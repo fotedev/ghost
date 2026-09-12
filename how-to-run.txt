@@ -1,6 +1,11 @@
 Windows (PowerShell as Administrator):
-  powershell -ExecutionPolicy Bypass -File "reset_cursor_windows-v0.1.ps1"
-  powershell -ExecutionPolicy Bypass -File "reset_windsurf_windows-v0.1.ps1"
+  powershell -ExecutionPolicy Bypass -File "reset_cursor_windows-v0.2.ps1"
+  powershell -ExecutionPolicy Bypass -File "reset_windsurf_windows-v0.2.ps1"
+  powershell -ExecutionPolicy Bypass -File "reset_trae_windows-v0.2.ps1"
+  powershell -ExecutionPolicy Bypass -File "reset_qoder_windows-v0.3.ps1"
+  powershell -ExecutionPolicy Bypass -File "reset_qoderwork_windows-v0.1.ps1"
+  powershell -ExecutionPolicy Bypass -File "reset_zcode_windows-v1.1.ps1"
+  powershell -ExecutionPolicy Bypass -File "reset_minimax_opencode_windows-v1.0.ps1"
   powershell -ExecutionPolicy Bypass -File "change_device_id.ps1"
 
 Or double-click: how-to-run.bat
