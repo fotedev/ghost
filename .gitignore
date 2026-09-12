@@ -37,4 +37,18 @@ desktop.ini
 files.txt
 structure.txt
 models/
+nul
 /context_output
+/.qoder
+IMPLEMENTATION_PLAN.md
+IMPLEMENTATION_GUIDE.md
+WALKTHROUGH.md
+/.context/inputs
+Analyze Device Fingerprint Persistence.md
+$outFile
+.zcode/plans
+
+# QoderWork research artifacts (extracted app manifest + Spec-Kit scaffold;
+# not part of this automation suite)
+package.json
+my-project/
