@@ -833,19 +833,11 @@ function New-RandomMacAddress {
     }
 }
 
-# 8 random hex chars prefixed with "WIN-". Total length 12, well under the
-# 15-char NetBIOS computer-name limit. Returns uppercase ASCII.
+# Local New-RandomHostname removed (v0.3.1): use Get-NewHostname from
+# identity_utils.ps1 -- DESKTOP-XXXXXXX factory-default pattern instead of
+# the recognizable WIN-XXXXXXXX reset-tool signature.
 function New-RandomHostname {
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $bytes = New-Object byte[] 4
-        $rng.GetBytes($bytes)
-        $hex = (($bytes | ForEach-Object { $_.ToString("X2") }) -join "")
-        return "WIN-$hex"
-    }
-    finally {
-        if ($rng) { $rng.Dispose() }
-    }
+    return Get-NewHostname
 }
 
 # Set and verify a REG_SZ value. Used for the Qoder source IDs that live outside

@@ -52,3 +52,18 @@ $outFile
 # not part of this automation suite)
 package.json
 my-project/
+
+# Research specs may embed live device fingerprints / API keys — never commit
+specs/
+
+# One-off audit scratch (re-run the audit script instead of keeping output)
+_ast_audit_zcode.ps1
+_qoder_ast_report.md
+_hkcr_search.ps1
+_hkcr_search2.ps1
+
+# Live hosts-file firewall tool — keep local-only until explicitly reviewed
+block_qoder_domains.ps1
+
+# Local trash — moved-aside junk, exes, research with secrets. Never commit.
+.trash/

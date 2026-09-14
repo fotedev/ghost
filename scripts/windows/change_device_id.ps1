@@ -11,8 +11,8 @@ param(
     [switch]$UpdateProfileListPaths
 )
 
-# Load assembly required for ProtectedData (not auto-loaded in Windows PowerShell 5.1)
-Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+# Load required assemblies for compatibility with older PowerShell versions
+Add-Type -AssemblyName System.Security
 
 if ($Mode -eq 'LegacyReset' -or $Mode -eq 'RepairProfiles') {
     if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -23,10 +23,6 @@ if ($Mode -eq 'LegacyReset' -or $Mode -eq 'RepairProfiles') {
 
 function Get-Sha256Hex {
     param(
-        # NOTE: Do NOT name this $Input — that is a reserved PowerShell automatic
-        # variable (pipeline enumerator). Naming it $Input causes PS 5.1 to
-        # resolve it to an empty enumerator, making GetBytes() receive "" and
-        # every hash becoming SHA256("") = e3b0c44...
         [Parameter(Mandatory=$true)][string]$InputText
     )
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -106,10 +102,10 @@ function Get-RandomHex {
     )
     $bytesLen = [math]::Ceiling($Length / 2)
     $bytes = New-Object byte[] $bytesLen
-    # Use GetBytes() for compatibility with Windows PowerShell 5.1 (.NET Framework)
-    # ::Fill() is .NET Core / .NET 5+ only
+    # Use compatible random number generation for older PowerShell versions
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    $rng.GetBytes($bytes)
+    $rng.Dispose()
     $hex = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
     return $hex.Substring(0, $Length)
 }
@@ -203,9 +199,30 @@ function Hash-Signals {
     $hashed = @{}
     foreach ($k in $Signals.Keys) {
         $v = [string]$Signals[$k]
-        $hashed[$k] = Get-Sha256Hex -InputText ("$Salt|$k|$v")
+        $hashed[$k] = Get-Sha256Hex -InputText "$Salt|$k|$v"
     }
     return $hashed
+}
+
+function ConvertTo-Hashtable {
+    <#
+        Normalize any IDictionary-like or PSCustomObject input to a plain
+        Hashtable. Needed because ConvertFrom-Json returns PSCustomObject,
+        which breaks strict [hashtable] parameter binders.
+    #>
+    param([Parameter(Mandatory=$true)][AllowNull()]$InputObject)
+    if ($null -eq $InputObject) { return $null }
+    $h = @{}
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        foreach ($k in $InputObject.Keys) {
+            $h[[string]$k] = $InputObject[$k]
+        }
+    } else {
+        foreach ($p in $InputObject.PSObject.Properties) {
+            $h[[string]$p.Name] = $p.Value
+        }
+    }
+    return $h
 }
 
 function Score-Match {
@@ -227,18 +244,6 @@ function Score-Match {
     }
     if ($total -le 0) { return 0.0 }
     return [math]::Round(($hit / $total), 4)
-}
-
-# ConvertFrom-Json returns PSCustomObject for nested objects, not [hashtable].
-# This helper normalises either type into a plain [hashtable] so Score-Match
-# and Hash-Signals always receive the correct type.
-function ConvertTo-SignalHashtable {
-    param([Parameter(Mandatory=$true)]$Obj)
-    if ($null -eq $Obj)               { return @{} }
-    if ($Obj -is [hashtable])          { return $Obj }
-    $ht = @{}
-    $Obj.PSObject.Properties | ForEach-Object { $ht[$_.Name] = [string]$_.Value }
-    return $ht
 }
 
 function Get-ConsensusSnapshot {
@@ -293,16 +298,19 @@ if ($Mode -eq 'Fingerprint') {
     if ($state.snapshots) { $existing = @($state.snapshots) }
 
     $maxHistory = 12
-    # Wrap in @() so $recent is always an [array], never $null, even when $existing is empty
     $recent = @($existing | Select-Object -Last $maxHistory)
 
     $lastSignals = $null
     if ($recent.Count -gt 0) {
-        # Convert from PSCustomObject (ConvertFrom-Json output) to hashtable
-        $lastSignals = ConvertTo-SignalHashtable $recent[-1].signals
+        # Read-State deserializes via ConvertFrom-Json, which yields PSCustomObject.
+        # Score-Match requires [hashtable], so normalize here.
+        $lastSignals = ConvertTo-Hashtable -InputObject $recent[-1].signals
     }
 
-    $consensusSignals = Get-ConsensusSnapshot -Snapshots $recent -Weights $weights
+    $consensusSignals = $null
+    if ($recent.Count -gt 0) {
+        $consensusSignals = Get-ConsensusSnapshot -Snapshots $recent -Weights $weights
+    }
 
     $scoreLast = $null
     if ($lastSignals) {
@@ -496,7 +504,23 @@ try {
 $newDeviceID = [System.Guid]::NewGuid().ToString().ToUpper()
 $newMachineGUID = [System.Guid]::NewGuid().ToString()
 $newProductID = "00331-" + (Get-Random -Minimum 10000 -Maximum 99999) + "-" + (Get-Random -Minimum 10000 -Maximum 99999) + "-" + (Get-Random -Minimum 10000 -Maximum 99999)
-$newComputerName = "RESET-PC-" + (Get-Random -Minimum 1000 -Maximum 9999)
+# Factory-default-style name (DESKTOP-XXXXXXX): the old RESET-PC-XXXX pattern
+# is a recognizable reset-tool signature. This file is standalone (no
+# identity_utils dot-source), so the pattern is generated inline, mirroring
+# Get-NewHostname in identity_utils.ps1.
+$hostnameAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+$hostnameRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $hostnameChars = for ($i = 0; $i -lt 7; $i++) {
+        $hb = New-Object byte[] 1
+        $hostnameRng.GetBytes($hb)
+        $hostnameAlphabet[$hb[0] % $hostnameAlphabet.Length]
+    }
+    $newComputerName = "DESKTOP-" + (-join $hostnameChars)
+}
+finally {
+    if ($hostnameRng) { $hostnameRng.Dispose() }
+}
 
 # Validate computer name (15 characters max for NetBIOS compatibility)
 if ($newComputerName.Length -gt 15) {
@@ -699,13 +723,13 @@ foreach ($reg in $registryPaths) {
             
             try {
                 $regItem = Get-ItemProperty -Path $reg.Path -Name $reg.Name -ErrorAction SilentlyContinue
-                if ($regItem -ne $null) {
+                if (($regItem -ne $null) -and ($null -ne $regItem.PSObject.Properties[$reg.Name])) {
                     $originalExists = $true
                     $originalValue = $regItem.$($reg.Name)
-                    
+
                     # Backup current value
                     "$($reg.Path)|$($reg.Name)|$originalValue" | Out-File -FilePath "$backupDir\registry_values.txt" -Append
-                    
+
                     # Add to change log for potential rollback
                     $changeLog += @{
                         ChangeType = "RegistryValue"
@@ -714,6 +738,38 @@ foreach ($reg in $registryPaths) {
                         OriginalExists = $true
                         OriginalValue = $originalValue
                     }
+                }
+                else {
+                    # Path exists but property is absent: record changelog and
+                    # create via New-ItemProperty (Set-ItemProperty throws on
+                    # missing properties). Get-ItemProperty with -Name does
+                    # not throw here, so without this branch no rollback entry
+                    # would exist and the write below would fail.
+                    $originalExists = $false
+                    $changeLog += @{
+                        ChangeType = "RegistryValue"
+                        Path = $reg.Path
+                        Name = $reg.Name
+                        OriginalExists = $false
+                        OriginalValue = $null
+                    }
+                    $newPropType = $reg.Type
+                    if ([string]::IsNullOrWhiteSpace($newPropType)) {
+                        $newPropType = "String"
+                    }
+                    New-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -PropertyType $newPropType -Force | Out-Null
+
+                    # Verify creation
+                    $createdValue = (Get-ItemProperty -Path $reg.Path -Name $reg.Name -ErrorAction SilentlyContinue).$($reg.Name)
+                    if ($createdValue -eq $reg.Value) {
+                        Write-Host "Created $($reg.Path)\$($reg.Name)" -ForegroundColor Green
+                        $successCount++
+                    } else {
+                        Write-Host "Failed to verify creation for $($reg.Path)\$($reg.Name)" -ForegroundColor Red
+                        $rollbackNeeded = $true
+                        break
+                    }
+                    continue
                 }
             } catch {
                 # Property doesn't exist yet, will be created
@@ -727,25 +783,11 @@ foreach ($reg in $registryPaths) {
                 }
             }
             
-            # Set new value with proper type
+            # Set new value. Set-ItemProperty has no -Type parameter
+            # (type is fixed at creation; -PropertyType belongs to
+            # New-ItemProperty) -- passing -Type threw on every write.
             try {
-                switch ($reg.Type) {
-                    "String" { 
-                        Set-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -Type String -Force 
-                    }
-                    "DWord" { 
-                        Set-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -Type DWord -Force 
-                    }
-                    "QWord" { 
-                        Set-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -Type QWord -Force 
-                    }
-                    "Binary" { 
-                        Set-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -Type Binary -Force 
-                    }
-                    Default { 
-                        Set-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -Force 
-                    }
-                }
+                Set-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -Force
                 
                 # Verify change
                 $newValue = (Get-ItemProperty -Path $reg.Path -Name $reg.Name -ErrorAction SilentlyContinue).$($reg.Name)

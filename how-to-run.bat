@@ -22,42 +22,42 @@ echo.
 set /p choice=Enter your choice: 
 
 if "%choice%"=="1" (
-    powershell -ExecutionPolicy Bypass -File "change_device_id.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\change_device_id.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="2" (
-    powershell -ExecutionPolicy Bypass -File "reset_cursor_windows-v0.2.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_cursor_windows-v0.2.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="3" (
-    powershell -ExecutionPolicy Bypass -File "reset_windsurf_windows-v0.2.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_windsurf_windows-v0.2.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="4" (
-    powershell -ExecutionPolicy Bypass -File "reset_trae_windows-v0.2.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_trae_windows-v0.2.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="5" (
-    powershell -ExecutionPolicy Bypass -File "reset_qoder_windows-v0.3.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoder_windows-v0.3.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="6" (
-    powershell -ExecutionPolicy Bypass -File "reset_qoderwork_windows-v0.1.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoderwork_windows-v0.1.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="7" (
-    powershell -ExecutionPolicy Bypass -File "reset_zcode_windows-v1.1.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.3.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="8" (
-    powershell -ExecutionPolicy Bypass -File "reset_minimax_opencode_windows-v1.0.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.0.ps1"
     pause
     goto MENU
 )

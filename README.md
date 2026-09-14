@@ -1,6 +1,20 @@
-# Machine ID Reset Tools
+# Clean Slate Kit
 
-Scripts to reset device identifiers for **Cursor**, **Windsurf**, **Trae**, **MiniMax Agent**, and **OpenCode**, and to inspect or reset system machine IDs. Available for **Windows** (PowerShell) and **Linux** (Bash).
+Fresh-start toolkit for local AI-IDE identity stores: rotate device identifiers for **Cursor**, **Windsurf**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent**, and **OpenCode**, and inspect or reset system machine IDs. For privacy hygiene, multi-account testing, and CI/dev-environment resets. Available for **Windows** (PowerShell) and **Linux** (Bash).
+
+## Repository layout
+
+```
+clean-slate-kit/
+├── README.md  how-to-run.bat  how-to-run.txt  how-to-run.sh
+├── scripts/
+│   ├── windows/   # current .ps1 resetters + identity_utils.ps1 + change_device_id.ps1
+│   └── linux/     # .sh scripts (id_reset_common.sh + per-IDE resetters)
+├── docs/          # AGENTS.md, IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes
+├── archive/       # superseded script versions (fallbacks — do not run)
+├── tools/         # reviewed utilities (block_qoder_domains.ps1 — local-only)
+└── .trash/        # moved-aside junk (git-ignored, never committed)
+```
 
 ## What These Tools Do
 
@@ -10,9 +24,12 @@ Applications often create unique IDs to identify your computer. These scripts ge
 
 | Task | Windows | Linux |
 |------|---------|-------|
-| Reset Cursor | `reset_cursor_windows-v0.1.ps1` | `reset_cursor_linux-v0.1.sh` |
-| Reset Windsurf | `reset_windsurf_windows-v0.1.ps1` | `reset_windsurf_linux-v0.1.sh` |
-| Reset Trae | `reset_trae_windows-v0.1.ps1` | `reset_trae_linux-v0.1.sh` |
+| Reset Cursor | `reset_cursor_windows-v0.2.ps1` | `reset_cursor_linux.sh` |
+| Reset Windsurf | `reset_windsurf_windows-v0.2.ps1` | `reset_windsurf_linux.sh` |
+| Reset Trae | `reset_trae_windows-v0.2.ps1` | `reset_trae_linux-v0.1.sh` |
+| Reset Qoder | `reset_qoder_windows-v0.3.ps1` | — |
+| Reset ZCode (+Qoder stores) | `reset_zcode_windows-v1.3.ps1` | — |
+| Reset QoderWork | `reset_qoderwork_windows-v0.1.ps1` | — |
 | Reset MiniMax Agent / OpenCode | `reset_minimax_opencode_windows-v1.0.ps1` | — |
 | Device fingerprint | `change_device_id.ps1` | `change_device_id_linux.sh Fingerprint` |
 | System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` |
@@ -36,7 +53,7 @@ Applications often create unique IDs to identify your computer. These scripts ge
 
 ```bash
 cd /path/to/this/repo
-chmod +x *.sh
+chmod +x scripts/linux/*.sh
 ./how-to-run.sh
 ```
 
@@ -44,18 +61,18 @@ Or run scripts directly:
 
 ```bash
 # Cursor (close Cursor first)
-./reset_cursor_linux-v0.1.sh
-sudo ./reset_cursor_linux-v0.1.sh   # also resets /etc/machine-id
+./scripts/linux/reset_cursor_linux.sh
+sudo ./scripts/linux/reset_cursor_linux.sh   # also resets /etc/machine-id
 
 # Windsurf (close Windsurf first)
-./reset_windsurf_linux-v0.1.sh
-sudo ./reset_windsurf_linux-v0.1.sh
+./scripts/linux/reset_windsurf_linux.sh
+sudo ./scripts/linux/reset_windsurf_linux.sh
 
 # Fingerprint only (no root)
-./change_device_id_linux.sh Fingerprint
+./scripts/linux/change_device_id_linux.sh Fingerprint
 
 # Reset Linux system machine-id (root)
-sudo ./change_device_id_linux.sh ResetMachineId
+sudo ./scripts/linux/change_device_id_linux.sh ResetMachineId
 ```
 
 ### Linux paths
@@ -71,10 +88,13 @@ sudo ./change_device_id_linux.sh ResetMachineId
 
 ### Linux scripts
 
-- `reset_cursor_linux-v0.1.sh` — Resets Cursor IDs (`machineId`, `storage.json`, `state.vscdb`)
-- `reset_windsurf_linux-v0.1.sh` — Resets Windsurf and Codeium IDs
+- `reset_cursor_linux.sh` — Resets Cursor IDs (`machineId`, `storage.json`, `state.vscdb`)
+- `reset_windsurf_linux.sh` — Resets Windsurf and Codeium IDs
+- `reset_trae_linux-v0.1.sh` — Resets Trae IDs (legacy standalone; no thin-wrapper version yet)
 - `change_device_id_linux.sh` — `Fingerprint` or `ResetMachineId`
-- `how-to-run.sh` — Interactive menu
+- `id_reset_common.sh` — Shared helpers sourced by the thin-wrapper scripts above
+- `how-to-run.sh` — Interactive menu (repo root)
+- `reset_cursor_linux-v0.1.sh`, `reset_windsurf_linux-v0.1.sh` — Legacy standalone fallbacks (self-contained, predate `id_reset_common.sh`)
 
 > **Note:** `change_device_id.ps1` modes `LegacyReset` and `RepairProfiles` are **Windows-only** (registry and profile list). On Linux use `ResetMachineId` for system ID changes.
 
@@ -82,31 +102,54 @@ sudo ./change_device_id_linux.sh ResetMachineId
 
 ## Windows
 
-### 1. Reset Cursor ID (`reset_cursor_windows-v0.1.ps1`)
+### 1. Reset Cursor ID (`reset_cursor_windows-v0.2.ps1`)
 
 - Creates fresh identification numbers via `identity_utils.ps1`
-- Updates `machineid`, `storage.json` (4 telemetry keys), `state.vscdb`, and renames Cookies / Network state / sentry / DIPS / workspace DBs
+- Updates `machineid`, `storage.json` (4 telemetry keys), `state.vscdb` (`storage.serviceMachineId`), deletes auth secrets (`cursorAuth/*`, `secret://cursorAuth/openAIKey`), rotates `device_id_salt` + `os_crypt.encrypted_key`, deletes Cookies / Network state / sentry / DIPS / Trust Tokens / Crashpad / logs / workspace DB entries (never the workspace files)
+- Self-elevates to Administrator, aggressive process tree-kill, watchdog re-verify, old `ID_Backups` purge
 - Every write is verified by re-reading; audit log + restore script are generated
 
 **Before running:** Close Cursor. Run PowerShell as Administrator.
 
-### 2. Reset Windsurf ID (`reset_windsurf_windows-v0.1.ps1`)
+### 2. Reset Windsurf ID (`reset_windsurf_windows-v0.2.ps1`)
 
 - Resets Windsurf and Codeium configuration via `identity_utils.ps1`
-- Updates `machineid`, `storage.json` (4 telemetry keys), `state.vscdb`, `argv.json` (`crash-reporter-id`), `.codeium\config.json` (`device_id`), `.windsurf\installation_id`, scrubs `$USERNAME` from Preferences/Local State, renames Cookies / Network state / DIPS / workspace DBs
+- Updates `machineid`, `storage.json` (4 telemetry keys), `state.vscdb`, deletes auth secrets (`codeium.windsurf-windsurf_auth`, `windsurf_auth-*`), `argv.json` (`crash-reporter-id`, JSONC comments preserved), `.codeium\config.json` (`device_id`), `.windsurf\installation_id`, scrubs username from Preferences/Local State, deletes Cookies / Network state / DIPS / workspace DB entries
 - Timestamped backups + audit log under `%APPDATA%\Windsurf\ID_Backups\<ts>`
 
 **Before running:** Close Windsurf. Run PowerShell as Administrator.
 
-### 3. Reset Trae ID (`reset_trae_windows-v0.1.ps1`)
+### 3. Reset Trae ID (`reset_trae_windows-v0.2.ps1`)
 
 - Resets Trae configuration via `identity_utils.ps1`
-- Updates `machineid`, `storage.json` (4 telemetry keys + removes `iCubeAuthInfo://*` + `has_device_id_updated_to_aha=false`), `state.vscdb`, `ModularData\ckg_server\local_env.json` (`device_id` + `host_map`), and renames `aha` (encrypted TinyStorage), `ModularData\ai-agent` (chat DB), Cookies / Network state / DIPS / SharedStorage / `Partitions\trae-webview` / workspace DBs
+- Updates `machineid`, `storage.json` (4 telemetry keys + removes `iCubeAuthInfo://*` + `has_device_id_updated_to_aha=false`), `state.vscdb`, `ModularData\ckg_server\local_env.json` (`device_id` + `host_map`), deletes `aha` (encrypted TinyStorage), scrubs only identity rows in `ModularData\ai-agent` (**chat preserved**), Cookies / Network state / DIPS / SharedStorage / `Partitions\trae-webview` / workspace DB entries
 - Timestamped backups + audit log under `%APPDATA%\Trae\ID_Backups\<ts>`
 
 **Before running:** Close Trae. Run PowerShell as Administrator.
 
-### 4. Reset MiniMax Agent / OpenCode (`reset_minimax_opencode_windows-v1.0.ps1`)
+### 4. Reset Qoder ID (`reset_qoder_windows-v0.3.ps1`)
+
+- 27 steps: `storage.json` (4 telemetry keys, main + `CORS_Profile`), `machineid`, `argv.json` (`crash-reporter-id`), `state.vscdb` + auth-secrets delete (`aicoding.auth.*`, `secret://blackbox.*`), `device_id_salt`, `os_crypt` rotation, browser data, `Crashpad`/`SharedClientCache`/`logs`, `.qoder` cache subdirs (reparse-point-safe), workspace UPSERT-only, plus system steps (HKCU deviceid, HKLM SQM MachineId, MAC, hostname — opt-out via `-SkipMac`/`-SkipHostname`)
+- Timestamped backups + audit log under `%APPDATA%\Qoder\ID_Backups\<ts>`
+
+**Before running:** Close Qoder. Run PowerShell as Administrator.
+
+### 5. Reset ZCode ID (`reset_zcode_windows-v1.3.ps1`)
+
+- 27 steps + `[6b/27]`: everything Qoder-side above (for the Qoder stores ZCode shares) plus `.updaterId`, `telemetry-state.json` (`deviceMid`), credentials OAuth clear, **config.json provider `apiKey` strip (fixes the Unlink → Checking loop)**, coding-plan-cache invalidation, RUM store, `setting.json` (`deviceSid`), session/embedded-browser Chromium data
+- Chat stores (`tasks-index.sqlite`, checkpoints, IndexedDB webview data, Local Storage leveldb) are never touched
+- Timestamped backups + audit log under `%APPDATA%\ZCode\ID_Backups\<ts>`
+
+**Before running:** Close ZCode (and Qoder). Run PowerShell as Administrator. After the reset, ZCode prompts for a fresh login.
+
+### 6. Reset QoderWork ID (`reset_qoderwork_windows-v0.1.ps1`)
+
+- 26 steps: `machine-id`, `installation_id`, `.status.json`, Chromium profile (`Preferences` salt, Cookies, Local/Session Storage, caches, SharedStorage, `Local State`), `agents.db` OAuth + `app_settings` scrub (**chats/messages/projects preserved**), `auth.dat`/`auth-v2.dat`, HKLM MachineGuid, HKCU deviceid, HKLM SQM MachineId, MAC + hostname, old-backup purge, watchdog re-verify
+- Supports `-SkipMac`, `-SkipHostname`, and `-DryRun` (prints actions without writing)
+
+**Before running:** Close QoderWork. Run PowerShell as Administrator.
+
+### 7. Reset MiniMax Agent / OpenCode (`reset_minimax_opencode_windows-v1.0.ps1`)
 
 Combined reset for two Electron apps plus their CLI homes, with every path verified against this machine's actual layout:
 
@@ -132,7 +175,7 @@ Safety features — never wiped:
 
 **Before running:** Close MiniMax Agent and OpenCode first, and run from a terminal *outside* OpenCode (the script also force-kills them). Run PowerShell as Administrator. No Python required — the script performs no SQLite writes.
 
-### 5. Change Windows Device ID (`change_device_id.ps1`)
+### 8. Change Windows Device ID (`change_device_id.ps1`)
 
 | Mode | Description |
 |------|-------------|
@@ -141,9 +184,9 @@ Safety features — never wiped:
 | `RepairProfiles` | Repairs ProfileList `.bak` keys (Admin) |
 
 ```powershell
-.\change_device_id.ps1
-.\change_device_id.ps1 -Mode LegacyReset
-.\change_device_id.ps1 -Mode RepairProfiles
+.\scripts\windows\change_device_id.ps1
+.\scripts\windows\change_device_id.ps1 -Mode LegacyReset
+.\scripts\windows\change_device_id.ps1 -Mode RepairProfiles
 ```
 
 ### Windows usage
@@ -153,9 +196,10 @@ Safety features — never wiped:
 3. Run the script you need, or use `how-to-run.bat`
 
 ```powershell
-.\reset_cursor_windows-v0.1.ps1
-.\reset_windsurf_windows-v0.1.ps1
-.\change_device_id.ps1
+.\scripts\windows\reset_cursor_windows-v0.2.ps1
+.\scripts\windows\reset_windsurf_windows-v0.2.ps1
+.\scripts\windows\reset_zcode_windows-v1.3.ps1
+.\scripts\windows\change_device_id.ps1
 ```
 
 ---
@@ -169,19 +213,22 @@ Safety features — never wiped:
 
 ## Files Included
 
-**Windows**
+**Windows** (`scripts/windows/` — older versions live in `archive/` as fallbacks; do not run them)
 
-- `reset_cursor_windows-v0.1.ps1`
-- `reset_windsurf_windows-v0.1.ps1`
-- `reset_trae_windows-v0.1.ps1`
+- `reset_cursor_windows-v0.2.ps1`
+- `reset_windsurf_windows-v0.2.ps1`
+- `reset_trae_windows-v0.2.ps1`
+- `reset_qoder_windows-v0.3.ps1`
+- `reset_zcode_windows-v1.3.ps1`
+- `reset_qoderwork_windows-v0.1.ps1`
 - `reset_minimax_opencode_windows-v1.0.ps1`
 - `identity_utils.ps1` (shared library — dot-sourced by the IDE reset scripts)
 - `change_device_id.ps1`
-- `how-to-run.bat`
+- `how-to-run.bat` (repo root)
 
-**Linux**
+**Linux** (`scripts/linux/`)
 
 - `reset_cursor_linux-v0.1.sh`
 - `reset_windsurf_linux-v0.1.sh`
 - `change_device_id_linux.sh`
-- `how-to-run.sh`
+- `how-to-run.sh` (repo root)

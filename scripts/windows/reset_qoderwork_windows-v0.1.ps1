@@ -46,13 +46,17 @@ if (-not $qoderWorkIsAdmin) {
 #   %USERPROFILE%\.qoderwork\           machine-id, installation_id, .status.json, .cache, cache, logs
 #   %APPDATA%\QoderWork\                rum-electron-store (ARMS RUM = cross-product ID)
 #                                       Partitions\main\   (Chromium profile: Network/Local Storage/Preferences/Local State)
-#                                       data\agents.db    (Drizzle ORM: chats, oauth tokens, app_settings)
+#                                       data\agents.db    (Drizzle ORM: oauth tokens, app_settings;
+#                                                        chats/sub_chats/messages/projects PRESERVED)
 #                                       data\dns-cache\   (Qoder endpoint IP cache)
 #                                       SharedStorage\    (Electron SharedStorage 4096 bytes)
 #                                       Local State        (Chromium os_crypt encrypted key)
 #
 # v0.1.1: added auth.dat/auth-v2.dat deletion + HKLM MachineGuid rotation + OTel
 #          host.id fix. Renumbered to 26 steps.
+# v0.1.2: agents.db no longer DELETEs chats/sub_chats/messages/projects
+#          (chat preservation, same policy as all other IDE scripts).
+#          Fixed step numbering (all [n/26]) + hostname audit variable.
 #
 # The script covers N file-level steps + 5 system-level steps, mirroring the
 # AGENTS.md "Cursor pattern":
@@ -386,6 +390,9 @@ function Clear-QoderWorkAgentsDb {
     )
 
     $exactKeys = @()  # agents.db has no key/value store; it has typed tables.
+    # CHAT PRESERVATION: chats/sub_chats/messages/projects are NEVER deleted.
+    # They hold conversation content with no server-side identity signal
+    # (same policy as Cursor/Windsurf/Trae/Qoder/ZCode/MiniMax scripts).
     $exactTables = @(
         "mcp_oauth_tokens",
         "mcp_oauth_tokens_by_user",
@@ -401,11 +408,7 @@ function Clear-QoderWorkAgentsDb {
         "scheduled_tasks",
         "task_run_logs",
         "nudge_logs",
-        "skill_evolution_suggestions",
-        "chats",
-        "sub_chats",
-        "messages",
-        "projects"
+        "skill_evolution_suggestions"
     )
     # app_settings: selectively reset -- only the identity-bearing keys (windowBounds
     # leaks screen geometry; asyncMigrationStatus records the cross-product migration
@@ -731,19 +734,11 @@ function New-RandomMacAddress {
     }
 }
 
-# 8 random hex chars prefixed with "WIN-". Total length 12, well under the
-# 15-char NetBIOS computer-name limit.
+# Local New-RandomHostname removed (v0.1.2): use Get-NewHostname from
+# identity_utils.ps1 -- DESKTOP-XXXXXXX factory-default pattern instead of
+# the recognizable WIN-XXXXXXXX reset-tool signature.
 function New-RandomHostname {
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $bytes = New-Object byte[] 4
-        $rng.GetBytes($bytes)
-        $hex = (($bytes | ForEach-Object { $_.ToString("X2") }) -join "")
-        return "WIN-$hex"
-    }
-    finally {
-        if ($rng) { $rng.Dispose() }
-    }
+    return Get-NewHostname
 }
 
 # Match a Get-NetAdapter.InterfaceGuid to its class registry key.
@@ -907,7 +902,7 @@ function Set-SystemHostname {
     $liveOk = ($activeComputerName -eq $NewHostname)
     $nextBootPending = ($nextBootActive -ne $NewHostname) -or ($nextBootNv -ne $NewHostname) -or ($tcpipHost -ne $NewHostname)
 
-    $after = "active=$activeComputerName/$activeTcpipHost; nextBoot=$nextBootActive/$nextBootNv"
+    $after = "active=$activeComputerName/$tcpipHost; nextBoot=$nextBootActive/$nextBootNv"
     if ($liveOk) {
         Add-AuditEntry -Audit $Audit -File $auditFile -Key $auditKey -Before $OldHostname -After $NewHostname -Ok $true
         if ($nextBootPending) {
@@ -1099,8 +1094,8 @@ $deviceIdSalt = ([guid]::NewGuid().ToString("N")).ToUpperInvariant()
 $newMachineId = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 $newInstallationId = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 
-# --- [1/24] machine-id (user-level) ---
-Write-Host "`n[1/24] Updating ~\.qoderwork\machine-id..." -ForegroundColor Cyan
+# --- [1/26] machine-id (user-level) ---
+Write-Host "`n[1/26] Updating ~\.qoderwork\machine-id..." -ForegroundColor Cyan
 $machineIdPath = Join-Path $userQoderWorkRoot "machine-id"
 $machineIdLabel = Get-UserProfileBackupLabel -TargetPath $machineIdPath
 if (Set-VerifiedFlatUuidFile -Path $machineIdPath -Value $newMachineId -BackupRoot $backupRoot -BackupLabel $machineIdLabel -Audit ([ref]$audit) -Actions ([ref]$actions)) {
@@ -1111,8 +1106,8 @@ if (Set-VerifiedFlatUuidFile -Path $machineIdPath -Value $newMachineId -BackupRo
     $failCount++
 }
 
-# --- [2/24] installation_id (user-level) ---
-Write-Host "`n[2/24] Updating ~\.qoderwork\installation_id..." -ForegroundColor Cyan
+# --- [2/26] installation_id (user-level) ---
+Write-Host "`n[2/26] Updating ~\.qoderwork\installation_id..." -ForegroundColor Cyan
 $installIdPath = Join-Path $userQoderWorkRoot "installation_id"
 $installIdLabel = Get-UserProfileBackupLabel -TargetPath $installIdPath
 if (Set-VerifiedFlatUuidFile -Path $installIdPath -Value $newInstallationId -BackupRoot $backupRoot -BackupLabel $installIdLabel -Audit ([ref]$audit) -Actions ([ref]$actions)) {
@@ -1123,8 +1118,8 @@ if (Set-VerifiedFlatUuidFile -Path $installIdPath -Value $newInstallationId -Bac
     $failCount++
 }
 
-# --- [3/24] .status.json reset ---
-Write-Host "`n[3/24] Resetting ~\.qoderwork\.status.json (logged_in=false, fresh snapshot)..." -ForegroundColor Cyan
+# --- [3/26] .status.json reset ---
+Write-Host "`n[3/26] Resetting ~\.qoderwork\.status.json (logged_in=false, fresh snapshot)..." -ForegroundColor Cyan
 $statusPath = Join-Path $userQoderWorkRoot ".status.json"
 $statusLabel = Get-UserProfileBackupLabel -TargetPath $statusPath
 if (Reset-QoderWorkStatusJson -Path $statusPath -BackupRoot $backupRoot -BackupLabel $statusLabel -Audit ([ref]$audit) -Actions ([ref]$actions)) {
@@ -1135,8 +1130,8 @@ if (Reset-QoderWorkStatusJson -Path $statusPath -BackupRoot $backupRoot -BackupL
     $failCount++
 }
 
-# --- [4/24] external-commands\registry.json reset ---
-Write-Host "`n[4/24] Resetting ~\.qoderwork\external-commands\registry.json..." -ForegroundColor Cyan
+# --- [4/26] external-commands\registry.json reset ---
+Write-Host "`n[4/26] Resetting ~\.qoderwork\external-commands\registry.json..." -ForegroundColor Cyan
 $extRegPath = Join-Path $userQoderWorkRoot "external-commands\registry.json"
 $extRegLabel = Get-UserProfileBackupLabel -TargetPath $extRegPath
 if (Reset-QoderWorkExternalCommandsRegistry -Path $extRegPath -BackupRoot $backupRoot -BackupLabel $extRegLabel -Audit ([ref]$audit) -Actions ([ref]$actions)) {
@@ -1147,51 +1142,51 @@ if (Reset-QoderWorkExternalCommandsRegistry -Path $extRegPath -BackupRoot $backu
     $failCount++
 }
 
-# --- [5/24] ~\.qoderwork\.cache\ deletion ---
-Write-Host "`n[5/24] Deleting ~\.qoderwork\.cache\..." -ForegroundColor Cyan
+# --- [5/26] ~\.qoderwork\.cache\ deletion ---
+Write-Host "`n[5/26] Deleting ~\.qoderwork\.cache\..." -ForegroundColor Cyan
 $dotCachePath = Join-Path $userQoderWorkRoot ".cache"
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($dotCachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] .cache" -ForegroundColor Green
 $passCount++
 
-# --- [6/24] ~\.qoderwork\cache\ deletion (MCP market cache) ---
-Write-Host "`n[6/24] Deleting ~\.qoderwork\cache\..." -ForegroundColor Cyan
+# --- [6/26] ~\.qoderwork\cache\ deletion (MCP market cache) ---
+Write-Host "`n[6/26] Deleting ~\.qoderwork\cache\..." -ForegroundColor Cyan
 $cachePath = Join-Path $userQoderWorkRoot "cache"
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($cachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] cache" -ForegroundColor Green
 $passCount++
 
-# --- [7/24] ~\.qoderwork\logs\ deletion ---
-Write-Host "`n[7/24] Deleting ~\.qoderwork\logs\..." -ForegroundColor Cyan
+# --- [7/26] ~\.qoderwork\logs\ deletion ---
+Write-Host "`n[7/26] Deleting ~\.qoderwork\logs\..." -ForegroundColor Cyan
 $logsPath = Join-Path $userQoderWorkRoot "logs"
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($logsPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] logs" -ForegroundColor Green
 $passCount++
 
-# --- [8/24] rum-electron-store\ deletion (CROSS-PRODUCT RUM ID) ---
+# --- [8/26] rum-electron-store\ deletion (CROSS-PRODUCT RUM ID) ---
 # This is the single most important file in the script. The Alibaba ARMS
 # _arms_uid persisted here is what the ARMS backend uses to correlate this
 # QoderWork install with the previously-banned Qoder install.
-Write-Host "`n[8/24] Deleting Roaming\QoderWork\rum-electron-store\ (cross-product RUM)..." -ForegroundColor Cyan
+Write-Host "`n[8/26] Deleting Roaming\QoderWork\rum-electron-store\ (cross-product RUM)..." -ForegroundColor Cyan
 $rumStorePath = Join-Path $root "rum-electron-store"
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($rumStorePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] rum-electron-store (ARMS _arms_uid wiped)" -ForegroundColor Green
 $passCount++
 
-# --- [9/24] Local State (Chromium os_crypt encrypted key) ---
-Write-Host "`n[9/24] Deleting Roaming\QoderWork\Local State (Chromium os_crypt key)..." -ForegroundColor Cyan
+# --- [9/26] Local State (Chromium os_crypt encrypted key) ---
+Write-Host "`n[9/26] Deleting Roaming\QoderWork\Local State (Chromium os_crypt key)..." -ForegroundColor Cyan
 $localStatePath = Join-Path $root "Local State"
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($localStatePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] Local State" -ForegroundColor Green
 $passCount++
 
-# --- [10/24] Partitions\main\Preferences device_id_salt ---
-Write-Host "`n[10/24] Updating Partitions\main\Preferences electron.media.device_id_salt..." -ForegroundColor Cyan
+# --- [10/26] Partitions\main\Preferences device_id_salt ---
+Write-Host "`n[10/26] Updating Partitions\main\Preferences electron.media.device_id_salt..." -ForegroundColor Cyan
 $prefsPath = Join-Path $profileRoot "Preferences"
 $prefsLabel = Get-AppRelativeBackupLabel -RootPath $profileRoot -TargetPath $prefsPath
 if (Update-QoderWorkPreferences -Path $prefsPath -NewDeviceIdSalt $deviceIdSalt -BackupRoot $backupRoot -BackupLabel $prefsLabel -Audit ([ref]$audit) -Actions ([ref]$actions)) {
@@ -1202,8 +1197,8 @@ if (Update-QoderWorkPreferences -Path $prefsPath -NewDeviceIdSalt $deviceIdSalt 
     $failCount++
 }
 
-# --- [11/24] Partitions\main\Network\Cookies + Network Persistent State ---
-Write-Host "`n[11/24] Deleting Partitions\main\Network\Cookies + Network Persistent State..." -ForegroundColor Cyan
+# --- [11/26] Partitions\main\Network\Cookies + Network Persistent State ---
+Write-Host "`n[11/26] Deleting Partitions\main\Network\Cookies + Network Persistent State..." -ForegroundColor Cyan
 $netPaths = @(
     (Join-Path $profileRoot "Network\Cookies"),
     (Join-Path $profileRoot "Network\Cookies-journal"),
@@ -1218,32 +1213,32 @@ if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] Network stores" -ForegroundColor Green
 $passCount++
 
-# --- [12/24] Partitions\main\Local Storage\ (LevelDB) ---
-Write-Host "`n[12/24] Deleting Partitions\main\Local Storage\ (LevelDB identity keys)..." -ForegroundColor Cyan
+# --- [12/26] Partitions\main\Local Storage\ (LevelDB) ---
+Write-Host "`n[12/26] Deleting Partitions\main\Local Storage\ (LevelDB identity keys)..." -ForegroundColor Cyan
 $localStoragePath = Join-Path $profileRoot "Local Storage"
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($localStoragePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] Local Storage" -ForegroundColor Green
 $passCount++
 
-# --- [13/24] Partitions\main\Session Storage\ ---
-Write-Host "`n[13/24] Deleting Partitions\main\Session Storage\..." -ForegroundColor Cyan
+# --- [13/26] Partitions\main\Session Storage\ ---
+Write-Host "`n[13/26] Deleting Partitions\main\Session Storage\..." -ForegroundColor Cyan
 $sessionStoragePath = Join-Path $profileRoot "Session Storage"
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($sessionStoragePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] Session Storage" -ForegroundColor Green
 $passCount++
 
-# --- [14/24] Partitions\main\Shared Dictionary\ ---
-Write-Host "`n[14/24] Deleting Partitions\main\Shared Dictionary\..." -ForegroundColor Cyan
+# --- [14/26] Partitions\main\Shared Dictionary\ ---
+Write-Host "`n[14/26] Deleting Partitions\main\Shared Dictionary\..." -ForegroundColor Cyan
 $sharedDictPath = Join-Path $profileRoot "Shared Dictionary"
 $binaryActions = Clear-BinaryIdentityStore -Paths @($sharedDictPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] Shared Dictionary" -ForegroundColor Green
 $passCount++
 
-# --- [15/24] Partitions\main\Cache\ + Code Cache\ + GPUCache\ + Dawn*Cache\ ---
-Write-Host "`n[15/24] Deleting Partitions\main\Cache\ + Code Cache\ + GPUCache\ + Dawn*Cache\..." -ForegroundColor Cyan
+# --- [15/26] Partitions\main\Cache\ + Code Cache\ + GPUCache\ + Dawn*Cache\ ---
+Write-Host "`n[15/26] Deleting Partitions\main\Cache\ + Code Cache\ + GPUCache\ + Dawn*Cache\..." -ForegroundColor Cyan
 $cachePaths = @(
     (Join-Path $profileRoot "Cache"),
     (Join-Path $profileRoot "Code Cache"),
@@ -1257,33 +1252,33 @@ if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] cache trees" -ForegroundColor Green
 $passCount++
 
-# --- [16/24] Roaming\QoderWork\SharedStorage\ (Electron SharedStorage 4KB file) ---
-Write-Host "`n[16/24] Deleting Roaming\QoderWork\SharedStorage\..." -ForegroundColor Cyan
+# --- [16/26] Roaming\QoderWork\SharedStorage\ (Electron SharedStorage 4KB file) ---
+Write-Host "`n[16/26] Deleting Roaming\QoderWork\SharedStorage\..." -ForegroundColor Cyan
 $sharedStoragePath = Join-Path $root "SharedStorage"
 $binaryActions = Clear-BinaryIdentityStore -Paths @($sharedStoragePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] SharedStorage" -ForegroundColor Green
 $passCount++
 
-# --- [17/24] data\dns-cache\ deletion (Qoder endpoint IP cache) ---
-Write-Host "`n[17/24] Deleting data\dns-cache\ (Qoder endpoint IP cache)..." -ForegroundColor Cyan
+# --- [17/26] data\dns-cache\ deletion (Qoder endpoint IP cache) ---
+Write-Host "`n[17/26] Deleting data\dns-cache\ (Qoder endpoint IP cache)..." -ForegroundColor Cyan
 $dnsCachePath = Join-Path $root "data\dns-cache"
 $binaryActions = Clear-BinaryIdentityStore -Paths @($dnsCachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] data\dns-cache" -ForegroundColor Green
 $passCount++
 
-# --- [18/24] data\dynamic-text\qoder-work.json: KEEP (UI strings, not identity) ---
+# --- [18/26] data\dynamic-text\qoder-work.json: KEEP (UI strings, not identity) ---
 # Note: This file contains error.114 (the cross-product ban message). We do NOT
 # delete it because it's just localized UI strings -- deleting it would force a
 # download on next launch and isn't related to identity. Just recorded.
-Write-Host "`n[18/24] Preserving data\dynamic-text\qoder-work.json (UI strings only, not identity)..." -ForegroundColor Cyan
+Write-Host "`n[18/26] Preserving data\dynamic-text\qoder-work.json (UI strings only, not identity)..." -ForegroundColor Cyan
 Add-AuditEntry -Audit ([ref]$audit) -File (Join-Path $root "data\dynamic-text\qoder-work.json") -Key "preserved" -Before "present" -After "preserved" -Ok $true
 Write-Host "    [SKIP] dynamic-text is non-identity resource bundle" -ForegroundColor DarkGray
 $passCount++
 
-# --- [19/24] data\agents.db scrub (oauth tokens + chat history + app_settings) ---
-Write-Host "`n[19/24] Scrubbing data\agents.db (oauth/app_settings/chats/projects tables)..." -ForegroundColor Cyan
+# --- [19/26] data\agents.db scrub (oauth tokens + app_settings; chats preserved) ---
+Write-Host "`n[19/26] Scrubbing data\agents.db (oauth/app_settings tables; chats preserved)..." -ForegroundColor Cyan
 $agentsDbPath = Join-Path $root "data\agents.db"
 if (-not $DryRun) {
     $backupAgentsDb = Backup-FileToTimestampDir -Source $agentsDbPath -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $agentsDbPath)
@@ -1299,13 +1294,13 @@ if (Clear-QoderWorkAgentsDb -DbPath $agentsDbPath -Audit ([ref]$audit)) {
     $failCount++
 }
 
-# --- [20/24] Old ID_Backups purge (keep newest only) ---
-Write-Host "`n[20/24] Purging old ID_Backups directories (keep current run only)..." -ForegroundColor Cyan
+# --- [20/26] Old ID_Backups purge (keep newest only) ---
+Write-Host "`n[20/26] Purging old ID_Backups directories (keep current run only)..." -ForegroundColor Cyan
 Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit)
 $passCount++
 
-# --- [21/24] Post-write watchdog re-verify ---
-Write-Host "`n[21/24] Post-write watchdog re-verify..." -ForegroundColor Cyan
+# --- [21/26] Post-write watchdog re-verify ---
+Write-Host "`n[21/26] Post-write watchdog re-verify..." -ForegroundColor Cyan
 $watchdogCorePaths = @($rumStorePath, $localStatePath)
 if (-not $DryRun) {
     Test-QoderWorkWatchdogRecreation -CorePaths $watchdogCorePaths -Audit ([ref]$audit)
@@ -1352,7 +1347,7 @@ $systemManifest.registry += @{
 if ($machineGuidResult.Success) { $passCount++ } else { $failCount++ }
 
 # --- [24/26] HKCU DeveloperTools deviceid source ---
-Write-Host "`n[22/24] Updating HKCU DeveloperTools deviceid source..." -ForegroundColor Cyan
+Write-Host "`n[24/26] Updating HKCU DeveloperTools deviceid source..." -ForegroundColor Cyan
 $developerToolsPath = "HKCU:\SOFTWARE\Microsoft\DeveloperTools"
 $developerToolsResult = Set-VerifiedRegistryStringValue -Path $developerToolsPath -Name "deviceid" -Value $ids.devDeviceId -Audit ([ref]$audit)
 $systemManifest.registry += @{

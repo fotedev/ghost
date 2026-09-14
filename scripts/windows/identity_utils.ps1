@@ -595,3 +595,24 @@ foreach (`$entry in `$manifest) {
 function Get-NewCrashReporterId {
     return ([guid]::NewGuid().ToString()).ToLowerInvariant()
 }
+
+# Factory-default-style computer name: DESKTOP- + 7 chars A-Z0-9 (15 chars,
+# the NetBIOS limit), mimicking Windows OOBE naming. The old RESET-PC-XXXX /
+# WIN-XXXXXXXX patterns are a recognizable reset-tool signature shared by
+# every user of these scripts; a DESKTOP-* name is indistinguishable from a
+# fresh Windows install. Crypto RNG via .GetBytes() (PS 5.1 safe).
+function Get-NewHostname {
+    $alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $chars = for ($i = 0; $i -lt 7; $i++) {
+            $b = New-Object byte[] 1
+            $rng.GetBytes($b)
+            $alphabet[$b[0] % $alphabet.Length]
+        }
+        return "DESKTOP-" + (-join $chars)
+    }
+    finally {
+        if ($rng) { $rng.Dispose() }
+    }
+}
