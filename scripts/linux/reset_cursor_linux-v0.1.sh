@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+# GHOST common lib (sourced BEFORE local defs so local overrides stay intact)
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/id_reset_common.sh"
+show_banner "Cursor Identity Reset" "0.1"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

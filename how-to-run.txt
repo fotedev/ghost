@@ -1,3 +1,7 @@
+GHOST - Guided Hardware & OS Scrubbing Toolkit
+Device identity reset tools. Prefer the interactive launchers
+(how-to-run.bat on Windows / how-to-run.sh on Linux); direct commands below.
+
 Windows (PowerShell as Administrator, from the repo root):
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_cursor_windows-v0.2.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_windsurf_windows-v0.2.ps1"

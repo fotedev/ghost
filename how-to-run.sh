@@ -8,11 +8,7 @@ LINUX_DIR="$SCRIPT_DIR/scripts/linux"
 source "$LINUX_DIR/id_reset_common.sh"
 
 while true; do
-    echo ""
-    ok "═══════════════════════════════════════════════"
-    ok "  Device ID Reset Tools (Linux)"
-    ok "═══════════════════════════════════════════════"
-    echo ""
+    show_banner "Interactive Menu"
     echo "  1) Generate hardware fingerprint (JSON)"
     echo "  2) Reset Cursor machine IDs"
     echo "  3) Reset Windsurf machine IDs"

@@ -1,13 +1,19 @@
 @echo off
 chcp 65001 >nul
-title Script Runner - By Ahmed
+title GHOST - Guided Hardware and OS Scrubbing Toolkit
 cd /d "%~dp0"
 
 :MENU
 cls
-echo ================================
-echo        🛠️ Script Launcher
-echo ================================
+echo.
+echo   ____ _   _  ___  ____ _____ 
+echo  / ___^| ^| ^| ^|/ _ \/ ___^|_   _^|
+echo ^| ^|  _^| ^|_^| ^| ^| ^| \___ \ ^| ^|  
+echo ^| ^|_^| ^|  _  ^| ^|_^| ^|___) ^|^| ^|  
+echo  \____^|_^| ^|_^|\___/^|____/ ^|_^|  
+echo.
+echo        GHOST - Guided Hardware ^& OS Scrubbing Toolkit
+echo.
 echo [1] Change Device ID [MACHINE-WIDE: affects BOTH ZCode instances + Qoder]
 echo [2] Reset Cursor
 echo [3] Reset Windsurf

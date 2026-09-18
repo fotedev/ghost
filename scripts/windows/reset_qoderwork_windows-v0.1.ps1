@@ -40,6 +40,8 @@ if (-not $qoderWorkIsAdmin) {
     exit
 }
 
+Write-GhostBanner -Target "QoderWork Identity Reset" -Version "0.1"
+
 # QoderWork v0.1 -- identity reset + system-level defenses.
 #
 # Targets a much smaller surface than Qoder. QoderWork's local stores are:

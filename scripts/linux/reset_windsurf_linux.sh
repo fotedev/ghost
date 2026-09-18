@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
+show_banner "Windsurf Identity Reset"
+
 USERNAME="${USER:-$(whoami)}"
 WINDSURF_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/Windsurf"
 WINDSURF_HOME="$HOME/.windsurf"

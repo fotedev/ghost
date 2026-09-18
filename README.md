@@ -1,11 +1,11 @@
-# Clean Slate Kit
+# GHOST — Guided Hardware & OS Scrubbing Toolkit
 
-Fresh-start toolkit for local AI-IDE identity stores: rotate device identifiers for **Cursor**, **Windsurf**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent**, and **OpenCode**, and inspect or reset system machine IDs. For privacy hygiene, multi-account testing, and CI/dev-environment resets. Available for **Windows** (PowerShell) and **Linux** (Bash).
+**GHOST** = **G**uided **H**ardware & **O**S **S**crubbing Toolkit. Fresh-start toolkit for local AI-IDE identity stores: rotate device identifiers for **Cursor**, **Windsurf**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent**, and **OpenCode**, and inspect or reset system machine IDs. For privacy hygiene, multi-account testing, and CI/dev-environment resets. Available for **Windows** (PowerShell) and **Linux** (Bash).
 
 ## Repository layout
 
 ```
-clean-slate-kit/
+ghost/
 ├── README.md  how-to-run.bat  how-to-run.txt  how-to-run.sh
 ├── scripts/
 │   ├── windows/   # current .ps1 resetters + identity_utils.ps1 + change_device_id.ps1

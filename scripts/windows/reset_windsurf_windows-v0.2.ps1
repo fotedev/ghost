@@ -55,6 +55,8 @@ if (-not $windsurfIsAdmin) {
     exit
 }
 
+Write-GhostBanner -Target "Windsurf Identity Reset" -Version "0.2"
+
 # === Local helpers (Windsurf pattern, no-BOM throughout) ======================
 
 function Add-ActionEntry {

@@ -22,6 +22,45 @@ warn()  { echo -e "${YELLOW}$*${NC}"; }
 err()   { echo -e "${RED}$*${NC}"; }
 dim()   { echo -e "${GRAY}$*${NC}"; }
 
+# ── GHOST banner ────────────────────────────────────────────────────────
+# Usage: show_banner [target] [version]
+show_banner() {
+    local target="${1:-Identity Reset}"
+    local version="${2:-}"
+    local target_label="$target"
+    [[ -n "$version" ]] && target_label="$target (v$version)"
+
+    local priv_label="USER" priv_color="$YELLOW"
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        priv_label="ROOT"
+        priv_color="$GREEN"
+    fi
+
+    local -a ghost_logo=(
+        '  ____ _   _  ___  ____ _____ '
+        ' / ___| | | |/ _ \/ ___|_   _|'
+        '| |  _| |_| | | | \___ \ | |  '
+        '| |_| |  _  | |_| |___) || |  '
+        ' \____|_| |_|\___/|____/ |_|  '
+    )
+
+    local -a ghost_side=(
+        "${WHITE}Guided Hardware & OS Scrubbing Toolkit${NC}"
+        "${CYAN}Target : ${target_label}${NC}"
+        "${priv_color}Privs  : [${priv_label}]${NC}"
+        "${GRAY}Status : Ready${NC}"
+    )
+
+    echo ""
+    echo -e "${CYAN}${ghost_logo[0]}${NC}"
+    local i padded
+    for ((i = 1; i < 5; i++)); do
+        printf -v padded '%-31s' "${ghost_logo[$i]}"
+        echo -e "${CYAN}${padded}${NC}  ${ghost_side[$((i - 1))]}"
+    done
+    echo ""
+}
+
 # ── ID generation ───────────────────────────────────────────────────────
 generate_uuid() {
     uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid

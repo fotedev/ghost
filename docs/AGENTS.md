@@ -1,4 +1,4 @@
-# AGENTS.md — clean-slate-kit
+# AGENTS.md — GHOST (Guided Hardware & OS Scrubbing Toolkit)
 
 ## Project overview
 

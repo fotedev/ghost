@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+# GHOST common lib (sourced BEFORE local defs so local overrides stay intact)
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/id_reset_common.sh"
+show_banner "Trae Identity Reset" "0.1"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -31,7 +35,7 @@ ensure_trae_closed() {
     if pgrep -x trae >/dev/null 2>&1 || pgrep -f '[T]rae' >/dev/null 2>&1; then
         warn "Trae IDE is currently running. Please close it before continuing."
         read -r -p "Forcibly close Trae IDE now? (y/N): " response
-        if [[ "${response,,}" == "y" ]; then
+        if [[ "${response,,}" == "y" ]]; then
             pkill -x trae 2>/dev/null || pkill -f '[T]rae' 2>/dev/null || true
             sleep 2
         else

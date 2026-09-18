@@ -86,6 +86,49 @@ function New-IdentitySet {
     }
 }
 
+function Write-GhostBanner {
+    # GHOST (Guided Hardware & OS Scrubbing Toolkit) terminal banner.
+    # PS 5.1 safe: no ternary, single-quoted art (backslashes literal).
+    param(
+        [Parameter(Mandatory = $true)][string]$Target,
+        [string]$Version = ""
+    )
+
+    $isAdmin = [Security.Principal.WindowsPrincipal]::new(
+        [Security.Principal.WindowsIdentity]::GetCurrent()
+    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    $privLabel = "NON-ELEVATED"
+    $privColor = "Yellow"
+    if ($isAdmin) {
+        $privLabel = "ADMIN"
+        $privColor = "Green"
+    }
+
+    $targetLabel = $Target
+    if ($Version) { $targetLabel = "$Target (v$Version)" }
+
+    $logo = @(
+        '  ____ _   _  ___  ____ _____ '
+        ' / ___| | | |/ _ \/ ___|_   _|'
+        '| |  _| |_| | | | \___ \ | |  '
+        '| |_| |  _  | |_| |___) || |  '
+        ' \____|_| |_|\___/|____/ |_|  '
+    )
+
+    Write-Host ""
+    Write-Host $logo[0] -ForegroundColor Cyan
+    Write-Host $logo[1].PadRight(31) -NoNewline -ForegroundColor Cyan
+    Write-Host "  Guided Hardware & OS Scrubbing Toolkit" -ForegroundColor White
+    Write-Host $logo[2].PadRight(31) -NoNewline -ForegroundColor Cyan
+    Write-Host "  Target : $targetLabel" -ForegroundColor Cyan
+    Write-Host $logo[3].PadRight(31) -NoNewline -ForegroundColor Cyan
+    Write-Host "  Privs  : [$privLabel]" -ForegroundColor $privColor
+    Write-Host $logo[4].PadRight(31) -NoNewline -ForegroundColor Cyan
+    Write-Host "  Status : Ready" -ForegroundColor Gray
+    Write-Host ""
+}
+
 function Assert-Administrator {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)

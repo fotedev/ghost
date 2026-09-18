@@ -53,6 +53,8 @@ if (-not $cursorIsAdmin) {
     exit
 }
 
+Write-GhostBanner -Target "Cursor Identity Reset" -Version "0.2"
+
 # === Local helpers (Cursor reference pattern, no-BOM throughout) ==============
 
 function Add-ActionEntry {

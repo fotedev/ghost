@@ -98,6 +98,8 @@ if (-not $zcodeIsAdmin) {
     exit
 }
 
+Write-GhostBanner -Target "ZCode/Qoder Identity Reset [$Target]" -Version "1.4"
+
 # === Local helpers (mirroring the Cursor reference pattern) ===================
 
 function Add-ActionEntry {

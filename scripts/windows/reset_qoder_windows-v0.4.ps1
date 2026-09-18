@@ -38,6 +38,8 @@ if (-not $qoderIsAdmin) {
     exit
 }
 
+Write-GhostBanner -Target "Qoder Identity Reset" -Version "0.4"
+
 # Qoder v0.4 -- comprehensive identity reset + system-level defenses + device-flow purge.
 #
 # Builds on v0.3 (27 steps) with FOUR new device-flow steps (28-31) driven by

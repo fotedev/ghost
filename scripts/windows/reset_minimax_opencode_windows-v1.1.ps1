@@ -103,6 +103,8 @@ if (-not $mmoIsAdmin) {
     exit
 }
 
+Write-GhostBanner -Target "MiniMax/OpenCode Identity Reset" -Version "1.1"
+
 # === Local helpers (mirroring the zcode v1.1 reference pattern) ================
 
 function Add-ActionEntry {

@@ -53,6 +53,8 @@ if (-not $traeIsAdmin) {
     exit
 }
 
+Write-GhostBanner -Target "Trae Identity Reset" -Version "0.2"
+
 # === Local helpers (Trae pattern, no-BOM throughout) ==========================
 
 function Add-ActionEntry {

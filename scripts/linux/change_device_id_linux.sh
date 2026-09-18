@@ -3,6 +3,9 @@
 # Designed as the Linux counterpart to change_device_id.ps1 (Windows-only modes omitted).
 set -euo pipefail
 
+# GHOST common lib (sourced BEFORE local defs so local overrides stay intact)
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/id_reset_common.sh"
+
 MODE="${1:-Fingerprint}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/LicenseIdentity"
 STATE_PATH="${STATE_PATH:-$STATE_DIR/fingerprint_state.json}"
@@ -147,9 +150,11 @@ case "$MODE" in
         exit 0
         ;;
     Fingerprint|fingerprint)
+        show_banner "Device Fingerprint / Machine ID [Fingerprint]"
         fingerprint_mode
         ;;
     ResetMachineId|reset|Reset)
+        show_banner "Device Fingerprint / Machine ID [ResetMachineId]"
         reset_machine_id_mode
         ;;
     *)

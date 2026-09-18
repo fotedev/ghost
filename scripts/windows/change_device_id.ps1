@@ -14,12 +14,16 @@ param(
 # Load required assemblies for compatibility with older PowerShell versions
 Add-Type -AssemblyName System.Security
 
+. "$PSScriptRoot\identity_utils.ps1"
+
 if ($Mode -eq 'LegacyReset' -or $Mode -eq 'RepairProfiles') {
     if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-Host "Please run this script as Administrator!" -ForegroundColor Red
         Exit
     }
 }
+
+Write-GhostBanner -Target "Device Fingerprint / MachineGuid [$Mode]"
 
 function Get-Sha256Hex {
     param(
