@@ -125,7 +125,13 @@ if (-not (Test-Path -LiteralPath (Join-Path $SecondZCode 'v2\setting.json'))) {
     Write-Host '[seed] Second profile already exists, skipping clone (independent).'
 }
 
-# 3) Launch 2nd instance in a dedicated env scope (process-scoped, does not pollute user env)
+# 3) Launch 2nd instance detached from THIS console.
+# Why: ZCode.exe attaches to the parent console (AttachConsole) for its stdout
+# logging. A plain Start-Process keeps this window as that console, so ZCode
+# floods it with [pid:*] logs forever and closing the window risks killing
+# ZCode with it. Routing through `cmd /c start ""` gives it an intermediate
+# parent that exits immediately, leaving no console to hijack. Env vars are
+# still inherited through the chain (powershell -> cmd -> ZCode).
 $env:ZCODE_DATA_BASE_DIR = $SecondHome
 $env:ZCODE_DESKTOP_USER_DATA_DIR = $SecondUserData
 $env:ZCODE_DESKTOP_SESSION_DATA_DIR = $SecondSession
@@ -136,6 +142,23 @@ Write-Host "[launch] DATA_BASE_DIR=$($env:ZCODE_DATA_BASE_DIR)"
 Write-Host "[launch] USER_DATA_DIR=$($env:ZCODE_DESKTOP_USER_DATA_DIR)"
 Write-Host "[launch] SESSION_DIR=$($env:ZCODE_DESKTOP_SESSION_DATA_DIR)"
 
-$proc = Start-Process -FilePath $ZCodeExe -PassThru
-Write-Host "[launch] Second ZCode PID=$($proc.Id). Both windows should now be visible as 'ZCode'."
+$beforeMains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $c = ([string]$_.CommandLine).Trim()
+    ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+} | Select-Object -ExpandProperty ProcessId)
+$null = Start-Process -FilePath "$env:ComSpec" -ArgumentList '/c', 'start', '""', "`"$ZCodeExe`"" -WindowStyle Hidden
+# Best-effort PID discovery: a fresh bare-exe main appears within seconds.
+# Re-launch while already running just focuses the window and exits instead.
+$newPid = $null
+for ($i = 0; $i -lt 15; $i++) {
+    Start-Sleep -Seconds 1
+    $nowMains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue | Where-Object {
+        $c = ([string]$_.CommandLine).Trim()
+        ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+    } | Select-Object -ExpandProperty ProcessId)
+    $diff = @($nowMains | Where-Object { $beforeMains -notcontains $_ })
+    if ($diff.Count -gt 0) { $newPid = $diff[0]; break }
+}
+if ($newPid) { Write-Host "[launch] Second ZCode PID=$newPid. Both windows should now be visible as 'ZCode'." }
+else { Write-Host "[launch] Launched (already running: existing window focused). Both windows should now be visible as 'ZCode'." }
 Write-Host '[verify] Get-Process ZCode | Where MainWindowHandle -ne 0  should list 2 rows.'

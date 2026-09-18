@@ -73,7 +73,8 @@ if "%choice%"=="9" (
     goto MENU
 )
 if "%choice%"=="10" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\windows\launch_zcode_second_instance.ps1"
+    start "ZCode Second Instance" powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\windows\launch_zcode_second_instance.ps1"
+    echo Launcher opened in a separate window - it closes automatically when done.
     pause
     goto MENU
 )
