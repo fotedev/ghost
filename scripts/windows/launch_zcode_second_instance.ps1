@@ -125,6 +125,82 @@ if (-not (Test-Path -LiteralPath (Join-Path $SecondZCode 'v2\setting.json'))) {
     Write-Host '[seed] Second profile already exists, skipping clone (independent).'
 }
 
+# 2c) Telegram routing (one-time, marker-guarded): a cloned profile carries the
+# PRIMARY's enabled Telegram bots, and two pollers on one token cause HTTP 409
+# conflicts plus random cross-account billing. Keep Telegram on Primary by
+# disabling telegram bots in the clone. Runs ONCE ever (marker file) so a
+# deliberate re-enable in the Secondary UI is never reverted. Primary untouched.
+$tgMarker = Join-Path $SecondHome '.telegram-routed'
+if (Test-Path -LiteralPath $tgMarker) {
+    Write-Host '[telegram-route] Already reconciled, skipping.' -ForegroundColor DarkGray
+} else {
+    $tgNoBom = New-Object System.Text.UTF8Encoding $false
+    $tgDisabled = 0
+    foreach ($cfgName in @('v2\bot-config.json', 'v2\bot-config.v3.json')) {
+        $tgCfg = Join-Path $SecondZCode $cfgName
+        if (-not (Test-Path -LiteralPath $tgCfg)) { continue }
+        try {
+            $bj = Get-Content -LiteralPath $tgCfg -Raw | ConvertFrom-Json
+            $changed = $false
+            if (($null -ne $bj) -and ($null -ne $bj.PSObject.Properties['bots'])) {
+                foreach ($b in $bj.bots) {
+                    if (($b.provider -eq 'telegram') -and ($b.enabled -eq $true)) { $b.enabled = $false; $changed = $true; $tgDisabled++ }
+                }
+            }
+            if ($changed) { [System.IO.File]::WriteAllText($tgCfg, ($bj | ConvertTo-Json -Depth 20), $tgNoBom) }
+        } catch { Write-Host "[telegram-route] $cfgName SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
+    }
+    if ($tgDisabled -gt 0) { Write-Host ("[telegram-route] Disabled {0} Telegram bot(s) in Secondary; Telegram stays on Primary." -f $tgDisabled) -ForegroundColor Green }
+    else { Write-Host '[telegram-route] No enabled Telegram bots in Secondary; nothing to do.' -ForegroundColor DarkGray }
+    # Drop stale polling locks, but ONLY when Secondary is not running (a live
+    # poller owns its lock dir). A running instance picks up the config change
+    # on its next restart.
+    try {
+        $secLive = $false
+        $allProcs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)
+        if ($allProcs.Count -gt 0) {
+            $byParent = @{}
+            foreach ($p in $allProcs) {
+                $ppid = [int]$p.ParentProcessId
+                if (-not $byParent.ContainsKey($ppid)) { $byParent[$ppid] = @() }
+                $byParent[$ppid] += $p
+            }
+            foreach ($m in @($allProcs | Where-Object {
+                $c = ([string]$_.CommandLine).Trim()
+                # Empty CommandLine is a known WMI race on fresh mains: keep as candidate.
+                ([string]::IsNullOrWhiteSpace($c)) -or ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+            })) {
+                $seen = @{}; $queue = New-Object System.Collections.Queue
+                $queue.Enqueue([int]$m.ProcessId) | Out-Null
+                while ($queue.Count -gt 0) {
+                    $id = $queue.Dequeue()
+                    if ($seen.ContainsKey($id)) { continue }
+                    $seen[$id] = $true
+                    if ($byParent.ContainsKey($id)) {
+                        foreach ($c in $byParent[$id]) {
+                            $cmd = [string]$c.CommandLine
+                            if (($cmd -like '*ZCode-Second*') -or ($cmd -like '*ZCodeSecondHome*')) { $secLive = $true; break }
+                            $queue.Enqueue([int]$c.ProcessId) | Out-Null
+                        }
+                    }
+                    if ($secLive) { break }
+                }
+                if ($secLive) { break }
+            }
+        }
+        if ($secLive) {
+            if ($tgDisabled -gt 0) { Write-Host '[telegram-route] Secondary is running: restart it once to apply (config saved).' -ForegroundColor Yellow }
+        } else {
+            $tgLockRoot = Join-Path $SecondZCode 'v2\bots-runtime-locks\telegram-polling'
+            if (Test-Path -LiteralPath $tgLockRoot) {
+                Get-ChildItem -LiteralPath $tgLockRoot -Force -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -Confirm:$false -ErrorAction SilentlyContinue }
+                Write-Host '[telegram-route] Stale Secondary polling locks cleared.' -ForegroundColor Green
+            }
+        }
+    } catch { Write-Host "[telegram-route] lock check SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
+    New-Item -ItemType File -Path $tgMarker -Force | Out-Null
+}
+
 # 3) Launch 2nd instance detached from THIS console.
 # Why: ZCode.exe attaches to the parent console (AttachConsole) for its stdout
 # logging. A plain Start-Process keeps this window as that console, so ZCode
@@ -144,18 +220,20 @@ Write-Host "[launch] SESSION_DIR=$($env:ZCODE_DESKTOP_SESSION_DATA_DIR)"
 
 $beforeMains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue | Where-Object {
     $c = ([string]$_.CommandLine).Trim()
-    ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+    # Empty CommandLine is a known WMI race on fresh mains: keep as candidate.
+    ([string]::IsNullOrWhiteSpace($c)) -or ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
 } | Select-Object -ExpandProperty ProcessId)
 $null = Start-Process -FilePath "$env:ComSpec" -ArgumentList '/c', 'start', '""', "`"$ZCodeExe`"" -WindowStyle Hidden
 # Best-effort PID discovery: a fresh bare-exe main appears within seconds.
 # Re-launch while already running just focuses the window and exits instead.
 $newPid = $null
-for ($i = 0; $i -lt 15; $i++) {
-    Start-Sleep -Seconds 1
-    $nowMains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue | Where-Object {
-        $c = ([string]$_.CommandLine).Trim()
-        ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
-    } | Select-Object -ExpandProperty ProcessId)
+    for ($i = 0; $i -lt 15; $i++) {
+        Start-Sleep -Seconds 1
+        $nowMains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue | Where-Object {
+            # (empty CommandLine = WMI race; keep as candidate)
+            $cc = ([string]$_.CommandLine).Trim()
+            ([string]::IsNullOrWhiteSpace($cc)) -or ($cc -match '^"[^"]*ZCode\.exe"$') -or ($cc -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+        } | Select-Object -ExpandProperty ProcessId)
     $diff = @($nowMains | Where-Object { $beforeMains -notcontains $_ })
     if ($diff.Count -gt 0) { $newPid = $diff[0]; break }
 }

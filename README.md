@@ -28,7 +28,8 @@ Applications often create unique IDs to identify your computer. These scripts ge
 | Reset Windsurf | `reset_windsurf_windows-v0.2.ps1` | `reset_windsurf_linux.sh` |
 | Reset Trae | `reset_trae_windows-v0.2.ps1` | `reset_trae_linux-v0.1.sh` |
 | Reset Qoder | `reset_qoder_windows-v0.4.ps1` | — |
-| Reset ZCode (+Qoder stores) | `reset_zcode_windows-v1.3.ps1` | — |
+| Reset ZCode (+Qoder stores) | `reset_zcode_windows-v1.4.ps1` (`-Target Primary\|Secondary\|Both`) | — |
+| ZCode second instance (dual-instance) | `launch_zcode_second_instance.ps1` + `Launch-ZCode-Second.bat` | — |
 | Reset QoderWork | `reset_qoderwork_windows-v0.1.ps1` | — |
 | Reset MiniMax Agent / OpenCode | `reset_minimax_opencode_windows-v1.1.ps1` | — |
 | Device fingerprint | `change_device_id.ps1` | `change_device_id_linux.sh Fingerprint` |
@@ -134,13 +135,25 @@ sudo ./scripts/linux/change_device_id_linux.sh ResetMachineId
 
 **Before running:** Close Qoder. Run PowerShell as Administrator.
 
-### 5. Reset ZCode ID (`reset_zcode_windows-v1.3.ps1`)
+### 5. Reset ZCode ID (`reset_zcode_windows-v1.4.ps1`)
 
 - 27 steps + `[6b/27]`: everything Qoder-side above (for the Qoder stores ZCode shares) plus `.updaterId`, `telemetry-state.json` (`deviceMid`), credentials OAuth clear, **config.json provider `apiKey` strip (fixes the Unlink → Checking loop)**, coding-plan-cache invalidation, RUM store, `setting.json` (`deviceSid`), session/embedded-browser Chromium data
 - Chat stores (`tasks-index.sqlite`, checkpoints, IndexedDB webview data, Local Storage leveldb) are never touched
-- Timestamped backups + audit log under `%APPDATA%\ZCode\ID_Backups\<ts>`
+- Timestamped backups + audit log under `%APPDATA%\ZCode\ID_Backups\<ts>` (per-target: Secondary uses `%APPDATA%\ZCode-Second\ID_Backups\<ts>`)
+- `-Target Primary` (default reset scope + Qoder steps), `-Target Secondary` (selective tree-kill, survivor keeps running, Qoder untouched), `-Target Both` (two independent child runs, Secondary first; each generates its OWN fresh ID set — IDs are never duplicated across instances)
 
-**Before running:** Close ZCode (and Qoder). Run PowerShell as Administrator. After the reset, ZCode prompts for a fresh login.
+**Before running:** close only the TARGET instance (the script kills it; the survivor keeps running in Single mode). Run PowerShell as Administrator. After the reset, ZCode prompts for a fresh login. `change_device_id.ps1` is machine-wide and affects BOTH instances + Qoder.
+
+### 5b. ZCode second instance (dual-instance setup)
+
+Run two fully independent ZCode windows side by side (separate Electron locks, separate SQLite stores, separate accounts):
+
+```powershell
+# Option A — menu: how-to-run.bat → [10]
+# Option B — double-click: scripts\windows\Launch-ZCode-Second.bat
+```
+
+First launch clones history (`~\.zcode` → `~\ZCodeSecondHome\.zcode`, journals excluded), then scrubs the clone to fresh independent IDs (deviceMid, deviceSid, OAuth tokens, provider apiKeys) and routes Telegram bots to Primary only (marker-guarded, runs once — a deliberate re-enable in Secondary is never reverted). Later launches reuse the independent profile. Isolation is driven by five process-scoped env vars (`ZCODE_DATA_BASE_DIR`, `ZCODE_DESKTOP_USER_DATA_DIR`, `ZCODE_DESKTOP_SESSION_DATA_DIR`, `ZCODE_DESKTOP_HOME_DIR`, `HOME`) — the app overwrites `--user-data-dir`, so env vars are the only working lever. Both instances share one install: a single update covers both. Telegram channel bots must live on ONE instance only (two pollers on one token cause HTTP 409 conflicts and random cross-account billing); the launcher enforces Primary-only automatically.
 
 ### 6. Reset QoderWork ID (`reset_qoderwork_windows-v0.1.ps1`)
 
@@ -200,7 +213,7 @@ Safety features — never wiped:
 ```powershell
 .\scripts\windows\reset_cursor_windows-v0.2.ps1
 .\scripts\windows\reset_windsurf_windows-v0.2.ps1
-.\scripts\windows\reset_zcode_windows-v1.3.ps1
+.\scripts\windows\reset_zcode_windows-v1.4.ps1 -Target Primary
 .\scripts\windows\change_device_id.ps1
 ```
 
@@ -221,7 +234,8 @@ Safety features — never wiped:
 - `reset_windsurf_windows-v0.2.ps1`
 - `reset_trae_windows-v0.2.ps1`
 - `reset_qoder_windows-v0.4.ps1`
-- `reset_zcode_windows-v1.3.ps1`
+- `reset_zcode_windows-v1.4.ps1` (`-Target Primary|Secondary|Both`; v1.3 stays beside it as rollback fallback — prefer v1.4)
+- `launch_zcode_second_instance.ps1` + `Launch-ZCode-Second.bat` (dual-instance launcher)
 - `reset_qoderwork_windows-v0.1.ps1`
 - `reset_minimax_opencode_windows-v1.1.ps1`
 - `identity_utils.ps1` (shared library — dot-sourced by the IDE reset scripts)

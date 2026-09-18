@@ -1240,6 +1240,9 @@ function Get-ZcodeTargetMains {
 
     $mains = @($procs | Where-Object {
         $cmd = ([string]$_.CommandLine).Trim()
+        # Empty CommandLine is a known WMI race on fresh mains: keep them as
+        # candidates (subtree walk below still classifies them correctly).
+        ([string]::IsNullOrWhiteSpace($cmd)) -or
         ($cmd -match '^"[^"]*ZCode\.exe"$') -or ($cmd -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
     })
     $primary = @()

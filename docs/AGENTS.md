@@ -51,9 +51,14 @@ reset_qoder_windows-v0.4.ps1       # Qoder: 31 steps (main + CORS_Profile, expan
                                    #          installation_id/.auth machine_id rotation,
                                    #          webview stores, tmp/telemetry+logs, probe;
                                    #          system steps: HKCU deviceid, HKLM SQM, MAC, hostname)
-reset_zcode_windows-v1.3.ps1       # ZCode: 27 steps + [6b/27] config.json provider-apiKey strip
+reset_zcode_windows-v1.4.ps1       # ZCode: 27 steps + [6b/27] config.json provider-apiKey strip
                                    #          (Unlink-loop fix) + telemetry-state deviceMid, RUM store,
-                                   #          setting.json deviceSid, embedded-browser partition
+                                   #          setting.json deviceSid, embedded-browser partition;
+                                   #          -Target Primary|Secondary|Both (selective tree-kill,
+                                   #          per-target ID_Backups, dual independent IDs in Both)
+launch_zcode_second_instance.ps1   # ZCode dual-instance launcher (own window via cmd/start;
+                                   #          first run clones+scrubs profile, routes Telegram bots
+                                   #          to Primary via marker; Launch-ZCode-Second.bat wrapper)
 reset_qoderwork_windows-v0.1.ps1   # QoderWork: 26 steps (agents.db oauth/app_settings scrub,
                                    #          chats preserved; auth.dat, MachineGuid, MAC, hostname;
                                    #          -SkipMac/-SkipHostname/-DryRun)
@@ -101,6 +106,25 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   double quotes, aborting the whole script silently. Reword to avoid parens
   (e.g. `a separate window - leave it open`) or escape as `^( ^)`.
   (Bit us in `how-to-run.bat` option [9]: the parent menu vanished instantly.)
+- GUI apps that call `AttachConsole(ATTACH_PARENT_PROCESS)` (verified: ZCode)
+  hijack the launching console with log floods. Launch them detached
+  (`cmd /c start "" <exe>`, new window via `start` in the .bat) — never inline.
+  (Bit us in `how-to-run.bat` option [10]: the menu drowned in `[pid:*]` logs.)
+
+## Multi-instance conventions (ZCode dual-instance)
+
+- Isolation lever is **env vars, never CLI flags**: the app overwrites
+  `--user-data-dir` via `app.setPath`, so `ZCODE_DATA_BASE_DIR` /
+  `ZCODE_DESKTOP_USER_DATA_DIR` / `ZCODE_DESKTOP_SESSION_DATA_DIR` /
+  `ZCODE_DESKTOP_HOME_DIR` / `HOME` are the only working mechanism.
+- Classify mains by **bare-exe CommandLine** (quoted or unquoted full path only);
+  `--type` filtering alone misclassifies helpers as mains. Empty CommandLine is a
+  WMI race — keep as candidate, subtree walk still classifies correctly.
+- One Telegram bot token = ONE polling instance. Never clone an enabled bot into
+  a second profile (HTTP 409 + random cross-account billing). Launcher enforces
+  Primary-only via marker-guarded disable; a deliberate re-enable is never reverted.
+- Both-mode resets generate **independent ID sets per instance** — never duplicate.
+- Backups, watchdog probes and final validation are scoped **per-target**.
 
 ## Out of scope
 
