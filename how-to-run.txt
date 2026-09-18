@@ -2,13 +2,19 @@ Windows (PowerShell as Administrator, from the repo root):
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_cursor_windows-v0.2.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_windsurf_windows-v0.2.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_trae_windows-v0.2.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoder_windows-v0.3.ps1"
+  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoder_windows-v0.4.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoderwork_windows-v0.1.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.3.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.0.ps1"
+  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.1.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\change_device_id.ps1"
 
 Or double-click: how-to-run.bat
+
+ZCode captcha watchdog (unattended; runs as your user, no admin needed):
+  powershell -ExecutionPolicy Bypass -File "tools\watch_zcode_captcha.ps1"
+Telegram escalation reads TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from .envlocal
+(repo root; git-ignored). Test first:
+  powershell -ExecutionPolicy Bypass -File "tools\watch_zcode_captcha.ps1" -RunOnce -DryRun
 
 Linux:
   chmod +x scripts/linux/*.sh

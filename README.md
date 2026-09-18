@@ -12,7 +12,7 @@ clean-slate-kit/
 │   └── linux/     # .sh scripts (id_reset_common.sh + per-IDE resetters)
 ├── docs/          # AGENTS.md, IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes
 ├── archive/       # superseded script versions (fallbacks — do not run)
-├── tools/         # reviewed utilities (block_qoder_domains.ps1 — local-only)
+├── tools/         # reviewed utilities (block_qoder_domains.ps1 — local-only; watch_zcode_captcha.ps1 — captcha-stall watchdog)
 └── .trash/        # moved-aside junk (git-ignored, never committed)
 ```
 
@@ -27,10 +27,10 @@ Applications often create unique IDs to identify your computer. These scripts ge
 | Reset Cursor | `reset_cursor_windows-v0.2.ps1` | `reset_cursor_linux.sh` |
 | Reset Windsurf | `reset_windsurf_windows-v0.2.ps1` | `reset_windsurf_linux.sh` |
 | Reset Trae | `reset_trae_windows-v0.2.ps1` | `reset_trae_linux-v0.1.sh` |
-| Reset Qoder | `reset_qoder_windows-v0.3.ps1` | — |
+| Reset Qoder | `reset_qoder_windows-v0.4.ps1` | — |
 | Reset ZCode (+Qoder stores) | `reset_zcode_windows-v1.3.ps1` | — |
 | Reset QoderWork | `reset_qoderwork_windows-v0.1.ps1` | — |
-| Reset MiniMax Agent / OpenCode | `reset_minimax_opencode_windows-v1.0.ps1` | — |
+| Reset MiniMax Agent / OpenCode | `reset_minimax_opencode_windows-v1.1.ps1` | — |
 | Device fingerprint | `change_device_id.ps1` | `change_device_id_linux.sh Fingerprint` |
 | System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` |
 | Interactive menu | `how-to-run.bat` | `how-to-run.sh` |
@@ -127,9 +127,9 @@ sudo ./scripts/linux/change_device_id_linux.sh ResetMachineId
 
 **Before running:** Close Trae. Run PowerShell as Administrator.
 
-### 4. Reset Qoder ID (`reset_qoder_windows-v0.3.ps1`)
+### 4. Reset Qoder ID (`reset_qoder_windows-v0.4.ps1`)
 
-- 27 steps: `storage.json` (4 telemetry keys, main + `CORS_Profile`), `machineid`, `argv.json` (`crash-reporter-id`), `state.vscdb` + auth-secrets delete (`aicoding.auth.*`, `secret://blackbox.*`), `device_id_salt`, `os_crypt` rotation, browser data, `Crashpad`/`SharedClientCache`/`logs`, `.qoder` cache subdirs (reparse-point-safe), workspace UPSERT-only, plus system steps (HKCU deviceid, HKLM SQM MachineId, MAC, hostname — opt-out via `-SkipMac`/`-SkipHostname`)
+- 31 steps: `storage.json` (4 telemetry keys, main + `CORS_Profile`), `machineid`, `argv.json` (`crash-reporter-id`), `state.vscdb` + expanded auth-secrets delete (`aicoding.auth.*` incl. `loginBroadcast`, `secret.local.machine.variables`, `secret://blackbox.*`), `device_id_salt`, `os_crypt` rotation, browser data, `Crashpad`/`SharedClientCache`/`logs`, `.qoder` cache subdirs (reparse-point-safe), workspace UPSERT-only, plus system steps (HKCU deviceid, HKLM SQM MachineId, MAC, hostname — opt-out via `-SkipMac`/`-SkipHostname`), plus v0.4 device-flow steps (`.qoder\installation_id` + `.auth\machine_id` rotation, credential/dns/endpoint cache delete, IndexedDB/Partitions/Storage webview purge, `.qoder\tmp\telemetry` + `logs` cleanup, read-only device-flow final probe)
 - Timestamped backups + audit log under `%APPDATA%\Qoder\ID_Backups\<ts>`
 
 **Before running:** Close Qoder. Run PowerShell as Administrator.
@@ -149,7 +149,9 @@ sudo ./scripts/linux/change_device_id_linux.sh ResetMachineId
 
 **Before running:** Close QoderWork. Run PowerShell as Administrator.
 
-### 7. Reset MiniMax Agent / OpenCode (`reset_minimax_opencode_windows-v1.0.ps1`)
+### 7. Reset MiniMax Agent / OpenCode (`reset_minimax_opencode_windows-v1.1.ps1`)
+
+v1.1 fixes post-reset `FreeTierError: OpenCode's free tier can only be used from within OpenCode` (server-side UA gate: only `User-Agent: opencode/<version>` on clients ≥1.17.0 passes). New: version preflight (aborts on outdated clients unless `-SkipVersionCheck`), `-KeepLogin` (preserves `auth.json` for paid/topped-up Zen logins; default still wipes to `{}` + prints re-login command), distinct GUIDs for `.updaterId` vs `gh\device-id` (v1.0 reused one value), names-only auth probe before wiping.
 
 Combined reset for two Electron apps plus their CLI homes, with every path verified against this machine's actual layout:
 
@@ -213,15 +215,15 @@ Safety features — never wiped:
 
 ## Files Included
 
-**Windows** (`scripts/windows/` — older versions live in `archive/` as fallbacks; do not run them)
+**Windows** (`scripts/windows/` — current versions only; superseded ones, incl. Qoder v0.3 and ZCode v1.1, live in `archive/` as fallbacks — do not run them)
 
 - `reset_cursor_windows-v0.2.ps1`
 - `reset_windsurf_windows-v0.2.ps1`
 - `reset_trae_windows-v0.2.ps1`
-- `reset_qoder_windows-v0.3.ps1`
+- `reset_qoder_windows-v0.4.ps1`
 - `reset_zcode_windows-v1.3.ps1`
 - `reset_qoderwork_windows-v0.1.ps1`
-- `reset_minimax_opencode_windows-v1.0.ps1`
+- `reset_minimax_opencode_windows-v1.1.ps1`
 - `identity_utils.ps1` (shared library — dot-sourced by the IDE reset scripts)
 - `change_device_id.ps1`
 - `how-to-run.bat` (repo root)
@@ -232,3 +234,8 @@ Safety features — never wiped:
 - `reset_windsurf_linux-v0.1.sh`
 - `change_device_id_linux.sh`
 - `how-to-run.sh` (repo root)
+
+**Tools** (`tools/` — reviewed utilities, run as the logged-in user, no admin needed)
+
+- `block_qoder_domains.ps1` — hosts-file blocker for the Qoder/QoderWork fingerprint-SDK and telemetry chain (`-Mode Block/Unblock/Status`, `-AllowAuth` keeps sign-in open)
+- `watch_zcode_captcha.ps1` — unattended watchdog for the ZCode Aliyun-CAPTCHA stall (`Captcha instance timed out after 10000ms`, upstream `zai-org/feedback#349`). Tails the agent JSONL logs; on fresh failures it restarts ZCode (clears the stuck instance) and, past the escalation threshold, raises a sound alert + optional Telegram message. Recovery extras: if the relaunch fails it retries while the kill is inside `-RelaunchWindowMinutes` (an app closed by you outside that window is left alone; `-NoAutoRelaunch` disables all of it), and after a restart it resumes the failed sessions headlessly in place (`zcode --resume <sess> --prompt <msg>`, capped per session per hour; `-NoAutoContinue` disables). A second failure class, capacity overload (terminal `turn.failed` with `rate_limited`/529/1305/3009/`model_rate_limited` cause chain), never restarts the app — it defers the resume by `-RateLimitResumeDelayMinutes` (default 10) instead. Never touches identity/auth/config files. Telegram creds come from `-TelegramBotToken`/`-TelegramChatId` or, when omitted, from `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` in `.envlocal` (repo root, git-ignored). Test first with `-RunOnce -DryRun`, then leave running in a window (or pick `[9]` in `how-to-run.bat`). Logging: console shows milestones only (`-Verbose` for full detail, DryRun implies verbose); `watch.log` keeps everything (rotated at 5MB); relaunched-app output goes to per-run `relaunch_*.log` files instead of the console; per-run logs older than 7 days (`-LogRetentionDays`) are deleted automatically.

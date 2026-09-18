@@ -9,10 +9,13 @@ Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf*
 ```
 README.md  how-to-run.bat/txt/sh   # root launchers (scripts live under scripts/)
 scripts/windows/                   # current .ps1 resetters + identity_utils.ps1 + change_device_id.ps1
+                                   #   (superseded Qoder v0.3 / ZCode v1.1 moved to archive/)
 scripts/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters)
 docs/                              # AGENTS.md, IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes
 archive/                           # superseded versions (fallbacks — do not run)
-tools/                             # reviewed utilities
+tools/                             # reviewed utilities (block_qoder_domains.ps1,
+                                   #   watch_zcode_captcha.ps1 — captcha-stall watchdog;
+                                   #   Telegram creds via params or .envlocal at repo root)
 .trash/                            # moved-aside junk (git-ignored, never committed)
 ```
 
@@ -42,7 +45,11 @@ reset_trae_windows-v0.2.ps1      # Trae: 16 steps (above + aha delete,
                                    #         ai-agent identity-rows-only scrub (chat preserved), SharedStorage,
                                    #         Partitions\trae-webview, iCubeAuthInfo://* removal,
                                    #         has_device_id_updated_to_aha=false)
-reset_qoder_windows-v0.3.ps1       # Qoder: 27 steps (main + CORS_Profile, state.vscdb scrub,
+reset_qoder_windows-v0.4.ps1       # Qoder: 31 steps (main + CORS_Profile, expanded
+                                   #          state.vscdb scrub incl. loginBroadcast +
+                                   #          secret.local.machine.variables, .qoder
+                                   #          installation_id/.auth machine_id rotation,
+                                   #          webview stores, tmp/telemetry+logs, probe;
                                    #          system steps: HKCU deviceid, HKLM SQM, MAC, hostname)
 reset_zcode_windows-v1.3.ps1       # ZCode: 27 steps + [6b/27] config.json provider-apiKey strip
                                    #          (Unlink-loop fix) + telemetry-state deviceMid, RUM store,
@@ -50,13 +57,15 @@ reset_zcode_windows-v1.3.ps1       # ZCode: 27 steps + [6b/27] config.json provi
 reset_qoderwork_windows-v0.1.ps1   # QoderWork: 26 steps (agents.db oauth/app_settings scrub,
                                    #          chats preserved; auth.dat, MachineGuid, MAC, hostname;
                                    #          -SkipMac/-SkipHostname/-DryRun)
-reset_minimax_opencode_windows-v1.0.ps1  # MiniMax/OpenCode: 22 steps (auth.json wipes -> {},
+reset_minimax_opencode_windows-v1.1.ps1  # MiniMax/OpenCode: 22 steps (auth.json wipe -> {} unless
+                                   #          -KeepLogin, version preflight ≥1.17.0, distinct
                                    #          updater IDs, Chromium state per profile; chat preserved)
 change_device_id.ps1              # System-level: Fingerprint (self-test) / LegacyReset (registry GUIDs)
                                    #   / RepairProfiles (ProfileList .bak keys). Windows-only.
 ```
 (All .ps1 above live in scripts/windows/; .sh scripts in scripts/linux/;
-older v0.1 / v1.0-v1.2 files live in archive/ as fallbacks — do not run them.)
+older Qoder v0.1-v0.3 / ZCode v1.0-v1.2 (+ Cursor/Windsurf/Trae v0.1) files
+live in archive/ as fallbacks — do not run them.)
 
 Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin -> Stop-App -> New-IdentitySet -> per-target [n/N] steps with verify-after -> audit log -> restore script -> summary.
 
@@ -84,6 +93,14 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 - Never name a variable `$Input` — it's a reserved automatic variable in PS 5.1.
 - Never use ternary operator `? :` — it's PS 7+ only. Use `if/else`.
 - `ConvertFrom-Json` returns `PSCustomObject`, not `[hashtable]`. Normalize with `ConvertTo-Hashtable` before passing to `[hashtable]`-typed parameters.
+
+## Batch (.bat) launcher rules
+
+- Never use bare `(` / `)` in an `echo` (or any) line inside a parenthesized
+  `if (...) (...)` block — CMD treats `)` as the block terminator even inside
+  double quotes, aborting the whole script silently. Reword to avoid parens
+  (e.g. `a separate window - leave it open`) or escape as `^( ^)`.
+  (Bit us in `how-to-run.bat` option [9]: the parent menu vanished instantly.)
 
 ## Out of scope
 

@@ -67,3 +67,12 @@ block_qoder_domains.ps1
 
 # Local trash — moved-aside junk, exes, research with secrets. Never commit.
 .trash/
+
+# Local env — tokens, secrets, machine-specific values. Never commit.
+.envlocal
+
+# Local-only: agent context/settings (per-machine) — never commit.
+.context/
+
+# Local-only: hosts-file firewall tool (security-sensitive) — never commit.
+tools/block_qoder_domains.ps1

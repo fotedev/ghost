@@ -8,14 +8,18 @@ cls
 echo ================================
 echo        🛠️ Script Launcher
 echo ================================
-echo [1] Change Device ID
+echo [1] Change Device ID [MACHINE-WIDE: affects BOTH ZCode instances + Qoder]
 echo [2] Reset Cursor
 echo [3] Reset Windsurf
 echo [4] Reset Trae
 echo [5] Reset Qoder
 echo [6] Reset QoderWork
-echo [7] Reset ZCode
+echo [7] Reset ZCode Primary instance
 echo [8] Reset MiniMax/OpenCode
+echo [9] Watch ZCode captcha (unattended watchdog, separate window)
+echo [10] Launch ZCode second instance (independent window)
+echo [11] Reset ZCode Secondary instance (survivor kept running)
+echo [12] Reset BOTH ZCode instances (independent IDs)
 echo [0] Exit
 echo.
 
@@ -42,7 +46,7 @@ if "%choice%"=="4" (
     goto MENU
 )
 if "%choice%"=="5" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoder_windows-v0.3.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoder_windows-v0.4.ps1"
     pause
     goto MENU
 )
@@ -52,12 +56,34 @@ if "%choice%"=="6" (
     goto MENU
 )
 if "%choice%"=="7" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.3.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Primary
     pause
     goto MENU
 )
 if "%choice%"=="8" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.0.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.1.ps1"
+    pause
+    goto MENU
+)
+if "%choice%"=="9" (
+    start "ZCode captcha watch" powershell -NoExit -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\watch_zcode_captcha.ps1"
+    echo Watchdog launched in a separate window - leave it open.
+    echo To verify it runs: check %%LOCALAPPDATA%%\watch-zcode-captcha\watch.log
+    pause
+    goto MENU
+)
+if "%choice%"=="10" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\windows\launch_zcode_second_instance.ps1"
+    pause
+    goto MENU
+)
+if "%choice%"=="11" (
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Secondary
+    pause
+    goto MENU
+)
+if "%choice%"=="12" (
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Both
     pause
     goto MENU
 )
