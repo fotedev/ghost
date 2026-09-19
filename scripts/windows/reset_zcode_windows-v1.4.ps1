@@ -6,9 +6,13 @@
 #   - -Target Both      -> orchestrates two independent child runs (Secondary first,
 #                          then Primary incl. Qoder), each with its OWN fresh ID set.
 #     Dual-identity rule: Both mode NEVER duplicates IDs across instances.
-#   - Single-target mode uses selective PID-tree killing (CommandLine
-#     --user-data-dir inspection) so the survivor instance keeps running.
-#     v1.3 killed every ZCode* process unconditionally.
+#   - Single-target mode uses selective PID-tree killing (target mains via
+#     taskkill /T /PID, classified by descendant CommandLine markers) so the
+#     survivor instance keeps running. Primary additionally uses a Qoder-only
+#     kill that never touches ZCode (shared helpers spared when they descend
+#     from the Secondary tree). v1.3 killed every ZCode* process
+#     unconditionally (that path survives as Stop-ZcodeQoderProcessesAggressive
+#     but is NOT used by single-target modes).
 #   - Backups (ID_Backups), watchdog probes and final validation are scoped
 #     strictly per-target. v1.3 is kept intact for rollback.
 #   - -SkipQoder is internal (used by the Both orchestrator so Qoder steps run
@@ -1018,6 +1022,10 @@ function Update-ArgvJsonCrashReporterId {
 # Aggressive tree-kill for ZCode/Qoder plus known extension helpers that hold
 # file handles (verified: kilo.exe kept a log file locked as an orphan process).
 # Requires 2 consecutive clean checks; hard-fails the run when unkillable.
+# LEGACY: kills EVERY ZCode* process unconditionally, closing BOTH windows.
+# Do NOT call from single-target (Primary/Secondary) paths -- use
+# Stop-ZcodeTargetTree (+ Stop-QoderProcessesOnly for Primary). Kept for
+# manual full-kill scenarios only.
 function Stop-ZcodeQoderProcessesAggressive {
     param(
         [int]$MaxAttempts = 10,
@@ -1255,11 +1263,11 @@ function Get-ZcodeTargetMains {
         $queue.Enqueue([int]$m.ProcessId) | Out-Null
         $isSecondary = $false
         while ($queue.Count -gt 0) {
-            $pid = $queue.Dequeue()
-            if ($seen.ContainsKey($pid)) { continue }
-            $seen[$pid] = $true
-            if ($byParent.ContainsKey($pid)) {
-                foreach ($c in $byParent[$pid]) {
+            $childPid = $queue.Dequeue()
+            if ($seen.ContainsKey($childPid)) { continue }
+            $seen[$childPid] = $true
+            if ($byParent.ContainsKey($childPid)) {
+                foreach ($c in $byParent[$childPid]) {
                     $cmd = [string]$c.CommandLine
                     if (($cmd -like '*ZCode-Second*') -or ($cmd -like '*ZCodeSecondHome*')) { $isSecondary = $true; break }
                     $queue.Enqueue([int]$c.ProcessId) | Out-Null
@@ -1276,7 +1284,14 @@ function Get-ZcodeTargetMains {
 # subtree via /T, covering glm/cua-helper/plugin-host children that carry no
 # user-data-dir flag themselves). Shared Qoder helpers are never touched here.
 # Returns $true when the target is gone across 2 consecutive checks AND (when
-# requested) the survivor mains still exist.
+# requested AND a survivor existed at entry) the survivor mains still exist.
+# -RequireSurvivor is conditional: when no survivor main exists at entry
+# (target-only running, or Both-mode Primary child after Secondary already
+# exited) the run succeeds without a survivor instead of failing.
+# Ambiguity guard: when Label=Primary and 2+ mains exist but ZERO classify as
+# Secondary (classifier found no ZCode-Second/ZCodeSecondHome marker in any
+# subtree), killing "Primary" would kill EVERYTHING including the survivor, so
+# the run aborts with a diagnostic dump instead of killing both.
 function Stop-ZcodeTargetTree {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('Primary', 'Secondary')][string]$Label,
@@ -1286,20 +1301,37 @@ function Stop-ZcodeTargetTree {
     )
 
     Write-Host "[*] Terminating ZCode $Label instance tree only (survivor preserved)..." -ForegroundColor Cyan
+    $otherLabel = if ($Label -eq 'Primary') { 'Secondary' } else { 'Primary' }
+    $entryMap = Get-ZcodeTargetMains
+    $entrySurvivors = @($entryMap[$otherLabel]).Count
+    $entryTargets = @($entryMap[$Label]).Count
+    $enforceSurvivor = $RequireSurvivor -and ($entrySurvivors -gt 0)
+    if ($RequireSurvivor -and (-not $enforceSurvivor)) {
+        Write-Host "    [INFO] no $otherLabel survivor running at entry -- survivor check disabled" -ForegroundColor DarkGray
+    }
+    if (($Label -eq 'Primary') -and ($entryTargets -ge 2) -and ($entrySurvivors -eq 0)) {
+        Write-Host "[FAILED] ambiguous classification: $($entryTargets) ZCode mains running but none classify as Secondary." -ForegroundColor Red
+        Write-Host "    Refusing to kill: every main looks like Primary, so a Primary tree-kill would close BOTH windows." -ForegroundColor Red
+        foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)) {
+            Write-Host ("    PID {0} PPID {1}: {2}" -f $p.ProcessId, $p.ParentProcessId, [string]$p.CommandLine) -ForegroundColor Red
+        }
+        Write-Host "    Hint: restart the Secondary via option [10] (env-var isolated launch) so its subtree carries the ZCode-Second marker, then retry." -ForegroundColor Yellow
+        return $false
+    }
     $consecutiveClean = 0
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         $map = Get-ZcodeTargetMains
         $targets = @($map[$Label])
-        foreach ($pid in $targets) {
-            $null = & taskkill /F /T /PID $pid 2>&1
+        foreach ($targetPid in $targets) {
+            $null = & taskkill /F /T /PID $targetPid 2>&1
         }
         Start-Sleep -Milliseconds $DelayMs
         $map = Get-ZcodeTargetMains
         $remaining = @($map[$Label]).Count
-        $survivors = @($map[$(if ($Label -eq 'Primary') { 'Secondary' } else { 'Primary' })]).Count
+        $survivors = @($map[$otherLabel]).Count
         Write-Host ("    attempt {0}/{1} - target remaining: {2}, survivor mains: {3}" -f $attempt, $MaxAttempts, $remaining, $survivors) -ForegroundColor DarkGray
         if ($remaining -eq 0) {
-            if ($RequireSurvivor -and ($survivors -eq 0)) {
+            if ($enforceSurvivor -and ($survivors -eq 0)) {
                 Write-Host "[WARN] target is gone but the survivor instance is also gone!" -ForegroundColor Yellow
                 $consecutiveClean = 0
             }
@@ -1314,6 +1346,80 @@ function Stop-ZcodeTargetTree {
         else { $consecutiveClean = 0 }
     }
     Write-Host "[FAILED] ZCode $Label tree still running after $MaxAttempts attempts. Aborting." -ForegroundColor Red
+    return $false
+}
+
+# Qoder-only kill for the Primary path. Kills Qoder* mains (each via /T so its
+# own children are reaped) plus orphaned extension helpers that lock Qoder
+# files (kilo.exe kept a log locked as an orphan process). NEVER touches any
+# ZCode* process: shared helpers (kilo/roo/cline/blackbox) are killed ONLY when
+# their ancestor chain does NOT lead to a surviving Secondary ZCode main, so a
+# running Secondary instance keeps its helpers. Secondary mode never calls this
+# (Qoder stays running there by design).
+function Stop-QoderProcessesOnly {
+    param(
+        [int]$MaxAttempts = 10,
+        [int]$DelayMs = 1500
+    )
+
+    Write-Host "[*] Terminating Qoder processes only (ZCode survivor untouched)..." -ForegroundColor Cyan
+    $qoderImageNames = @("Qoder", "Qoder Helper", "Qoder Helper (GPU)", "Qoder Helper (Renderer)")
+    $sharedHelperNames = @("kilo", "roo", "cline", "cline-host", "blackbox")
+    $consecutiveClean = 0
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $zmap = Get-ZcodeTargetMains
+        $secondaryPids = @($zmap['Secondary'])
+
+        $allProcs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+        $byPid = @{}
+        foreach ($p in $allProcs) { $byPid[[int]$p.ProcessId] = $p }
+
+        foreach ($imageName in $qoderImageNames) {
+            $matches = @($allProcs | Where-Object { $_.Name -ieq ($imageName + ".exe") })
+            foreach ($m in $matches) {
+                $null = & taskkill /F /T /PID ([int]$m.ProcessId) 2>&1
+            }
+        }
+        foreach ($helperName in $sharedHelperNames) {
+            $matches = @($allProcs | Where-Object { $_.Name -ieq ($helperName + ".exe") })
+            foreach ($m in $matches) {
+                $helperPid = [int]$m.ProcessId
+                # Inline ancestor walk: spare helpers descending from a
+                # surviving Secondary ZCode main (dynamic scoping of nested
+                # functions is fragile, so no helper function here).
+                $isSecondaryHelper = $false
+                $seenPids = @{}
+                $currentPid = $helperPid
+                while ($true) {
+                    if ($secondaryPids -contains $currentPid) { $isSecondaryHelper = $true; break }
+                    if ($seenPids.ContainsKey($currentPid)) { break }
+                    $seenPids[$currentPid] = $true
+                    if (-not $byPid.ContainsKey($currentPid)) { break }
+                    $parentPid = [int]$byPid[$currentPid].ParentProcessId
+                    if (($parentPid -eq 0) -or ($parentPid -eq $currentPid)) { break }
+                    $currentPid = $parentPid
+                }
+                if ($isSecondaryHelper) { continue }
+                $null = & taskkill /F /T /PID $helperPid 2>&1
+            }
+        }
+
+        Start-Sleep -Milliseconds $DelayMs
+
+        $qoderRemaining = @(Get-Process -Name "Qoder*" -ErrorAction SilentlyContinue).Count
+        $zmapAfter = Get-ZcodeTargetMains
+        $secondarySurvivors = @($zmapAfter['Secondary']).Count
+        Write-Host ("    attempt {0}/{1} - Qoder remaining: {2}, Secondary survivors: {3}" -f $attempt, $MaxAttempts, $qoderRemaining, $secondarySurvivors) -ForegroundColor DarkGray
+        if ($qoderRemaining -eq 0) {
+            $consecutiveClean++
+            if ($consecutiveClean -ge 2) {
+                Write-Host "[OK] Qoder processes terminated (2 clean checks); Secondary survivors: $secondarySurvivors" -ForegroundColor Green
+                return $true
+            }
+        }
+        else { $consecutiveClean = 0 }
+    }
+    Write-Host "[FAILED] Qoder processes still running after $MaxAttempts attempts. Aborting." -ForegroundColor Red
     return $false
 }
 
@@ -1391,16 +1497,23 @@ Write-Host "Policy: chat history + workspaces preserved; no MAC/hostname/registr
 Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects BOTH instances + Qoder." -ForegroundColor Yellow
 
 # Pre-step: scoped tree-kill. Single-target mode kills ONLY the target ZCode
-# tree (survivor keeps running). Qoder + shared helpers are killed only when
-# the Primary target needs its Qoder steps; Secondary never touches them.
+# tree (survivor keeps running). Qoder processes are killed only when the
+# Primary target needs its Qoder steps (via Qoder-only kill that never touches
+# ZCode); Secondary never touches Qoder. The aggressive kill-all helper is
+# intentionally NOT used here (it closes BOTH ZCode windows).
 if ($Target -eq 'Secondary') {
     if (-not (Stop-ZcodeTargetTree -Label Secondary -RequireSurvivor)) {
         exit 1
     }
 }
 else {
-    if (-not (Stop-ZcodeQoderProcessesAggressive)) {
+    if (-not (Stop-ZcodeTargetTree -Label Primary -RequireSurvivor)) {
         exit 1
+    }
+    if ($qoderPresent) {
+        if (-not (Stop-QoderProcessesOnly)) {
+            exit 1
+        }
     }
 }
 
