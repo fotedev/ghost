@@ -101,9 +101,9 @@ Describe "README consistency" {
         $readme | Should -Not -Match "reset_[a-z_]+_windows-v\d"
     }
 
-    It "has no stale scripts/ paths in tracked text files" {
+    It "has no stale scripts/ paths in tracked text files (CHANGELOG exempt: rename history)" {
         $repoRoot = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
-        $hits = & git -C $repoRoot grep -l -E "scripts[/\\\\](windows|linux)" -- "*.md" "*.bat" "*.sh" "*.txt" "*.yml" 2>$null
+        $hits = & git -C $repoRoot grep -l -E "scripts[/\\\\](windows|linux)" -- "*.md" "*.bat" "*.sh" "*.txt" "*.yml" ":!CHANGELOG.md" 2>$null
         @($hits).Count | Should -Be 0
     }
 }
