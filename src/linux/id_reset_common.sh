@@ -98,7 +98,8 @@ backup_to_dir() {
     local src="$1" dir="$2" label="$3"
     if [[ -f "$src" ]]; then
         mkdir -p "$dir"
-        local dest="$dir/${label}_$(timestamp).backup"
+        local dest
+        dest="$dir/${label}_$(timestamp).backup"
         cp -f "$src" "$dest"
         warn "Backup: $dest"
     fi
@@ -123,15 +124,17 @@ ensure_not_running() {
 
 # ── System machine-id ──────────────────────────────────────────────────
 # Sets SYSTEM_MACHINE_ID_SKIPPED=true when not running as root.
-SYSTEM_MACHINE_ID_SKIPPED=false
+# Exported: callers (reset_cursor.sh / reset_windsurf.sh) read it after
+# sourcing this library, and ShellCheck needs the export to see that.
+export SYSTEM_MACHINE_ID_SKIPPED=false
 
 reset_system_machine_id() {
-    SYSTEM_MACHINE_ID_SKIPPED=false
+    export SYSTEM_MACHINE_ID_SKIPPED=false
     local etc_id="/etc/machine-id"
     local dbus_id="/var/lib/dbus/machine-id"
 
     if [[ $EUID -ne 0 ]]; then
-        SYSTEM_MACHINE_ID_SKIPPED=true
+        export SYSTEM_MACHINE_ID_SKIPPED=true
         warn "Not running as root; skipping system machine-id update."
         warn "Re-run with: sudo $0"
         return 0
@@ -156,7 +159,9 @@ reset_system_machine_id() {
     if [[ -e "$dbus_id" && ! -L "$dbus_id" ]]; then
         rm -f "$dbus_id"
     fi
-    command -v dbus-uuidgen >/dev/null 2>&1 && dbus-uuidgen --ensure >/dev/null 2>&1 || true
+    if command -v dbus-uuidgen >/dev/null 2>&1; then
+        dbus-uuidgen --ensure >/dev/null 2>&1 || true
+    fi
 
     ok "Updated system machine-id."
     if [[ -f "$etc_id" ]]; then

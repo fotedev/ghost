@@ -4,6 +4,7 @@
 set -euo pipefail
 
 # GHOST common lib (sourced BEFORE local defs so local overrides stay intact)
+# shellcheck source=src/linux/id_reset_common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/id_reset_common.sh"
 
 MODE="${1:-Fingerprint}"
@@ -137,7 +138,9 @@ reset_machine_id_mode() {
     if [[ -e "$dbus_id" && ! -L "$dbus_id" ]]; then
         rm -f "$dbus_id"
     fi
-    command -v dbus-uuidgen >/dev/null 2>&1 && dbus-uuidgen --ensure >/dev/null 2>&1 || true
+    if command -v dbus-uuidgen >/dev/null 2>&1; then
+        dbus-uuidgen --ensure >/dev/null 2>&1 || true
+    fi
     echo "System machine-id reset. New value:"
     cat "$etc_id"
     echo ""

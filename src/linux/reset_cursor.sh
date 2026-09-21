@@ -5,6 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=id_reset_common.sh
+# shellcheck source=src/linux/id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
 show_banner "Cursor Identity Reset"
@@ -110,13 +111,13 @@ info ""
 info "[2/4] Updating storage.json..."
 [[ -f "$STORAGE_JSON" ]] && backup_file "$STORAGE_JSON"
 mkdir -p "$GLOBAL_STORAGE"
-update_storage_json && ok "Updated storage.json." || warn "storage.json update skipped."
+if update_storage_json; then ok "Updated storage.json."; else warn "storage.json update skipped."; fi
 
 info ""
 info "[3/4] Updating SQLite database..."
 if [[ -f "$SQLITE_DB" ]]; then
     backup_file "$SQLITE_DB"
-    update_sqlite && ok "Updated SQLite database." || warn "SQLite update failed."
+    if update_sqlite; then ok "Updated SQLite database."; else warn "SQLite update failed."; fi
 fi
 
 info ""

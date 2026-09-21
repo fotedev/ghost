@@ -5,6 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=id_reset_common.sh
+# shellcheck source=src/linux/id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
 show_banner "Windsurf Identity Reset"
@@ -131,21 +132,21 @@ info ""
 info "[2/5] Updating Preferences file..."
 if [[ -f "$PREFERENCES_PATH" ]]; then
     backup_to_dir "$PREFERENCES_PATH" "$BACKUP_PATH" "Preferences"
-    json_replace_username "$PREFERENCES_PATH" && ok "Updated Preferences." || warn "Preferences update failed."
+    if json_replace_username "$PREFERENCES_PATH"; then ok "Updated Preferences."; else warn "Preferences update failed."; fi
 fi
 
 info ""
 info "[3/5] Updating Local State file..."
 if [[ -f "$LOCAL_STATE_PATH" ]]; then
     backup_to_dir "$LOCAL_STATE_PATH" "$BACKUP_PATH" "LocalState"
-    json_replace_username "$LOCAL_STATE_PATH" && ok "Updated Local State." || warn "Local State update failed."
+    if json_replace_username "$LOCAL_STATE_PATH"; then ok "Updated Local State."; else warn "Local State update failed."; fi
 fi
 
 info ""
 info "[4/5] Updating argv.json file..."
 if [[ -f "$ARGV_PATH" ]]; then
     backup_to_dir "$ARGV_PATH" "$BACKUP_PATH" "argv"
-    json_replace_username "$ARGV_PATH" && ok "Updated argv.json." || warn "argv.json update failed."
+    if json_replace_username "$ARGV_PATH"; then ok "Updated argv.json."; else warn "argv.json update failed."; fi
 fi
 
 info ""

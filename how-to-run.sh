@@ -5,6 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LINUX_DIR="$SCRIPT_DIR/src/linux"
+# shellcheck source=src/linux/id_reset_common.sh
 source "$LINUX_DIR/id_reset_common.sh"
 
 while true; do
