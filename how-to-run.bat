@@ -95,7 +95,7 @@ if "%choice%"=="12" (
     goto MENU
 )
 if "%choice%"=="0" (
-    echo See you later, Ahmed 👋
+    echo Done.
     timeout /t 1 >nul
     exit
 )
