@@ -146,7 +146,7 @@ function Stop-AppProcesses {
 
     $helperMap = @{
         Cursor   = @("Cursor")
-        Windsurf = @("Windsurf", "codeium")
+        Windsurf = @("Windsurf", "Devin", "codeium")
         Trae     = @("Trae", "Trae Broker")
     }
 

@@ -1,18 +1,24 @@
-# Windsurf Identity Reset v0.2
+# Windsurf/Devin Identity Reset v0.3
+# (Windsurf rebranded to Devin Desktop on 2026-06-02 -- same IDE, over-the-air)
 #
-# Hardened rebuild of reset_windsurf_windows-v0.1.ps1 on the v1.1 template:
-#   - Self-elevation to Administrator (auto re-launch, no manual "run as admin")
-#   - Aggressive multi-process kill (Windsurf + codeium + helpers, 2 clean checks)
-#   - No-BOM UTF-8 on EVERY write (v0.1 used Set-Content -Encoding UTF8, which
-#     emits a BOM under PowerShell 5.1 and can corrupt Chromium/Electron parsers)
-#   - argv.json handled by comment-preserving JSONC regex (v0.1 stripped all
-#     comments on rewrite); user-data-dir username scrub kept via raw text.
-#   - Delete (not rename) for binary stores: renames left *.backup files with
-#     the OLD fingerprint on disk. Backups live in ID_Backups for restore.
-#   - NEW targets over v0.1: state.vscdb auth-secrets scrub (key list verified
-#     live on 2026-09-12), os_crypt rotation, Preferences device_id_salt,
-#     SharedStorage, Trust Tokens, Crashpad, logs, stale .backup deletion,
-#     old ID_Backups purge, watchdog re-verify.
+# Multi-root rebuild of reset_windsurf_windows-v0.2.ps1 for the rebrand:
+#   - The OTA update renamed the product: Windows process is now
+#     Devin.exe / Devin Helper*, windsurf.com redirects to devin.ai, and
+#     post-update installs can carry BOTH data roots side by side:
+#     %APPDATA%\devin (new) and %APPDATA%\Windsurf (legacy).
+#   - v0.3 auto-detects every existing root under %APPDATA% (Devin, Windsurf)
+#     and runs the full identity sequence against EACH one in a single pass.
+#   - New targets over v0.2 (verified live on 2026-09-21 against
+#     %APPDATA%\devin): credentials.toml (windsurf_api_key auth) deletion,
+#     config.json devin.org_id blanking, cli\installation_id regeneration,
+#     .devin\argv.json crash-reporter-id scrub, extended state.vscdb secret
+#     patterns (%cachedPlanInfoData:user-% + devin-named candidates), and an
+#     extended cache sweep (CachedData, CachedProfilesData, CachedExtensionVSIXs,
+#     CachedConfigurations, DawnGraphiteCache, DawnWebGPUCache, Shared Dictionary).
+#   - Verified NON-targets (never touched): %USERPROFILE%\.devin-shared
+#     (sharedStorage state.vscdb holds UI markers only),
+#     %LOCALAPPDATA%\devin (CLI binaries + is_zdr flag, no identity),
+#     WebStorage + IndexedDB (unknown contents, possible chat data).
 #
 # PRESERVATION (chat history + workspaces are never wiped):
 #   - chat.ChatSessionStore.index + all Cascade/chat keys: never touched.
@@ -21,6 +27,7 @@
 #     stale .backup sidecars are never deleted.
 #   - Third-party secrets (mcp_token_github, other extensions' secret://
 #     entries, github-authentication): never touched.
+#   - .devin\.windsurf extensions/plans/worktrees + mcp_config.json: untouched.
 #
 # SCOPE ISOLATION: no MAC / hostname / registry-source steps here. Those belong
 # strictly to change_device_id.ps1.
@@ -29,8 +36,8 @@
 # RandomNumberGenerator via .GetBytes() only.
 #
 # Usage (Windows 10, PowerShell 5.1 or 7 -- just double-click or run):
-#   powershell -ExecutionPolicy Bypass -File reset_windsurf_windows-v0.2.ps1
-# Prerequisite: close Windsurf first (the script also force-kills it).
+#   powershell -ExecutionPolicy Bypass -File reset_devin_windows-v0.3.ps1
+# Prerequisite: close Windsurf / Devin Desktop first (the script force-kills both).
 # Requirement: Python (python or python3) for SQLite writes.
 
 . "$PSScriptRoot\identity_utils.ps1"
@@ -38,24 +45,24 @@
 $ErrorActionPreference = "Stop"
 
 # --- Self-elevation -----------------------------------------------------------
-$windsurfIsAdmin = [Security.Principal.WindowsPrincipal]::new(
+$devinIsAdmin = [Security.Principal.WindowsPrincipal]::new(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $windsurfIsAdmin) {
-    $windsurfLogOut = "$env:TEMP\windsurf_v0.2_result.log"
-    $windsurfScript = $MyInvocation.MyCommand.Path
-    $windsurfArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$windsurfScript`" *> `"$windsurfLogOut`""
-    Start-Process powershell -Verb RunAs -ArgumentList $windsurfArgs -WindowStyle Normal -Wait
-    if (Test-Path -LiteralPath $windsurfLogOut) {
-        Get-Content -LiteralPath $windsurfLogOut
+if (-not $devinIsAdmin) {
+    $devinLogOut = "$env:TEMP\devin_v0.3_result.log"
+    $devinScript = $MyInvocation.MyCommand.Path
+    $devinArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$devinScript`" *> `"$devinLogOut`""
+    Start-Process powershell -Verb RunAs -ArgumentList $devinArgs -WindowStyle Normal -Wait
+    if (Test-Path -LiteralPath $devinLogOut) {
+        Get-Content -LiteralPath $devinLogOut
     }
-    if (Test-Path -LiteralPath "$env:TEMP\windsurf_v0.2_done.txt") {
-        Get-Content -LiteralPath "$env:TEMP\windsurf_v0.2_done.txt"
+    if (Test-Path -LiteralPath "$env:TEMP\devin_v0.3_done.txt") {
+        Get-Content -LiteralPath "$env:TEMP\devin_v0.3_done.txt"
     }
     exit
 }
 
-Write-GhostBanner -Target "Windsurf Identity Reset" -Version "0.2"
+Write-GhostBanner -Target "Windsurf/Devin Identity Reset" -Version "0.3"
 
 # === Local helpers (Windsurf pattern, no-BOM throughout) ======================
 
@@ -185,11 +192,17 @@ function Invoke-WorkspaceSqliteUpdate {
     }
 }
 
-# DELETE Windsurf account secrets from state.vscdb ItemTable and verify
-# survivors are zero via read-only reopen. Key list verified live on
-# 2026-09-12 against %APPDATA%\Windsurf\User\globalStorage\state.vscdb.
-# chat.ChatSessionStore.index and third-party extension secrets are never
-# touched. Underscore in LIKE patterns is escaped (it is a wildcard).
+# DELETE account secrets from state.vscdb ItemTable and verify survivors are
+# zero via read-only reopen. Key list verified live on 2026-09-12 against
+# %APPDATA%\Windsurf and on 2026-09-21 against %APPDATA%\devin: even inside
+# the rebranded root the app still writes WINDSURF-named auth keys
+# (codeium.windsurf-windsurf_auth, windsurf_auth-<user>, windsurfAuthStatus),
+# so the windsurf patterns stay primary; the devin-named entries are defensive
+# candidates (delete-if-exists is a no-op when absent). The v0.3 addition
+# %cachedPlanInfoData:user-% covers windsurf.reactSettings.cachedPlanInfoData
+# keyed by a per-user account hex. chat.ChatSessionStore.index and third-party
+# extension secrets are never touched. Underscore in LIKE patterns is escaped
+# (it is a wildcard).
 function Clear-WindsurfSecrets {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -229,10 +242,15 @@ exact_keys = [
     "codeium.windsurf-windsurf_auth",
     "windsurfAuthStatus",
     "windsurf.settings.cachedPlanInfo",
+    "devinAuthStatus",
+    "devin.settings.cachedPlanInfo",
 ]
 like_patterns = [
     "windsurf\\_auth-%",
     "%windsurf\\_auth%",
+    "%cachedPlanInfoData:user-%",
+    "devin\\_auth-%",
+    "%devin\\_auth%",
 ]
 
 deleted = []
@@ -303,10 +321,79 @@ print(json.dumps({"deleted": deleted, "survivors": survivors}))
     }
 }
 
+# NEW in v0.3: %APPDATA%\devin\config.json carries a devin.org_id binding
+# (verified live 2026-09-21). Blank it (never delete the file -- it also holds
+# theme/shell prefs) so the next launch re-resolves the org against the new
+# identity. No-BOM write.
+function Clear-AppOrgBinding {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "devin.org_id" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] config.json not present: $Path" -ForegroundColor Yellow
+        return $true
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "devin.org_id" -Before "present" -After "parse-failed" -Ok $false
+        Write-Host "    [FAILED] could not parse config.json: $Path" -ForegroundColor Red
+        return $false
+    }
+
+    $beforeValue = $null
+    if ((Test-ObjectProperty -Object $content -Name "devin") -and (Test-ObjectProperty -Object $content.devin -Name "org_id")) {
+        $beforeValue = $content.devin.org_id
+    }
+
+    if ([string]::IsNullOrEmpty("$beforeValue")) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "devin.org_id" -Before "absent-or-empty" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] no org binding present: $Path" -ForegroundColor Yellow
+        return $true
+    }
+
+    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+    if ($backupPath) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    }
+
+    $content.devin.org_id = ""
+    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+
+    try {
+        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $afterValue = $verified.devin.org_id
+        $ok = [string]::IsNullOrEmpty("$afterValue")
+        Add-AuditEntry -Audit $Audit -File $Path -Key "devin.org_id" -Before $beforeValue -After $afterValue -Ok $ok
+        if ($ok) {
+            Write-Host "    [OK] devin.org_id blanked: $Path" -ForegroundColor Green
+        }
+        else {
+            Write-Host "    [FAILED] devin.org_id still present: $Path" -ForegroundColor Red
+        }
+        return $ok
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "devin.org_id" -Before $beforeValue -After "verify-failed" -Ok $false
+        Write-Host "    [FAILED] could not re-read config.json after write: $Path" -ForegroundColor Red
+        return $false
+    }
+}
+
 # argv.json is JSONC (comments allowed). Regex-replace just the
 # crash-reporter-id value and the leaked username in user-data-dir, preserving
 # every comment and other field verbatim. No-BOM write.
-function Update-WindsurfArgvJson {
+# v0.3: used for both %USERPROFILE%\.windsurf\argv.json and
+# %USERPROFILE%\.devin\argv.json (both carry crash-reporter-id post-rebrand).
+function Update-ArgvJsonIdentity {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$NewCrashReporterId,
@@ -648,17 +735,23 @@ function Set-DeviceIdSalt {
     }
 }
 
-# Aggressive tree-kill for Windsurf + Codeium backend + extension helpers.
-# Requires 2 consecutive clean checks; hard-fails the run when unkillable.
-function Stop-WindsurfProcessesAggressive {
+# Aggressive tree-kill for Devin Desktop + Windsurf + Codeium backend +
+# extension helpers. Requires 2 consecutive clean checks; hard-fails the run
+# when unkillable. Both brand names are killed because post-rebrand installs
+# may still run legacy Windsurf processes (or both generations side by side).
+function Stop-AppFamilyProcessesAggressive {
     param(
         [int]$MaxAttempts = 10,
         [int]$DelayMs = 1500
     )
 
-    Write-Host "[*] Terminating all Windsurf/Codeium + extension-helper processes (aggressive tree-kill)..." -ForegroundColor Cyan
+    Write-Host "[*] Terminating all Devin/Windsurf/Codeium + extension-helper processes (aggressive tree-kill)..." -ForegroundColor Cyan
 
     $processesToKill = @(
+        "Devin",
+        "Devin Helper",
+        "Devin Helper (GPU)",
+        "Devin Helper (Renderer)",
         "Windsurf",
         "Windsurf Helper",
         "Windsurf Helper (GPU)",
@@ -681,19 +774,20 @@ function Stop-WindsurfProcessesAggressive {
 
         Start-Sleep -Milliseconds $DelayMs
 
+        $devinRemaining = @(Get-Process -Name "Devin*" -ErrorAction SilentlyContinue)
         $windsurfRemaining = @(Get-Process -Name "Windsurf*" -ErrorAction SilentlyContinue)
         $codeiumRemaining = @(Get-Process -Name "codeium*" -ErrorAction SilentlyContinue)
         $helperRemaining = 0
         foreach ($helperName in @("kilo", "cline", "roo", "blackbox")) {
             $helperRemaining += @(Get-Process -Name $helperName -ErrorAction SilentlyContinue).Count
         }
-        $count = $windsurfRemaining.Count + $codeiumRemaining.Count + $helperRemaining
+        $count = $devinRemaining.Count + $windsurfRemaining.Count + $codeiumRemaining.Count + $helperRemaining
         Write-Host "    attempt $attempt/$MaxAttempts - remaining processes: $count" -ForegroundColor DarkGray
 
         if ($count -eq 0) {
             $consecutiveClean++
             if ($consecutiveClean -ge 2) {
-                Write-Host "[OK] all Windsurf/Codeium + extension-helper processes terminated (confirmed across 2 checks)" -ForegroundColor Green
+                Write-Host "[OK] all Devin/Windsurf/Codeium + extension-helper processes terminated (confirmed across 2 checks)" -ForegroundColor Green
                 return $true
             }
         }
@@ -703,6 +797,9 @@ function Stop-WindsurfProcessesAggressive {
     }
 
     Write-Host "[FAILED] processes still running after $MaxAttempts attempts. Aborting reset." -ForegroundColor Red
+    foreach ($p in @(Get-Process -Name "Devin*" -ErrorAction SilentlyContinue)) {
+        Write-Host ("    Devin PID {0}: {1}" -f $p.Id, $p.Path) -ForegroundColor Red
+    }
     foreach ($p in @(Get-Process -Name "Windsurf*" -ErrorAction SilentlyContinue)) {
         Write-Host ("    Windsurf PID {0}: {1}" -f $p.Id, $p.Path) -ForegroundColor Red
     }
@@ -798,41 +895,379 @@ function Get-StepAuditStatus {
     return @{ Success = ($failed.Count -eq 0); FailedEntries = $failed }
 }
 
+# === Per-root reset (steps [1/17]..[14/17] run against EACH detected root) ====
+
+# Runs the full root-local identity sequence against one %APPDATA% data root.
+# Each root gets its OWN ID_Backups\<ts> dir (self-contained restore, no
+# label collisions between roots). Counters/audit/actions flow back through
+# refs. All step bodies are carried over from v0.2 unchanged except where
+# noted (step renumbering, extended cache list, new step 13).
+function Invoke-RootReset {
+    param(
+        [Parameter(Mandatory = $true)][string]$AppName,
+        [Parameter(Mandatory = $true)][string]$RootPath,
+        [Parameter(Mandatory = $true)][hashtable]$Ids,
+        [Parameter(Mandatory = $true)][hashtable]$StorageUpdates,
+        [Parameter(Mandatory = $true)][string]$NewSalt,
+        [Parameter(Mandatory = $true)][string]$NewCrashReporterId,
+        [Parameter(Mandatory = $true)][string]$Timestamp,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions,
+        [Parameter(Mandatory = $true)][ref]$PassCount,
+        [Parameter(Mandatory = $true)][ref]$FailCount
+    )
+
+    $root = $RootPath
+    $machineIdPath = Join-Path $root "machineid"
+    $storagePath = Join-Path $root "User\globalStorage\storage.json"
+    $sqlitePath = Join-Path $root "User\globalStorage\state.vscdb"
+    $workspaceStorageRoot = Join-Path $root "User\workspaceStorage"
+    $rootBackupRoot = Join-Path $root ("ID_Backups\" + $Timestamp)
+    New-Item -Path $rootBackupRoot -ItemType Directory -Force | Out-Null
+
+    Write-Host "`n########## Root: $AppName ($root) ##########" -ForegroundColor Magenta
+    Write-Host "Root backup: $rootBackupRoot" -ForegroundColor Gray
+
+    # --- [1/17] machineid ---
+    Write-Host "[1/17] [$AppName] Updating machineid..." -ForegroundColor Cyan
+    if (Set-VerifiedMachineIdFile -Path $machineIdPath -Value $Ids.devDeviceId -BackupRoot $rootBackupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $machineIdPath) -Audit $Audit -Actions $Actions) {
+        Write-Host "[OK] machineid verified" -ForegroundColor Green
+        $PassCount.Value++
+    }
+    else {
+        Write-Host "[FAILED] machineid verification failed" -ForegroundColor Red
+        $FailCount.Value++
+    }
+
+    # --- [2/17] storage.json ---
+    Write-Host "[2/17] [$AppName] Updating storage.json..." -ForegroundColor Cyan
+    if (Set-JsonIdentity -Path $storagePath -Updates $StorageUpdates -Audit $Audit -BackupRoot $rootBackupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $storagePath) -Actions $Actions) {
+        Write-Host "[OK] storage.json verified" -ForegroundColor Green
+        $PassCount.Value++
+    }
+    else {
+        Write-Host "[FAILED] storage.json verification failed" -ForegroundColor Red
+        $FailCount.Value++
+    }
+
+    # --- [3/17] state.vscdb serviceMachineId ---
+    Write-Host "[3/17] [$AppName] Updating global state.vscdb (serviceMachineId)..." -ForegroundColor Cyan
+    if (Set-SqliteKeys -Path $sqlitePath -Updates @{ "storage.serviceMachineId" = $Ids.devDeviceId } -Audit $Audit -BackupRoot $rootBackupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $sqlitePath) -Actions $Actions) {
+        Write-Host "[OK] global state.vscdb verified" -ForegroundColor Green
+        $PassCount.Value++
+    }
+    else {
+        Write-Host "[FAILED] global state.vscdb verification failed" -ForegroundColor Red
+        $FailCount.Value++
+    }
+
+    # --- [4/17] state.vscdb auth secrets DELETE ---
+    Write-Host "[4/17] [$AppName] Clearing global state.vscdb auth secrets..." -ForegroundColor Cyan
+    if (Clear-WindsurfSecrets -Path $sqlitePath -BackupRoot $rootBackupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $sqlitePath) -Audit $Audit -Actions $Actions) {
+        $PassCount.Value++
+    }
+    else {
+        $FailCount.Value++
+    }
+
+    # --- [5/17] stale state.vscdb.backup deletion ---
+    Write-Host "[5/17] [$AppName] Deleting stale state.vscdb.backup..." -ForegroundColor Cyan
+    if (Remove-VerifiedFileNoBackup -Path (Join-Path $root "User\globalStorage\state.vscdb.backup") -AuditKey "state.vscdb.backup" -Audit $Audit) {
+        $PassCount.Value++
+    }
+    else {
+        $FailCount.Value++
+    }
+
+    # --- [6/17] Preferences salt + Local State os_crypt + username scrub ---
+    # Username scrub runs LAST via raw text so the absence check covers the
+    # final file content after the JSON mutations above.
+    Write-Host "[6/17] [$AppName] Updating Preferences/Local State (salt + os_crypt + username scrub)..." -ForegroundColor Cyan
+    $stepFailed = $false
+    if (-not (Set-DeviceIdSalt -Path (Join-Path $root "Preferences") -NewSalt $NewSalt -BackupRoot $rootBackupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath (Join-Path $root "Preferences")) -Audit $Audit -Actions $Actions)) {
+        $stepFailed = $true
+    }
+    if (-not (Remove-OsCryptEncryptedKey -Path (Join-Path $root "Local State") -BackupRoot $rootBackupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath (Join-Path $root "Local State")) -Audit $Audit -Actions $Actions)) {
+        $stepFailed = $true
+    }
+    foreach ($scrubPath in @((Join-Path $root "Preferences"), (Join-Path $root "Local State"))) {
+        if (-not (Set-UsernameScrubbedFile -Path $scrubPath -Username $env:USERNAME -Replacement "RESET" -BackupRoot $rootBackupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $scrubPath) -Audit $Audit -Actions $Actions)) {
+            $stepFailed = $true
+        }
+    }
+    if ($stepFailed) {
+        Write-Host "[FAILED] Preferences/Local State step had failures" -ForegroundColor Red
+        $FailCount.Value++
+    }
+    else {
+        $PassCount.Value++
+    }
+
+    # --- [7/17] Cookies + transport state (delete) ---
+    Write-Host "[7/17] [$AppName] Clearing Cookies + transport state..." -ForegroundColor Cyan
+    $auditStart = $Audit.Value.Count
+    $cookieActions = Clear-BinaryIdentityStore -Paths @(
+        (Join-Path $root "Network\Cookies"),
+        (Join-Path $root "Network\Cookies-journal"),
+        (Join-Path $root "Network\Network Persistent State"),
+        (Join-Path $root "Network\TransportSecurity")
+    ) -Action "delete" -BackupRoot $rootBackupRoot -Audit $Audit -RootPath $root
+    $Actions.Value += @($cookieActions)
+    $status = Get-StepAuditStatus -Audit $Audit -StartIndex $auditStart -Path $root
+    if ($status.Success) {
+        Write-Host "[OK] Cookies + transport state cleared" -ForegroundColor Green
+        $PassCount.Value++
+    }
+    else {
+        Write-Host "[FAILED] Cookies + transport state had failures" -ForegroundColor Red
+        $FailCount.Value++
+    }
+
+    # --- [8/17] DIPS stores (delete) ---
+    Write-Host "[8/17] [$AppName] Clearing DIPS stores..." -ForegroundColor Cyan
+    $auditStart = $Audit.Value.Count
+    $dipsActions = Clear-BinaryIdentityStore -Paths @((Join-Path $root "DIPS"), (Join-Path $root "DIPS-wal")) -Action "delete" -BackupRoot $rootBackupRoot -Audit $Audit -RootPath $root
+    $Actions.Value += @($dipsActions)
+    $status = Get-StepAuditStatus -Audit $Audit -StartIndex $auditStart -Path $root
+    if ($status.Success) {
+        Write-Host "[OK] DIPS stores cleared" -ForegroundColor Green
+        $PassCount.Value++
+    }
+    else {
+        Write-Host "[FAILED] DIPS stores had failures" -ForegroundColor Red
+        $FailCount.Value++
+    }
+
+    # --- [9/17] SharedStorage + Trust Tokens ---
+    Write-Host "[9/17] [$AppName] Clearing SharedStorage + Trust Tokens..." -ForegroundColor Cyan
+    $auditStart = $Audit.Value.Count
+    $sharedActions = Clear-BinaryIdentityStore -Paths @(
+        (Join-Path $root "SharedStorage"),
+        (Join-Path $root "SharedStorage-wal"),
+        (Join-Path $root "Network\Trust Tokens"),
+        (Join-Path $root "Network\Trust Tokens-journal")
+    ) -Action "delete" -BackupRoot $rootBackupRoot -Audit $Audit -RootPath $root
+    $Actions.Value += @($sharedActions)
+    $status = Get-StepAuditStatus -Audit $Audit -StartIndex $auditStart -Path $root
+    if ($status.Success) {
+        Write-Host "[OK] SharedStorage + Trust Tokens cleared" -ForegroundColor Green
+        $PassCount.Value++
+    }
+    else {
+        Write-Host "[FAILED] SharedStorage + Trust Tokens had failures" -ForegroundColor Red
+        $FailCount.Value++
+    }
+
+    # --- [10/17] cache dirs + Session Storage (per-file; chat stores preserved) ---
+    # v0.3 extends the sweep with the rebrand-era cache dirs verified live on
+    # 2026-09-21 (CachedData / CachedProfilesData / CachedExtensionVSIXs /
+    # CachedConfigurations / DawnGraphiteCache / DawnWebGPUCache / Shared
+    # Dictionary). WebStorage + IndexedDB are deliberately NOT touched
+    # (unknown contents, possible chat data).
+    Write-Host "[10/17] [$AppName] Clearing cache directories + Session Storage..." -ForegroundColor Cyan
+    $auditStart = $Audit.Value.Count
+    foreach ($relative in @(
+            "Cache\Cache_Data", "Code Cache", "GPUCache", "blob_storage", "Service Worker", "Session Storage",
+            "CachedData", "CachedProfilesData", "CachedExtensionVSIXs", "CachedConfigurations",
+            "DawnGraphiteCache", "DawnWebGPUCache", "Shared Dictionary"
+        )) {
+        $fullPath = Join-Path $root $relative
+        if (Test-Path -LiteralPath $fullPath) {
+            $null = Clear-TreeFilesIndividually -Path $fullPath -BackupRoot $rootBackupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $fullPath) -Audit $Audit -Actions $Actions
+        }
+        else {
+            Add-AuditEntry -Audit $Audit -File $fullPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+        }
+    }
+    foreach ($preservedRelative in @("Local Storage\leveldb", "Backups")) {
+        $preservedPath = Join-Path $root $preservedRelative
+        if (Test-Path -LiteralPath $preservedPath) {
+            Write-Host "[INFO] Preserving $preservedRelative" -ForegroundColor Cyan
+            Add-AuditEntry -Audit $Audit -File $preservedPath -Key "chat-store" -Before "present" -After "preserved-for-chat" -Ok $true
+        }
+        else {
+            Add-AuditEntry -Audit $Audit -File $preservedPath -Key "chat-store" -Before "missing" -After "skipped" -Ok $true
+        }
+    }
+    $status = Get-StepAuditStatus -Audit $Audit -StartIndex $auditStart -Path $root
+    if ($status.Success) {
+        Write-Host "[OK] cache directories cleared" -ForegroundColor Green
+        $PassCount.Value++
+    }
+    else {
+        Write-Host "[FAILED] cache directories had failures" -ForegroundColor Red
+        $FailCount.Value++
+    }
+
+    # --- [11/17] Crashpad + logs ---
+    Write-Host "[11/17] [$AppName] Clearing Crashpad + logs..." -ForegroundColor Cyan
+    $auditStart = $Audit.Value.Count
+    foreach ($relative in @("Crashpad", "logs")) {
+        $fullPath = Join-Path $root $relative
+        if (Test-Path -LiteralPath $fullPath) {
+            $null = Clear-TreeFilesIndividually -Path $fullPath -BackupRoot $rootBackupRoot -BackupLabel $relative -Audit $Audit -Actions $Actions
+        }
+        else {
+            Add-AuditEntry -Audit $Audit -File $fullPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+        }
+    }
+    $status = Get-StepAuditStatus -Audit $Audit -StartIndex $auditStart -Path $root
+    if ($status.Success) {
+        Write-Host "[OK] Crashpad + logs cleared" -ForegroundColor Green
+        $PassCount.Value++
+    }
+    else {
+        Write-Host "[FAILED] Crashpad + logs had failures" -ForegroundColor Red
+        $FailCount.Value++
+    }
+
+    # --- [12/17] workspace UPSERT-only (never delete workspace files) ---
+    Write-Host "[12/17] [$AppName] Updating workspace state.vscdb files (UPSERT only)..." -ForegroundColor Cyan
+    $workspaceDbPaths = @()
+    if (Test-Path -LiteralPath $workspaceStorageRoot) {
+        $workspaceDbPaths = Get-ChildItem -LiteralPath $workspaceStorageRoot -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName "state.vscdb" } |
+            Where-Object { Test-Path -LiteralPath $_ }
+    }
+
+    if ($workspaceDbPaths.Count -eq 0) {
+        Write-Host "[SKIP] no workspace state.vscdb files found" -ForegroundColor Yellow
+        Add-AuditEntry -Audit $Audit -File $workspaceStorageRoot -Key "workspaceStorage" -Before "none" -After "skipped" -Ok $true
+        $PassCount.Value++
+    }
+    else {
+        $workspaceFailures = 0
+        foreach ($workspaceDbPath in $workspaceDbPaths) {
+            Invoke-WorkspaceSqliteUpdate -WorkspaceDbPath $workspaceDbPath -DeviceId $Ids.devDeviceId -RootPath $root -BackupRoot $rootBackupRoot -Audit $Audit -Actions $Actions
+            if ($Audit.Value.Count -gt 0) {
+                $lastAuditEntry = $Audit.Value[-1]
+                if (-not $lastAuditEntry.ok) {
+                    $workspaceFailures++
+                }
+            }
+            else {
+                $workspaceFailures++
+            }
+        }
+        $workspaceBackupCount = @(Get-ChildItem -LiteralPath $workspaceStorageRoot -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName "state.vscdb.backup" } |
+            Where-Object { Test-Path -LiteralPath $_ }).Count
+        Add-AuditEntry -Audit $Audit -File $workspaceStorageRoot -Key "workspace-backups-preserved" -Before ("present=" + $workspaceBackupCount) -After "preserved-per-policy" -Ok $true
+
+        if ($workspaceFailures -eq 0) {
+            Write-Host "[OK] workspace UPSERT complete (no workspace files deleted)" -ForegroundColor Green
+            $PassCount.Value++
+        }
+        else {
+            Write-Host "[FAILED] workspace UPSERT had failures" -ForegroundColor Red
+            $FailCount.Value++
+        }
+    }
+
+    # --- [13/17] app-specific files (NEW in v0.3) ---
+    # cli\installation_id: the Devin CLI keeps its own install GUID under the
+    #   data root (verified live 2026-09-21). Regenerated only when present.
+    # credentials.toml: holds windsurf_api_key (the shared auth token). Backed
+    #   up, then deleted, so no old-bound credential survives the reset.
+    # config.json: devin.org_id blanked via Clear-AppOrgBinding (file kept).
+    Write-Host "[13/17] [$AppName] Resetting app-specific files (cli installation_id / credentials.toml / config.json)..." -ForegroundColor Cyan
+    $stepFailed = $false
+
+    $cliInstallationIdPath = Join-Path $root "cli\installation_id"
+    if (Test-Path -LiteralPath $cliInstallationIdPath) {
+        $newCliInstallationId = ([guid]::NewGuid().ToString()).ToLowerInvariant()
+        if (-not (Set-VerifiedMachineIdFile -Path $cliInstallationIdPath -Value $newCliInstallationId -BackupRoot $rootBackupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $cliInstallationIdPath) -Audit $Audit -Actions $Actions)) {
+            $stepFailed = $true
+        }
+    }
+    else {
+        Write-Host "    [SKIP] cli\installation_id not present: $cliInstallationIdPath" -ForegroundColor Yellow
+        Add-AuditEntry -Audit $Audit -File $cliInstallationIdPath -Key "installation_id" -Before "missing" -After "skipped" -Ok $true
+    }
+
+    $credentialsPath = Join-Path $root "credentials.toml"
+    $auditStart = $Audit.Value.Count
+    $credActions = Clear-BinaryIdentityStore -Paths @($credentialsPath) -Action "delete" -BackupRoot $rootBackupRoot -Audit $Audit -RootPath $root
+    $Actions.Value += @($credActions)
+    $credStatus = Get-StepAuditStatus -Audit $Audit -StartIndex $auditStart -Path $root
+    if (-not $credStatus.Success) {
+        $stepFailed = $true
+    }
+
+    if (-not (Clear-AppOrgBinding -Path (Join-Path $root "config.json") -BackupRoot $rootBackupRoot -BackupLabel "config.json" -Audit $Audit -Actions $Actions)) {
+        $stepFailed = $true
+    }
+
+    if ($stepFailed) {
+        Write-Host "[FAILED] app-specific files step had failures" -ForegroundColor Red
+        $FailCount.Value++
+    }
+    else {
+        $PassCount.Value++
+    }
+
+    # --- [14/17] Old ID_Backups purge + watchdog re-verify (this root) ---
+    Write-Host "[14/17] [$AppName] Purging old ID_Backups + watchdog re-verify..." -ForegroundColor Cyan
+    Invoke-OldIdBackupsPurge -BackupRoot $rootBackupRoot -IdBackupsRoot (Join-Path $root "ID_Backups") -Audit $Audit
+    $watchdogCoreFiles = @(
+        (Join-Path $root "Network\Cookies"),
+        (Join-Path $root "DIPS"),
+        (Join-Path $root "SharedStorage")
+    )
+    Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit $Audit
+    $PassCount.Value++
+}
+
 # === Main =====================================================================
 
 Assert-Administrator
 
-$app = "Windsurf"
+# Windsurf rebranded to Devin Desktop (2026-06-02, over-the-air). The data
+# root under %APPDATA% may exist under either (or both) names; NTFS is
+# case-insensitive so a lowercase "devin" on disk matches the "Devin" probe,
+# and Get-Item resolves the on-disk casing for accurate audit paths.
+$appNames = @("Devin", "Windsurf")
+$roots = @()
+foreach ($appName in $appNames) {
+    $candidateRoot = Join-Path $env:APPDATA $appName
+    if (Test-Path -LiteralPath $candidateRoot) {
+        $resolvedRoot = Get-Item -LiteralPath $candidateRoot
+        $roots += [pscustomobject]@{ Name = $resolvedRoot.Name; Path = $resolvedRoot.FullName }
+    }
+}
+
+if ($roots.Count -eq 0) {
+    Write-Host "Windsurf / Devin Desktop installation not found. Checked:" -ForegroundColor Red
+    foreach ($appName in $appNames) {
+        Write-Host "    $(Join-Path $env:APPDATA $appName)" -ForegroundColor Red
+    }
+    exit 1
+}
+
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$root = Join-Path $env:APPDATA $app
-$backupRoot = Join-Path $root ("ID_Backups\" + $timestamp)
-$idBackupsRoot = Join-Path $root "ID_Backups"
-$machineIdPath = Join-Path $root "machineid"
-$storagePath = Join-Path $root "User\globalStorage\storage.json"
-$sqlitePath = Join-Path $root "User\globalStorage\state.vscdb"
-$workspaceStorageRoot = Join-Path $root "User\workspaceStorage"
+$primaryRoot = $roots[0].Path
+$backupRoot = Join-Path $primaryRoot ("ID_Backups\" + $timestamp)
 $windsurfHome = Join-Path $env:USERPROFILE ".windsurf"
+$devinHome = Join-Path $env:USERPROFILE ".devin"
 $codeiumHome = Join-Path $env:USERPROFILE ".codeium"
-$argvPath = Join-Path $windsurfHome "argv.json"
-$codeiumConfigPath = Join-Path $codeiumHome "config.json"
+$windsurfArgvPath = Join-Path $windsurfHome "argv.json"
+$devinArgvPath = Join-Path $devinHome "argv.json"
 $installationIdPath = Join-Path $windsurfHome "installation_id"
+$codeiumConfigPath = Join-Path $codeiumHome "config.json"
 $audit = @()
 $actions = @()
 $ids = New-IdentitySet
 
-if (-not (Test-Path -LiteralPath $root)) {
-    Write-Host "Windsurf installation not found at: $root" -ForegroundColor Red
-    exit 1
-}
-
 New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
 
-Write-Host "=== Windsurf Identity Reset v0.2 ===" -ForegroundColor Cyan
-Write-Host "Root: $root" -ForegroundColor Gray
+Write-Host "=== Windsurf/Devin Identity Reset v0.3 ===" -ForegroundColor Cyan
+foreach ($rootEntry in $roots) {
+    Write-Host "Root [$($rootEntry.Name)]: $($rootEntry.Path)" -ForegroundColor Gray
+}
 Write-Host "Backup: $backupRoot" -ForegroundColor Gray
 Write-Host "Policy: chat history + workspaces preserved; no MAC/hostname/registry steps" -ForegroundColor Gray
 
-if (-not (Stop-WindsurfProcessesAggressive)) {
+if (-not (Stop-AppFamilyProcessesAggressive)) {
     exit 1
 }
 
@@ -848,324 +1283,121 @@ $storageUpdates = @{
     "telemetry.devDeviceId"  = $ids.devDeviceId
 }
 
-# --- [1/16] machineid ---
-Write-Host "`n[1/16] Updating machineid..." -ForegroundColor Cyan
-if (Set-VerifiedMachineIdFile -Path $machineIdPath -Value $ids.devDeviceId -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $machineIdPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
-    Write-Host "[OK] machineid verified" -ForegroundColor Green
-    $passCount++
-}
-else {
-    Write-Host "[FAILED] machineid verification failed" -ForegroundColor Red
-    $failCount++
+foreach ($rootEntry in $roots) {
+    Invoke-RootReset -AppName $rootEntry.Name -RootPath $rootEntry.Path -Ids $ids -StorageUpdates $storageUpdates -NewSalt $newSalt -NewCrashReporterId $newCrashReporterId -Timestamp $timestamp -Audit ([ref]$audit) -Actions ([ref]$actions) -PassCount ([ref]$passCount) -FailCount ([ref]$failCount)
 }
 
-# --- [2/16] storage.json ---
-Write-Host "`n[2/16] Updating storage.json..." -ForegroundColor Cyan
-if (Set-JsonIdentity -Path $storagePath -Updates $storageUpdates -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $storagePath) -Actions ([ref]$actions)) {
-    Write-Host "[OK] storage.json verified" -ForegroundColor Green
-    $passCount++
-}
-else {
-    Write-Host "[FAILED] storage.json verification failed" -ForegroundColor Red
-    $failCount++
-}
-
-# --- [3/16] state.vscdb serviceMachineId ---
-Write-Host "`n[3/16] Updating global state.vscdb (serviceMachineId)..." -ForegroundColor Cyan
-if (Set-SqliteKeys -Path $sqlitePath -Updates @{ "storage.serviceMachineId" = $ids.devDeviceId } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $sqlitePath) -Actions ([ref]$actions)) {
-    Write-Host "[OK] global state.vscdb verified" -ForegroundColor Green
-    $passCount++
-}
-else {
-    Write-Host "[FAILED] global state.vscdb verification failed" -ForegroundColor Red
-    $failCount++
-}
-
-# --- [4/16] state.vscdb auth secrets DELETE (NEW in v0.2) ---
-Write-Host "`n[4/16] Clearing global state.vscdb auth secrets..." -ForegroundColor Cyan
-if (Clear-WindsurfSecrets -Path $sqlitePath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $sqlitePath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
-    $passCount++
-}
-else {
-    $failCount++
-}
-
-# --- [5/16] stale state.vscdb.backup deletion (NEW in v0.2) ---
-Write-Host "`n[5/16] Deleting stale state.vscdb.backup..." -ForegroundColor Cyan
-if (Remove-VerifiedFileNoBackup -Path (Join-Path $root "User\globalStorage\state.vscdb.backup") -AuditKey "state.vscdb.backup" -Audit ([ref]$audit)) {
-    $passCount++
-}
-else {
-    $failCount++
-}
-
-# --- [6/16] argv.json crash-reporter-id + user-data-dir scrub (JSONC-safe) ---
-Write-Host "`n[6/16] Updating argv.json (crash-reporter-id)..." -ForegroundColor Cyan
-if (Update-WindsurfArgvJson -Path $argvPath -NewCrashReporterId $newCrashReporterId -Username $env:USERNAME -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $argvPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
-    $passCount++
-}
-else {
-    $failCount++
-}
-
-# --- [7/16] Codeium config.json device_id ---
-Write-Host "`n[7/16] Updating Codeium config.json (device_id)..." -ForegroundColor Cyan
-if (Test-Path -LiteralPath $codeiumConfigPath) {
-    if (Set-JsonIdentity -Path $codeiumConfigPath -Updates @{ "device_id" = $ids.devDeviceId } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $codeiumConfigPath) -Actions ([ref]$actions)) {
-        Write-Host "[OK] Codeium config.json verified" -ForegroundColor Green
-        $passCount++
-    }
-    else {
-        Write-Host "[FAILED] Codeium config.json verification failed" -ForegroundColor Red
-        $failCount++
+# --- [15/17] home dirs: argv.json + .windsurf installation_id + Codeium -------
+Write-Host "`n[15/17] Updating home dirs (argv.json / installation_id / Codeium device_id)..." -ForegroundColor Cyan
+$homeStepFailed = $false
+# Both argv.json variants carry crash-reporter-id post-rebrand (verified live
+# 2026-09-21 in .devin); the handler SKIPs cleanly when a file is absent.
+foreach ($argvPath in @($windsurfArgvPath, $devinArgvPath)) {
+    if (-not (Update-ArgvJsonIdentity -Path $argvPath -NewCrashReporterId $newCrashReporterId -Username $env:USERNAME -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $argvPath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+        $homeStepFailed = $true
     }
 }
-else {
-    Write-Host "[SKIP] Codeium config.json not present: $codeiumConfigPath" -ForegroundColor Yellow
-    Add-AuditEntry -Audit ([ref]$audit) -File $codeiumConfigPath -Key "device_id" -Before "missing" -After "skipped" -Ok $true
-    $passCount++
-}
 
-# --- [8/16] installation_id ---
-Write-Host "`n[8/16] Updating .windsurf\installation_id..." -ForegroundColor Cyan
 if (Test-Path -LiteralPath $installationIdPath) {
     $newInstallationId = ([guid]::NewGuid().ToString()).ToLowerInvariant()
-    if (Set-VerifiedMachineIdFile -Path $installationIdPath -Value $newInstallationId -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $installationIdPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
-        Write-Host "[OK] installation_id verified" -ForegroundColor Green
-        $passCount++
-    }
-    else {
-        Write-Host "[FAILED] installation_id verification failed" -ForegroundColor Red
-        $failCount++
+    if (-not (Set-VerifiedMachineIdFile -Path $installationIdPath -Value $newInstallationId -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $installationIdPath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+        $homeStepFailed = $true
     }
 }
 else {
-    Write-Host "[SKIP] installation_id not present: $installationIdPath" -ForegroundColor Yellow
+    Write-Host "    [SKIP] installation_id not present: $installationIdPath" -ForegroundColor Yellow
     Add-AuditEntry -Audit ([ref]$audit) -File $installationIdPath -Key "installation_id" -Before "missing" -After "skipped" -Ok $true
-    $passCount++
 }
 
-# --- [9/16] Preferences salt + Local State os_crypt + username scrub ---
-# Username scrub runs LAST via raw text so the absence check covers the final
-# file content after the JSON mutations above.
-Write-Host "`n[9/16] Updating Preferences/Local State (salt + os_crypt + username scrub)..." -ForegroundColor Cyan
-$stepFailed = $false
-if (-not (Set-DeviceIdSalt -Path (Join-Path $root "Preferences") -NewSalt $newSalt -BackupRoot $backupRoot -BackupLabel "Preferences" -Audit ([ref]$audit) -Actions ([ref]$actions))) {
-    $stepFailed = $true
-}
-if (-not (Remove-OsCryptEncryptedKey -Path (Join-Path $root "Local State") -BackupRoot $backupRoot -BackupLabel "Local State" -Audit ([ref]$audit) -Actions ([ref]$actions))) {
-    $stepFailed = $true
-}
-foreach ($scrubPath in @((Join-Path $root "Preferences"), (Join-Path $root "Local State"))) {
-    if (-not (Set-UsernameScrubbedFile -Path $scrubPath -Username $env:USERNAME -Replacement "RESET" -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $scrubPath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
-        $stepFailed = $true
+if (Test-Path -LiteralPath $codeiumConfigPath) {
+    if (-not (Set-JsonIdentity -Path $codeiumConfigPath -Updates @{ "device_id" = $ids.devDeviceId } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $codeiumConfigPath) -Actions ([ref]$actions))) {
+        $homeStepFailed = $true
     }
 }
-if ($stepFailed) {
-    Write-Host "[FAILED] Preferences/Local State step had failures" -ForegroundColor Red
+else {
+    Write-Host "    [SKIP] Codeium config.json not present: $codeiumConfigPath" -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $codeiumConfigPath -Key "device_id" -Before "missing" -After "skipped" -Ok $true
+}
+
+if ($homeStepFailed) {
+    Write-Host "[FAILED] home-dir step had failures" -ForegroundColor Red
     $failCount++
 }
 else {
+    Write-Host "[OK] home dirs updated" -ForegroundColor Green
     $passCount++
 }
 
-# --- [10/16] Cookies + transport state (delete; v0.1 renamed) ---
-Write-Host "`n[10/16] Clearing Cookies + transport state..." -ForegroundColor Cyan
+# --- [16/17] %LOCALAPPDATA% updater sweep (NEW in v0.3) ---
+# ONLY the updater cache dirs are deleted. %LOCALAPPDATA%\Programs\<App> is
+# the install dir and %LOCALAPPDATA%\devin holds CLI binaries + a non-identity
+# telemetry flag (is_zdr) -- both are never touched.
+Write-Host "`n[16/17] Sweeping %LOCALAPPDATA% updater dirs (Devin/Windsurf)..." -ForegroundColor Cyan
 $auditStart = $audit.Count
-$cookieActions = Clear-BinaryIdentityStore -Paths @(
-    (Join-Path $root "Network\Cookies"),
-    (Join-Path $root "Network\Cookies-journal"),
-    (Join-Path $root "Network\Network Persistent State"),
-    (Join-Path $root "Network\TransportSecurity")
-) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
-$actions += @($cookieActions)
-$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $root
-if ($status.Success) {
-    Write-Host "[OK] Cookies + transport state cleared" -ForegroundColor Green
-    $passCount++
-}
-else {
-    Write-Host "[FAILED] Cookies + transport state had failures" -ForegroundColor Red
-    $failCount++
-}
-
-# --- [11/16] DIPS stores (delete; v0.1 renamed) ---
-Write-Host "`n[11/16] Clearing DIPS stores..." -ForegroundColor Cyan
-$auditStart = $audit.Count
-$dipsActions = Clear-BinaryIdentityStore -Paths @((Join-Path $root "DIPS"), (Join-Path $root "DIPS-wal")) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
-$actions += @($dipsActions)
-$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $root
-if ($status.Success) {
-    Write-Host "[OK] DIPS stores cleared" -ForegroundColor Green
-    $passCount++
-}
-else {
-    Write-Host "[FAILED] DIPS stores had failures" -ForegroundColor Red
-    $failCount++
-}
-
-# --- [12/16] SharedStorage + Trust Tokens (NEW in v0.2) ---
-Write-Host "`n[12/16] Clearing SharedStorage + Trust Tokens..." -ForegroundColor Cyan
-$auditStart = $audit.Count
-$sharedActions = Clear-BinaryIdentityStore -Paths @(
-    (Join-Path $root "SharedStorage"),
-    (Join-Path $root "SharedStorage-wal"),
-    (Join-Path $root "Network\Trust Tokens"),
-    (Join-Path $root "Network\Trust Tokens-journal")
-) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
-$actions += @($sharedActions)
-$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $root
-if ($status.Success) {
-    Write-Host "[OK] SharedStorage + Trust Tokens cleared" -ForegroundColor Green
-    $passCount++
-}
-else {
-    Write-Host "[FAILED] SharedStorage + Trust Tokens had failures" -ForegroundColor Red
-    $failCount++
-}
-
-# --- [13/16] cache dirs + Session Storage (per-file; chat stores preserved) ---
-Write-Host "`n[13/16] Clearing cache directories + Session Storage..." -ForegroundColor Cyan
-$auditStart = $audit.Count
-foreach ($relative in @("Cache\Cache_Data", "Code Cache", "GPUCache", "blob_storage", "Service Worker", "Session Storage")) {
-    $fullPath = Join-Path $root $relative
-    if (Test-Path -LiteralPath $fullPath) {
-        $null = Clear-TreeFilesIndividually -Path $fullPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $fullPath) -Audit ([ref]$audit) -Actions ([ref]$actions)
+foreach ($updaterDir in @((Join-Path $env:LOCALAPPDATA "Devin-updater"), (Join-Path $env:LOCALAPPDATA "Windsurf-updater"))) {
+    if (Test-Path -LiteralPath $updaterDir) {
+        $null = Clear-TreeFilesIndividually -Path $updaterDir -BackupRoot $backupRoot -BackupLabel (Get-PathBackupLabel -Path $updaterDir) -Audit ([ref]$audit) -Actions ([ref]$actions)
     }
     else {
-        Add-AuditEntry -Audit ([ref]$audit) -File $fullPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+        Add-AuditEntry -Audit ([ref]$audit) -File $updaterDir -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
     }
 }
-foreach ($preservedRelative in @("Local Storage\leveldb", "Backups")) {
-    $preservedPath = Join-Path $root $preservedRelative
-    if (Test-Path -LiteralPath $preservedPath) {
-        Write-Host "[INFO] Preserving $preservedRelative" -ForegroundColor Cyan
-        Add-AuditEntry -Audit ([ref]$audit) -File $preservedPath -Key "chat-store" -Before "present" -After "preserved-for-chat" -Ok $true
-    }
-    else {
-        Add-AuditEntry -Audit ([ref]$audit) -File $preservedPath -Key "chat-store" -Before "missing" -After "skipped" -Ok $true
-    }
-}
-$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $root
-if ($status.Success) {
-    Write-Host "[OK] cache directories cleared" -ForegroundColor Green
+$updaterStatus = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $env:LOCALAPPDATA
+if ($updaterStatus.Success) {
+    Write-Host "[OK] updater sweep complete" -ForegroundColor Green
     $passCount++
 }
 else {
-    Write-Host "[FAILED] cache directories had failures" -ForegroundColor Red
+    Write-Host "[FAILED] updater sweep had failures" -ForegroundColor Red
     $failCount++
 }
 
-# --- [14/16] Crashpad + logs (NEW in v0.2) ---
-Write-Host "`n[14/16] Clearing Crashpad + logs..." -ForegroundColor Cyan
-$auditStart = $audit.Count
-foreach ($relative in @("Crashpad", "logs")) {
-    $fullPath = Join-Path $root $relative
-    if (Test-Path -LiteralPath $fullPath) {
-        $null = Clear-TreeFilesIndividually -Path $fullPath -BackupRoot $backupRoot -BackupLabel $relative -Audit ([ref]$audit) -Actions ([ref]$actions)
-    }
-    else {
-        Add-AuditEntry -Audit ([ref]$audit) -File $fullPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
-    }
-}
-$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $root
-if ($status.Success) {
-    Write-Host "[OK] Crashpad + logs cleared" -ForegroundColor Green
-    $passCount++
-}
-else {
-    Write-Host "[FAILED] Crashpad + logs had failures" -ForegroundColor Red
-    $failCount++
-}
-
-# --- [15/16] workspace UPSERT-only (never delete workspace files) ---
-Write-Host "`n[15/16] Updating workspace state.vscdb files (UPSERT only)..." -ForegroundColor Cyan
-$workspaceDbPaths = @()
-if (Test-Path -LiteralPath $workspaceStorageRoot) {
-    $workspaceDbPaths = Get-ChildItem -LiteralPath $workspaceStorageRoot -Directory -ErrorAction SilentlyContinue |
-        ForEach-Object { Join-Path $_.FullName "state.vscdb" } |
-        Where-Object { Test-Path -LiteralPath $_ }
-}
-
-if ($workspaceDbPaths.Count -eq 0) {
-    Write-Host "[SKIP] no workspace state.vscdb files found" -ForegroundColor Yellow
-    Add-AuditEntry -Audit ([ref]$audit) -File $workspaceStorageRoot -Key "workspaceStorage" -Before "none" -After "skipped" -Ok $true
-    $passCount++
-}
-else {
-    $workspaceFailures = 0
-    foreach ($workspaceDbPath in $workspaceDbPaths) {
-        Invoke-WorkspaceSqliteUpdate -WorkspaceDbPath $workspaceDbPath -DeviceId $ids.devDeviceId -RootPath $root -BackupRoot $backupRoot -Audit ([ref]$audit) -Actions ([ref]$actions)
-        if ($audit.Count -gt 0) {
-            $lastAuditEntry = $audit[-1]
-            if (-not $lastAuditEntry.ok) {
-                $workspaceFailures++
-            }
-        }
-        else {
-            $workspaceFailures++
-        }
-    }
-    $workspaceBackupCount = @(Get-ChildItem -LiteralPath $workspaceStorageRoot -Directory -ErrorAction SilentlyContinue |
-        ForEach-Object { Join-Path $_.FullName "state.vscdb.backup" } |
-        Where-Object { Test-Path -LiteralPath $_ }).Count
-    Add-AuditEntry -Audit ([ref]$audit) -File $workspaceStorageRoot -Key "workspace-backups-preserved" -Before ("present=" + $workspaceBackupCount) -After "preserved-per-policy" -Ok $true
-
-    if ($workspaceFailures -eq 0) {
-        Write-Host "[OK] workspace UPSERT complete (no workspace files deleted)" -ForegroundColor Green
-        $passCount++
-    }
-    else {
-        Write-Host "[FAILED] workspace UPSERT had failures" -ForegroundColor Red
-        $failCount++
-    }
-}
-
-# --- [16/16] Old ID_Backups purge + watchdog re-verify ---
-Write-Host "`n[16/16] Purging old ID_Backups + watchdog re-verify..." -ForegroundColor Cyan
-Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit)
-$watchdogCoreFiles = @(
-    (Join-Path $root "Network\Cookies"),
-    (Join-Path $root "DIPS"),
-    (Join-Path $root "SharedStorage")
-)
-Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit ([ref]$audit)
-$passCount++
-
-# --- Audit + Restore ---
+# --- [17/17] Final probes + combined audit + restore script -------------------
+Write-Host "`n[17/17] Final verification + audit + restore script..." -ForegroundColor Cyan
 $auditPath = Join-Path $backupRoot ("audit_{0}.json" -f $timestamp)
 Write-AuditLog -Audit $audit -Path $auditPath
-$restoreScriptPath = New-RestoreScript -BackupRoot $backupRoot -App $app -Actions $actions
+$restoreScriptPath = New-RestoreScript -BackupRoot $backupRoot -App "Devin-Windsurf" -Actions $actions
 
-$finalJsonOk = $false
-if (Test-Path -LiteralPath $storagePath) {
-    $finalJsonOk = Confirm-JsonValues -Path $storagePath -Expected $storageUpdates
-}
-$finalSqliteAuditEntries = @($audit | Where-Object { $_.file -eq $sqlitePath -and $_.key -eq "storage.serviceMachineId" })
-$finalSqliteOk = ($finalSqliteAuditEntries.Count -gt 0) -and ($finalSqliteAuditEntries[-1].ok -eq $true)
+foreach ($rootEntry in $roots) {
+    $rootStoragePath = Join-Path $rootEntry.Path "User\globalStorage\storage.json"
+    $rootSqlitePath = Join-Path $rootEntry.Path "User\globalStorage\state.vscdb"
 
-if ($finalJsonOk) {
-    Write-Host "[OK] final storage.json probe passed" -ForegroundColor Green
-}
-else {
-    Write-Host "[FAILED] final storage.json probe failed" -ForegroundColor Red
-    $failCount++
-}
+    $finalJsonOk = $false
+    if (Test-Path -LiteralPath $rootStoragePath) {
+        $finalJsonOk = Confirm-JsonValues -Path $rootStoragePath -Expected $storageUpdates
+    }
 
-if ($finalSqliteOk) {
-    Write-Host "[OK] final state.vscdb probe passed" -ForegroundColor Green
-}
-else {
-    Write-Host "[FAILED] final state.vscdb probe failed" -ForegroundColor Red
-    $failCount++
+    $finalSqliteAuditEntries = @($audit | Where-Object { $_.file -eq $rootSqlitePath -and $_.key -eq "storage.serviceMachineId" })
+    $finalSqliteOk = ($finalSqliteAuditEntries.Count -gt 0) -and ($finalSqliteAuditEntries[-1].ok -eq $true)
+
+    if ($finalJsonOk) {
+        Write-Host "[OK] final storage.json probe passed [$($rootEntry.Name)]" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[FAILED] final storage.json probe failed [$($rootEntry.Name)]" -ForegroundColor Red
+        $failCount++
+    }
+
+    if ($finalSqliteOk) {
+        Write-Host "[OK] final state.vscdb probe passed [$($rootEntry.Name)]" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[FAILED] final state.vscdb probe failed [$($rootEntry.Name)]" -ForegroundColor Red
+        $failCount++
+    }
 }
 
 if (-not (Test-Path -LiteralPath $restoreScriptPath) -or ((Get-Item -LiteralPath $restoreScriptPath).Length -le 0)) {
     Write-Host "[FAILED] restore script missing or empty" -ForegroundColor Red
     $failCount++
 }
+else {
+    $passCount++
+}
 
+$rootNamesProcessed = ($roots | ForEach-Object { $_.Name }) -join ", "
 Write-Host "`n=== Summary ===" -ForegroundColor Cyan
+Write-Host "Roots processed: $rootNamesProcessed" -ForegroundColor Gray
 Write-Host "Pass: $passCount" -ForegroundColor Green
 Write-Host "Fail: $failCount" -ForegroundColor Red
 Write-Host "Audit log: $auditPath" -ForegroundColor Gray
@@ -1173,11 +1405,11 @@ Write-Host "Restore script: $restoreScriptPath" -ForegroundColor Gray
 Write-Host "NOTE: workspace .backup sidecars were preserved per policy (they still embed the old device ID)." -ForegroundColor Yellow
 Write-Host "NOTE: change_device_id.ps1 remains the separate, optional system-level step." -ForegroundColor Yellow
 
-[System.IO.File]::WriteAllText("$env:TEMP\windsurf_v0.2_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText("$env:TEMP\devin_v0.3_done.txt", ("Roots: {0} Pass: {1} Fail: {2} Audit: {3}" -f $rootNamesProcessed, $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
 
 if ($failCount -gt 0) {
-    Write-Host "Windsurf reset v0.2 completed with failures. Review $auditPath." -ForegroundColor Red
+    Write-Host "Windsurf/Devin reset v0.3 completed with failures. Review $auditPath." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "Windsurf reset v0.2 completed successfully." -ForegroundColor Green
+Write-Host "Windsurf/Devin reset v0.3 completed successfully." -ForegroundColor Green

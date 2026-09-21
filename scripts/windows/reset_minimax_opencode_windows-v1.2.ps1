@@ -1,0 +1,2063 @@
+# MiniMax Agent / OpenCode Identity Reset v1.2
+#
+# v1.2 changes vs v1.1 (closes the remaining OpenCode fingerprint surfaces
+# found by a ground-truth filesystem audit -- "100% clean like a new device"):
+#   - opencode.updater.tmp-* stale siblings are now deleted (v1.1 only handled
+#     opencode.global.dat.tmp-*; a live install carries opencode.updater.tmp-*).
+#   - DIPS/SharedStorage suffix sweep: DIPS-wal, DIPS-journal, DIPS-shm,
+#     SharedStorage-shm (and any future DIPS*/SharedStorage* sibling at the
+#     profile root) are deleted via prefix sweep, not just the fixed list.
+#   - Runtime locks deleted: lockfile + opencode\locks\ (regenerable; the app
+#     was force-killed in the pre-step so nothing holds them).
+#   - Local State uninstall_metrics node removed (installation_date2 timestamp
+#     fingerprint survived v1.1; Chromium regenerates it on next launch).
+#   - opencode.settings windowIds[] rotated to a fresh GUID and the matching
+#     per-window files (window-state-<uuid>.json, opencode.window.<uuid>.dat)
+#     deleted backup-first (stable cross-reset window fingerprint; the generic
+#     window-state.json geometry file is preserved).
+#   - Preservation audit now explicitly covers default.dat, pnpm-state.json,
+#     .skill-lock.json and the gh\ dir (device-id inside it is rotated, so the
+#     dir entry says so instead of a blanket "preserved").
+#   - Watchdog + final probes extended to the new surfaces (lockfile, DIPS-wal,
+#     updater tmp, uninstall_metrics, windowIds).
+#
+# v1.1 changes vs v1.0 (fixes post-reset
+# "FreeTierError: OpenCode's free tier can only be used from within OpenCode"):
+#   - OpenCode version preflight: the Zen free tier is server-side UA-gated
+#     (only User-Agent opencode/<version> passes) and rejects outdated clients
+#     (1.17.0+ required). The script now detects the installed Desktop/CLI
+#     version BEFORE wiping anything and aborts with update guidance unless
+#     -SkipVersionCheck is passed.
+#   - -KeepLogin switch: skips the auth.json wipe (step 1) so paid/topped-up
+#     Zen logins survive the reset. Default stays wipe-to-{} (forces re-login
+#     to the anonymous tier). A names-only auth probe warns before wiping.
+#   - gh\device-id now gets its OWN fresh GUID (v1.0 reused the .updaterId
+#     value for both files -- fixed).
+#   - Post-reset summary documents the re-login + free-tier gate explicitly.
+#
+# Targets (ground-truth paths verified on this machine):
+#   MiniMax Agent  : %APPDATA%\MiniMax Agent (Electron userData) + %USERPROFILE%\.minimax
+#                    (+ %USERPROFILE%\.mavis which is a JUNCTION to .minimax -- never touched)
+#   OpenCode       : %APPDATA%\ai.opencode.desktop (Electron userData)
+#                    + %USERPROFILE%\.local\share\opencode (CLI home: auth.json, opencode.db)
+#                    + %USERPROFILE%\.config\opencode (preserved)
+#
+# Features (ported from reset_zcode_windows-v1.1.ps1 / reset_qoder_windows-v0.3.ps1):
+#   - Self-elevation to Administrator (auto re-launch, no manual "run as admin")
+#   - Aggressive multi-process kill (MiniMax/OpenCode/mavis, 2 consecutive clean checks)
+#   - Backup-first for every change + self-contained restore script
+#   - Verify-after-write everywhere (never silent-success)
+#   - Watchdog re-verify (slow-shutdown helpers can recreate files post-wipe)
+#   - Old ID_Backups purge (old backups re-embed the OLD fingerprint; keep current run only)
+#   - Reparse-point-safe deletions (never follow junctions/symlinks; .mavis audited only)
+#
+# PRESERVATION GUARANTEES (user content is never wiped):
+#   - .minimax\sessions\, sqlite.db (+shm/wal), memory\, plans\, workspace\, bin\,
+#     mcp\, credentials\mavis\telegram.json, state\, v2\ and every other
+#     non-targeted .minimax item are audited as preserved-per-policy.
+#   - OpenCode drafts.sqlite, window-state.json (generic geometry only),
+#     Local Storage, skills\, pnpm\, .config\opencode\, mcp-auth.json
+#     (third-party) are preserved. The UUID-suffixed per-window files
+#     (window-state-<uuid>.json, opencode.window.<uuid>.dat) are NOT preserved:
+#     they encode the rotated windowIds value and are deleted backup-first.
+#   - .local\share\opencode\opencode.db (+ repos/snapshot/storage/tool-output) is
+#     app-shared storage (3.7 GB) -- preserved by design; NEVER copied to backup.
+#     Isolation of this DB is the app-side fix; documented in the final summary.
+#   - minimax-agent-config.json: ONLY the `user` and `sharedUser` nodes are
+#     removed; `config`, `tokens`, `localStorageConfig` and all other nodes stay.
+#   - system-ca-certs.pem (MiniMax Agent) is a cert bundle, not identity -- preserved.
+#
+# SCOPE ISOLATION: no MAC / hostname / registry-source steps here. Those belong
+# strictly to change_device_id.ps1.
+#
+# ENCODING: every app-data file write uses
+# [System.IO.File]::WriteAllText(..., UTF8Encoding($false)) -- no BOM.
+# Set-Content -Encoding UTF8 emits a BOM under PowerShell 5.1 and corrupts
+# Chromium/Electron JSON parsers.
+#
+# PRIVACY: audit entries for auth files record node NAMES and counts only --
+# token values are never written to any log.
+#
+# PS 5.1 COMPAT: no [CmdletBinding()] (keeps `*>` log redirect working),
+# no ternary, no $Input variable, RandomNumberGenerator via .GetBytes() only.
+#
+# NOTE: no SQLite writes are performed by this script (both apps' SQLite
+# databases are preserved), so Python is NOT required.
+#
+# Usage (Windows 10, PowerShell 5.1 or 7 -- run from OUTSIDE OpenCode/MiniMax):
+#   powershell -ExecutionPolicy Bypass -File reset_minimax_opencode_windows-v1.2.ps1 [-KeepLogin] [-SkipVersionCheck]
+# Prerequisite: close MiniMax Agent + OpenCode first (the script also force-kills them).
+#   -KeepLogin         : preserve .local\share\opencode\auth.json (paid/topped-up
+#                        Zen login survives; default wipes it to {} and forces re-login).
+#   -SkipVersionCheck  : skip the OpenCode >= 1.17.0 preflight (not recommended --
+#                        outdated clients get the free-tier 403 even with fresh IDs).
+
+param(
+    # Note: NO [CmdletBinding()] -- the `*>` log redirect used by self-elevation
+    # breaks when [CmdletBinding()] is present (the `*` binds as a positional
+    # argument). Same pattern as reset_qoderwork_windows-v0.1.ps1.
+    [switch]$KeepLogin,
+    [switch]$SkipVersionCheck
+)
+
+. "$PSScriptRoot\identity_utils.ps1"
+
+$ErrorActionPreference = "Stop"
+
+# --- Self-elevation -----------------------------------------------------------
+# Re-launch elevated with the same script path + switches when not admin.
+$mmoIsAdmin = [Security.Principal.WindowsPrincipal]::new(
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $mmoIsAdmin) {
+    $mmoLogOut = "$env:TEMP\minimax_opencode_v1.2_result.log"
+    $mmoScript = $MyInvocation.MyCommand.Path
+    $mmoSwitchList = @()
+    if ($KeepLogin) { $mmoSwitchList += "-KeepLogin" }
+    if ($SkipVersionCheck) { $mmoSwitchList += "-SkipVersionCheck" }
+    $mmoSwitchString = if ($mmoSwitchList.Count -gt 0) { " " + ($mmoSwitchList -join " ") } else { "" }
+    $mmoArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$mmoScript`"$mmoSwitchString *> `"$mmoLogOut`""
+    Start-Process powershell -Verb RunAs -ArgumentList $mmoArgs -WindowStyle Normal -Wait
+    if (Test-Path -LiteralPath $mmoLogOut) {
+        Get-Content -LiteralPath $mmoLogOut
+    }
+    if (Test-Path -LiteralPath "$env:TEMP\minimax_opencode_v1.2_done.txt") {
+        Get-Content -LiteralPath "$env:TEMP\minimax_opencode_v1.2_done.txt"
+    }
+    exit
+}
+
+Write-GhostBanner -Target "MiniMax/OpenCode Identity Reset" -Version "1.2"
+
+# === Local helpers (mirroring the zcode v1.1 reference pattern) ================
+
+function Add-ActionEntry {
+    param(
+        [Parameter(Mandatory = $true)][ref]$Actions,
+        [Parameter(Mandatory = $true)][string]$OriginalPath,
+        [string]$BackupPath,
+        [ValidateSet("copy", "rename", "delete")][string]$Action = "copy",
+        [string]$RenamedPath
+    )
+
+    if ($null -eq $Actions.Value) {
+        $Actions.Value = @()
+    }
+
+    $Actions.Value += [ordered]@{
+        action       = $Action
+        originalPath = $OriginalPath
+        backupPath   = $BackupPath
+        renamedPath  = $RenamedPath
+    }
+}
+
+function Get-AppRelativeBackupLabel {
+    param(
+        [Parameter(Mandatory = $true)][string]$RootPath,
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    if ($TargetPath.StartsWith($RootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $TargetPath.Substring($RootPath.Length).TrimStart("\")
+    }
+
+    return Get-PathBackupLabel -Path $TargetPath
+}
+
+# %USERPROFILE%-level targets (.minimax, .local\share\opencode) sit outside
+# %APPDATA%. Label them under a USERPROFILE\ subtree so the restore script
+# rehydrates correctly.
+function Get-UserProfileBackupLabel {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    if ($TargetPath.StartsWith($env:USERPROFILE, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return Join-Path "USERPROFILE" ($TargetPath.Substring($env:USERPROFILE.Length).TrimStart("\"))
+    }
+
+    return Get-PathBackupLabel -Path $TargetPath
+}
+
+function Set-VerifiedMachineIdFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Value,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions,
+        [string]$AuditKey = "machineid"
+    )
+
+    $beforeValue = $null
+    if (Test-Path -LiteralPath $Path) {
+        $beforeValue = (Get-Content -LiteralPath $Path -Raw).Trim()
+        $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+        if ($backupPath) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+        }
+    }
+
+    $parent = Split-Path -Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    }
+
+    # No-BOM UTF-8. Set-Content -Encoding UTF8 emits a BOM on PS 5.1.
+    [System.IO.File]::WriteAllText($Path, $Value, (New-Object System.Text.UTF8Encoding $false))
+    $afterValue = (Get-Content -LiteralPath $Path -Raw).Trim()
+    $ok = $afterValue -eq $Value
+    Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $beforeValue -After $afterValue -Ok $ok
+    return $ok
+}
+
+function Confirm-JsonValues {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][hashtable]$Expected
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $false
+    }
+
+    $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    foreach ($key in $Expected.Keys) {
+        $actualValue = if ($null -ne $content.PSObject.Properties[$key]) { $content.$key } else { $null }
+        if ($actualValue -ne $Expected[$key]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+# Wipe EVERY top-level node from an auth JSON file (forces re-login). The audit
+# records node NAMES and a count only -- never token values. Verify-after
+# re-read must show zero properties. PS 5.1 note: ConvertFrom-Json on "{}" can
+# yield $null, which counts as zero nodes.
+function Clear-AllJsonNodes {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "auth-wipe" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] auth file not present: $Path" -ForegroundColor Yellow
+        return $true
+    }
+
+    $nodeNames = @()
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        if ($null -ne $content) {
+            $nodeNames = @($content.PSObject.Properties.Name)
+        }
+    }
+    catch {
+        $nodeNames = @("<unparseable>")
+    }
+
+    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+    if ($backupPath) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    }
+
+    $namesSummary = "empty"
+    if ($nodeNames.Count -gt 0) {
+        $shown = @($nodeNames | Select-Object -First 12)
+        $namesSummary = ("{0} nodes: {1}" -f $nodeNames.Count, ($shown -join ","))
+    }
+
+    [System.IO.File]::WriteAllText($Path, "{}", (New-Object System.Text.UTF8Encoding $false))
+
+    try {
+        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $afterCount = 0
+        if ($null -ne $verified) {
+            $afterCount = @($verified.PSObject.Properties).Count
+        }
+        $ok = ($afterCount -eq 0)
+        Add-AuditEntry -Audit $Audit -File $Path -Key "auth-wipe" -Before $namesSummary -After "0 nodes" -Ok $ok
+        if ($ok) {
+            Write-Host "    [OK] auth nodes wiped (names-only audit): $Path" -ForegroundColor Green
+        }
+        else {
+            Write-Host "    [FAILED] auth file still has $afterCount nodes: $Path" -ForegroundColor Red
+        }
+        return $ok
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "auth-wipe" -Before $namesSummary -After "verify-failed" -Ok $false
+        Write-Host "    [FAILED] could not re-read auth file after write: $Path" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Remove ONLY the named nodes from a JSON file, keep everything else (used for
+# minimax-agent-config.json: remove user/sharedUser, keep config + the rest).
+# Verify-after: removed nodes absent AND keep-nodes still present.
+function Remove-JsonNodesVerified {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$NodeNames,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions,
+        [string[]]$MustKeepNames = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "node-removal" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] JSON file not present: $Path" -ForegroundColor Yellow
+        return $true
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "node-removal" -Before "present" -After "parse-failed" -Ok $false
+        Write-Host "    [FAILED] could not parse JSON: $Path" -ForegroundColor Red
+        return $false
+    }
+
+    $presentTargets = @()
+    foreach ($name in $NodeNames) {
+        if ($null -ne $content.PSObject.Properties[$name]) {
+            $presentTargets += $name
+        }
+    }
+
+    if ($presentTargets.Count -eq 0) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "node-removal" -Before "absent" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] target nodes already absent: $Path" -ForegroundColor Yellow
+        return $true
+    }
+
+    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+    if ($backupPath) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    }
+
+    foreach ($name in $presentTargets) {
+        $null = $content.PSObject.Properties.Remove($name)
+    }
+
+    # No-BOM UTF-8 write.
+    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+
+    try {
+        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "node-removal" -Before ($presentTargets -join ",") -After "verify-parse-failed" -Ok $false
+        Write-Host "    [FAILED] could not re-read JSON after write: $Path" -ForegroundColor Red
+        return $false
+    }
+
+    $stillThere = @()
+    foreach ($name in $presentTargets) {
+        if ($null -ne $verified.PSObject.Properties[$name]) {
+            $stillThere += $name
+        }
+    }
+    $keepMissing = @()
+    foreach ($name in $MustKeepNames) {
+        if ($null -eq $verified.PSObject.Properties[$name]) {
+            $keepMissing += $name
+        }
+    }
+
+    $ok = (($stillThere.Count -eq 0) -and ($keepMissing.Count -eq 0))
+    $afterSummary = ("removed: " + ($presentTargets -join ","))
+    if ($stillThere.Count -gt 0) {
+        $afterSummary = ("still-present: " + ($stillThere -join ","))
+    }
+    if ($keepMissing.Count -gt 0) {
+        $afterSummary = $afterSummary + (" | keep-nodes-missing: " + ($keepMissing -join ","))
+    }
+    Add-AuditEntry -Audit $Audit -File $Path -Key "node-removal" -Before ($presentTargets -join ",") -After $afterSummary -Ok $ok
+
+    if ($ok) {
+        Write-Host "    [OK] nodes removed, keep-nodes intact: $($presentTargets -join ',')" -ForegroundColor Green
+    }
+    else {
+        Write-Host "    [FAILED] node removal verification failed: $afterSummary" -ForegroundColor Red
+    }
+    return $ok
+}
+
+# New device id that preserves the shape of the old one (braces / casing) so
+# the app's parser keeps accepting it. Falls back to a lowercase GUID.
+function New-DeviceIdPreservingFormat {
+    param([string]$CurrentValue)
+
+    $guidPattern = '^\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?$'
+    if ((-not [string]::IsNullOrWhiteSpace($CurrentValue)) -and ($CurrentValue -match $guidPattern)) {
+        $fresh = [guid]::NewGuid().ToString()
+        if ($CurrentValue.StartsWith("{")) {
+            return "{" + $fresh.ToUpperInvariant() + "}"
+        }
+        if ($CurrentValue -cmatch "[A-F]") {
+            return $fresh.ToUpperInvariant()
+        }
+        return $fresh.ToLowerInvariant()
+    }
+
+    return ([guid]::NewGuid().ToString()).ToLowerInvariant()
+}
+
+# Delete every file under $Path individually with retry, then prune empty dirs.
+# A whole-tree Remove-Item fails FAST on the first locked file and leaves the
+# rest intact; per-file delete means one stuck file cannot block the others.
+# Appends a single restorable delete action (whole-tree backup) to $Actions.
+function Clear-TreeFilesIndividually {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+        return @{ Deleted = 0; Failed = 0; FailedPaths = @() }
+    }
+
+    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+
+    $files = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)
+    $deleted = 0
+    $failed = 0
+    $failedPaths = @()
+
+    foreach ($file in $files) {
+        $fileDeleted = $false
+        $lastError = $null
+        for ($i = 0; $i -lt 4; $i++) {
+            try {
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                $fileDeleted = $true
+                break
+            }
+            catch {
+                $lastError = $_.Exception.Message
+                Start-Sleep -Milliseconds (500 * ($i + 1))
+            }
+        }
+        if ($fileDeleted) {
+            $deleted++
+        }
+        else {
+            $failed++
+            $failedPaths += $file.FullName
+            Add-AuditEntry -Audit $Audit -File $file.FullName -Key "binary-store" -Before "present" -After ("delete-failed: " + $lastError) -Ok $false
+        }
+    }
+
+    $dirs = @(Get-ChildItem -LiteralPath $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+        Sort-Object { $_.FullName.Length } -Descending)
+    foreach ($dir in $dirs) {
+        $null = Remove-Item -LiteralPath $dir.FullName -Force -ErrorAction SilentlyContinue
+    }
+    $null = Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+
+    $summary = "deleted=$deleted failed=$failed"
+    $ok = ($failed -eq 0)
+    Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After $summary -Ok $ok
+    if ($backupPath) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath -Action "delete"
+    }
+
+    return @{ Deleted = $deleted; Failed = $failed; FailedPaths = $failedPaths }
+}
+
+# Delete a stale file WITHOUT backing it up (regenerable files only). Verifies
+# the path is gone afterwards.
+function Remove-VerifiedFileNoBackup {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$AuditKey,
+        [Parameter(Mandatory = $true)][ref]$Audit
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before "missing" -After "skipped" -Ok $true
+        return $true
+    }
+
+    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before "present" -After "deleted" -Ok $true
+        return $true
+    }
+
+    Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before "present" -After "delete-failed" -Ok $false
+    Write-Host "    [FAILED] could not delete: $Path" -ForegroundColor Red
+    return $false
+}
+
+# Reparse-point-safe removal (junction/symlink guard). Removes the link itself
+# without following it; real dirs go through the restorable delete path. Never
+# touches the link target.
+function Remove-AppPathSafely {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "user-subdir" -Before "missing" -After "skipped" -Ok $true
+        return "missing"
+    }
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    $isReparsePoint = $item -and (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+
+    if ($isReparsePoint) {
+        $linkType = if ($item.LinkType) { $item.LinkType } else { "ReparsePoint" }
+        $target = if ($item.Target) { $item.Target } else { "<unknown>" }
+        Write-Host "    [LINK] $Path ($linkType -> $target) -- removing link only" -ForegroundColor DarkGray
+        $item.Delete()
+        Add-AuditEntry -Audit $Audit -File $Path -Key "user-subdir" -Before ("$linkType->$target") -After "link-removed" -Ok $true
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -Action "delete"
+        return "link-removed"
+    }
+
+    $binaryActions = Clear-BinaryIdentityStore -Paths @($Path) -Action "delete" -BackupRoot $BackupRoot -Audit $Audit -RootPath $env:USERPROFILE
+    $Actions.Value += @($binaryActions)
+    return "deleted"
+}
+
+# Scrub os_crypt.encrypted_key from a Chromium Local State file. Backup happens
+# ONLY when the key is actually present (keeps the restore manifest accurate --
+# a run that changed nothing must not list copy actions). No-BOM write.
+function Remove-OsCryptEncryptedKey {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] Local State not found: $Path" -ForegroundColor Yellow
+        return $true
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After "parse-failed" -Ok $false
+        Write-Host "    [FAILED] could not parse Local State: $Path" -ForegroundColor Red
+        return $false
+    }
+
+    if ($null -eq $content.PSObject.Properties['os_crypt']) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] os_crypt not found in: $Path" -ForegroundColor Yellow
+        return $true
+    }
+    if ($null -eq $content.os_crypt.PSObject.Properties['encrypted_key']) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] os_crypt.encrypted_key not present: $Path" -ForegroundColor Yellow
+        return $true
+    }
+
+    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+    if ($backupPath) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    }
+
+    $content.os_crypt.PSObject.Properties.Remove('encrypted_key')
+
+    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+
+    try {
+        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $afterValue = if ($null -eq $verified.os_crypt.PSObject.Properties['encrypted_key']) { "removed" } else { "still-present" }
+        $ok = $afterValue -eq "removed"
+        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After $afterValue -Ok $ok
+        if ($ok) {
+            Write-Host "    [OK] os_crypt.encrypted_key removed: $Path" -ForegroundColor Green
+        }
+        else {
+            Write-Host "    [FAILED] os_crypt.encrypted_key still present: $Path" -ForegroundColor Red
+        }
+        return $ok
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After "verify-failed" -Ok $false
+        Write-Host "    [FAILED] could not re-read Local State after write: $Path" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Rotate electron.media.device_id_salt in a Chromium Preferences file.
+# With -OnlyIfPresent the salt is rotated only when it already exists; a file
+# without the node is honestly skipped (never creates new identity state).
+function Set-DeviceIdSalt {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$NewSalt,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions,
+        [switch]$OnlyIfPresent
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] Preferences not found: $Path" -ForegroundColor Yellow
+        return $true
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before "present" -After "parse-failed" -Ok $false
+        Write-Host "    [FAILED] could not parse Preferences: $Path" -ForegroundColor Red
+        return $false
+    }
+
+    $beforeValue = $null
+    $saltPresent = $false
+
+    $electronProp = if ($null -ne $content.PSObject.Properties['electron']) { $content.electron } else { $null }
+    if ($electronProp -and ($null -ne $electronProp.PSObject.Properties['media'])) {
+        $mediaProp = $electronProp.media
+        if ($null -ne $mediaProp.PSObject.Properties['device_id_salt']) {
+            $beforeValue = $mediaProp.device_id_salt
+            $saltPresent = $true
+        }
+    }
+
+    if ($OnlyIfPresent -and (-not $saltPresent)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before "absent" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] device_id_salt not present (nothing to rotate): $Path" -ForegroundColor Yellow
+        return $true
+    }
+
+    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+    if ($backupPath) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    }
+
+    if ($null -eq $electronProp) {
+        Add-Member -InputObject $content -NotePropertyName 'electron' -NotePropertyValue @{ media = @{ device_id_salt = $NewSalt } }
+    }
+    elseif ($null -eq $electronProp.PSObject.Properties['media']) {
+        Add-Member -InputObject $content.electron -NotePropertyName 'media' -NotePropertyValue @{ device_id_salt = $NewSalt }
+    }
+    else {
+        $content.electron.media.device_id_salt = $NewSalt
+    }
+
+    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+
+    try {
+        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $actualValue = $verified.electron.media.device_id_salt
+        $ok = $actualValue -eq $NewSalt
+        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before $beforeValue -After $actualValue -Ok $ok
+        if ($ok) {
+            Write-Host "    [OK] device_id_salt updated: $Path" -ForegroundColor Green
+        }
+        else {
+            Write-Host "    [FAILED] device_id_salt verification failed: $Path" -ForegroundColor Red
+        }
+        return $ok
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before $beforeValue -After "verify-failed" -Ok $false
+        Write-Host "    [FAILED] could not re-read Preferences after write: $Path" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Rotate the windowIds array in opencode.settings to fresh GUIDs. windowIds is
+# a stable cross-reset window fingerprint (it also names
+# window-state-<uuid>.json and opencode.window.<uuid>.dat). Backup-first,
+# verify-after: every entry must be a fresh lowercase GUID and none may equal
+# an old value; the entry count is preserved. Missing file or a missing/empty
+# windowIds node is an honest skip. Returns @{ Ok; OldIds; NewIds }.
+# PS 5.1 safe: no ternary, no [CmdletBinding()].
+function Reset-OpenCodeWindowIds {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    $guidPattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    $emptyResult = @{ Ok = $true; OldIds = @(); NewIds = @() }
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] opencode.settings not found: $Path" -ForegroundColor Yellow
+        return $emptyResult
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before "present" -After "parse-failed" -Ok $false
+        Write-Host "    [FAILED] could not parse opencode.settings: $Path" -ForegroundColor Red
+        return @{ Ok = $false; OldIds = @(); NewIds = @() }
+    }
+
+    if (($null -eq $content.PSObject.Properties['windowIds']) -or ($null -eq $content.windowIds) -or (@($content.windowIds).Count -eq 0)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before "absent" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] windowIds not present (nothing to rotate): $Path" -ForegroundColor Yellow
+        return $emptyResult
+    }
+
+    $oldIds = @($content.windowIds)
+    $newIds = @()
+    foreach ($old in $oldIds) {
+        $fresh = ([guid]::NewGuid().ToString()).ToLowerInvariant()
+        $guard = 0
+        while (($oldIds -contains $fresh) -and ($guard -lt 5)) {
+            $fresh = ([guid]::NewGuid().ToString()).ToLowerInvariant()
+            $guard++
+        }
+        $newIds += $fresh
+    }
+
+    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+    if ($backupPath) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    }
+
+    $content.windowIds = $newIds
+
+    # No-BOM UTF-8 write.
+    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+
+    try {
+        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before ($oldIds -join ",") -After "verify-parse-failed" -Ok $false
+        Write-Host "    [FAILED] could not re-read opencode.settings after write: $Path" -ForegroundColor Red
+        return @{ Ok = $false; OldIds = $oldIds; NewIds = $newIds }
+    }
+
+    $actualIds = @()
+    if (($null -ne $verified.PSObject.Properties['windowIds']) -and ($null -ne $verified.windowIds)) {
+        $actualIds = @($verified.windowIds)
+    }
+
+    $ok = ($actualIds.Count -eq $oldIds.Count)
+    if ($ok) {
+        foreach ($id in $actualIds) {
+            if (($id -notmatch $guidPattern) -or ($oldIds -contains $id)) {
+                $ok = $false
+                break
+            }
+        }
+    }
+
+    if ($ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before ($oldIds -join ",") -After ($actualIds -join ",") -Ok $true
+        Write-Host "    [OK] windowIds rotated ($($oldIds.Count) entries): $Path" -ForegroundColor Green
+    }
+    else {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before ($oldIds -join ",") -After ($actualIds -join ",") -Ok $false
+        Write-Host "    [FAILED] windowIds verification failed: $Path" -ForegroundColor Red
+    }
+    return @{ Ok = $ok; OldIds = $oldIds; NewIds = $actualIds }
+}
+
+# === Aggressive process kill (ported from zcode v1.1) ==========================
+# Tree-kill for MiniMax Agent / MiniMax Code / OpenCode / mavis. Requires 2
+# consecutive clean wildcard checks; hard-fails the run when unkillable so no
+# step ever writes while a live process holds the files open.
+# DELIBERATELY NOT matched: node, python, kilo, cline, roo (unrelated work and
+# unrelated IDE extensions -- none of these names match the wildcards below).
+function Stop-MiniMaxOpenCodeProcessesAggressive {
+    param(
+        [int]$MaxAttempts = 10,
+        [int]$DelayMs = 1500
+    )
+
+    Write-Host "[*] Terminating all MiniMax/OpenCode/mavis processes (aggressive tree-kill)..." -ForegroundColor Cyan
+
+    $processesToKill = @(
+        "MiniMax",
+        "MiniMax Agent",
+        "OpenCode",
+        "ai.opencode.desktop",
+        "mavis",
+        "minimax"
+    )
+
+    $verifyWildcards = @(
+        "MiniMax*",
+        "minimax*",
+        "*opencode*",
+        "mavis*"
+    )
+
+    $consecutiveClean = 0
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        foreach ($processName in $processesToKill) {
+            if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
+                $null = & taskkill /F /T /IM "$processName.exe" 2>&1
+            }
+        }
+
+        Start-Sleep -Milliseconds $DelayMs
+
+        $remaining = @(Get-Process -Name $verifyWildcards -ErrorAction SilentlyContinue |
+            Select-Object -Unique Id)
+        $count = $remaining.Count
+        Write-Host "    attempt $attempt/$MaxAttempts - remaining processes: $count" -ForegroundColor DarkGray
+
+        if ($count -eq 0) {
+            $consecutiveClean++
+            if ($consecutiveClean -ge 2) {
+                Write-Host "[OK] all MiniMax/OpenCode/mavis processes terminated (confirmed across 2 checks)" -ForegroundColor Green
+                return $true
+            }
+        }
+        else {
+            $consecutiveClean = 0
+        }
+    }
+
+    Write-Host "[FAILED] processes still running after $MaxAttempts attempts. Aborting reset." -ForegroundColor Red
+    foreach ($wildcard in $verifyWildcards) {
+        foreach ($p in @(Get-Process -Name $wildcard -ErrorAction SilentlyContinue)) {
+            Write-Host ("    PID {0}: {1}" -f $p.Id, $p.Path) -ForegroundColor Red
+        }
+    }
+    return $false
+}
+
+# Post-reset watchdog probe: a slow-shutdown helper can recreate core identity
+# files within seconds of deletion. Re-delete with a WARN audit entry (the
+# reset itself already succeeded, so this never FAILs the run).
+function Test-WatchdogRecreation {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$CoreFiles,
+        [Parameter(Mandatory = $true)][ref]$Audit
+    )
+
+    Write-Host "[*] Verifying no watchdog recreated core identity files..." -ForegroundColor Cyan
+    Start-Sleep -Seconds 2
+
+    $recreated = @()
+    foreach ($path in $CoreFiles) {
+        if (Test-Path -LiteralPath $path) {
+            $recreated += $path
+        }
+    }
+
+    if ($recreated.Count -eq 0) {
+        Write-Host "[OK] no identity files were recreated by a watchdog" -ForegroundColor Green
+        Add-AuditEntry -Audit $Audit -File "watchdog-probe" -Key "recreation-check" -Before "none" -After "none" -Ok $true
+        return
+    }
+
+    foreach ($path in $recreated) {
+        Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
+        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+        $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
+        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok $true
+    }
+}
+
+# Old ID_Backups directories preserve complete snapshots of every identity file
+# with the OLD IDs still embedded. Keep the current run only; delete the rest.
+function Invoke-OldIdBackupsPurge {
+    param(
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$IdBackupsRoot,
+        [Parameter(Mandatory = $true)][ref]$Audit
+    )
+
+    $currentTimestamp = Split-Path -Leaf $BackupRoot
+    if (-not (Test-Path -LiteralPath $IdBackupsRoot)) {
+        Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    no ID_Backups directory to purge" -ForegroundColor DarkGray
+        return
+    }
+
+    $allBackups = @(Get-ChildItem -LiteralPath $IdBackupsRoot -Directory -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending)
+    $toDelete = @($allBackups | Where-Object { $_.Name -ne $currentTimestamp })
+
+    if ($toDelete.Count -eq 0) {
+        Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "none" -After "none" -Ok $true
+        Write-Host "    no older ID_Backups to purge (only current run present)" -ForegroundColor DarkGray
+        return
+    }
+
+    foreach ($dir in $toDelete) {
+        Write-Host "    [PURGE] $($dir.Name) (preserved old fingerprint; deleting)" -ForegroundColor DarkGray
+        Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+    }
+}
+
+# Audit entries added since $StartIndex that pertain to $Path (or children)
+# with ok=$false mean the step partially failed.
+function Get-StepAuditStatus {
+    param(
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][int]$StartIndex,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $newEntries = @($Audit.Value | Select-Object -Skip $StartIndex)
+    $pathEntries = @($newEntries | Where-Object {
+        $_.file -eq $Path -or $_.file.StartsWith($Path + "\")
+    })
+
+    if ($pathEntries.Count -eq 0) {
+        return @{ Success = $true; FailedEntries = @() }
+    }
+
+    $failed = @($pathEntries | Where-Object { -not $_.ok })
+    return @{ Success = ($failed.Count -eq 0); FailedEntries = $failed }
+}
+
+# v1.1: OpenCode version preflight. The Zen free tier is server-side UA-gated
+# (only User-Agent opencode/<version> passes; x-opencode-* headers alone do
+# not) and rejects outdated clients (< 1.17.0). Returns a hashtable with
+# Found/Version/VersionOk/Source. Never throws -- missing install = Found $false.
+function Get-OpenCodeVersionInfo {
+    $candidates = @()
+
+    # 1. Desktop package.json next to the Electron userData dir.
+    $pkgPaths = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\opencode\resources\app\package.json"),
+        (Join-Path ${env:ProgramFiles} "opencode\resources\app\package.json")
+    )
+    foreach ($p in $pkgPaths) {
+        if (Test-Path -LiteralPath $p) {
+            try {
+                $j = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
+                if ($null -ne $j -and $null -ne $j.PSObject.Properties['version']) {
+                    $candidates += @{ Version = [string]$j.version; Source = $p }
+                }
+            }
+            catch {
+            }
+        }
+    }
+
+    # 2. CLI on PATH (opencode --version prints e.g. "1.18.18" or "opencode 1.18.18").
+    $cli = Get-Command opencode -ErrorAction SilentlyContinue
+    if ($cli) {
+        try {
+            $out = & $cli.Source --version 2>$null | Select-Object -First 1
+            if ($out -match '(\d+\.\d+\.\d+)') {
+                $candidates += @{ Version = $Matches[1]; Source = ("cli:" + $cli.Source) }
+            }
+        }
+        catch {
+        }
+    }
+
+    if ($candidates.Count -eq 0) {
+        return @{ Found = $false; Version = $null; VersionOk = $false; Source = $null }
+    }
+
+    # Highest version wins when Desktop and CLI disagree.
+    $best = $candidates[0]
+    foreach ($c in $candidates) {
+        try {
+            if ([version]$c.Version -gt [version]$best.Version) { $best = $c }
+        }
+        catch {
+        }
+    }
+    $ok = $false
+    try {
+        $ok = ([version]$best.Version -ge [version]"1.17.0")
+    }
+    catch {
+        $ok = $false
+    }
+    return @{ Found = $true; Version = $best.Version; VersionOk = $ok; Source = $best.Source }
+}
+
+# v1.1: names-only auth.json summary (token values NEVER read into logs).
+# Returns "missing" | "empty" | "<n> nodes: a,b,c" (first 12 names only).
+function Get-AuthJsonSummary {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return "missing" }
+    try {
+        $j = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        if ($null -eq $j) { return "empty" }
+        # NOTE: @($j.PSObject.Properties.Name) is 1 (@($null)) when empty --
+        # count the Properties collection itself, not the .Name projection.
+        $propCount = @($j.PSObject.Properties).Count
+        if ($propCount -eq 0) { return "empty" }
+        $names = @($j.PSObject.Properties | ForEach-Object { $_.Name })
+        $shown = @($names | Select-Object -First 12)
+        return ("{0} nodes: {1}" -f $propCount, ($shown -join ","))
+    }
+    catch {
+        return "unparseable"
+    }
+}
+
+# === Main =====================================================================
+
+Assert-Administrator
+
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$mmRoaming = Join-Path $env:APPDATA "MiniMax Agent"
+$ocRoaming = Join-Path $env:APPDATA "ai.opencode.desktop"
+$mmHome = Join-Path $env:USERPROFILE ".minimax"
+$ocHome = Join-Path $env:USERPROFILE ".local\share\opencode"
+$ocConfig = Join-Path $env:USERPROFILE ".config\opencode"
+$mavisJunction = Join-Path $env:USERPROFILE ".mavis"
+$mmMcodePublic = Join-Path $mmHome "auth\prod\en\mcode-public"
+$backupRoot = Join-Path $mmRoaming ("ID_Backups\" + $timestamp)
+$mmIdBackupsRoot = Join-Path $mmRoaming "ID_Backups"
+$ocIdBackupsRoot = Join-Path $ocRoaming "ID_Backups"
+$audit = @()
+$actions = @()
+
+$mmRoamingPresent = Test-Path -LiteralPath $mmRoaming
+$ocRoamingPresent = Test-Path -LiteralPath $ocRoaming
+$mmHomePresent = Test-Path -LiteralPath $mmHome
+$ocHomePresent = Test-Path -LiteralPath $ocHome
+
+if (-not ($mmRoamingPresent -or $ocRoamingPresent -or $mmHomePresent -or $ocHomePresent)) {
+    Write-Host "Neither MiniMax nor OpenCode installations were found." -ForegroundColor Red
+    Write-Host "Looked at: $mmRoaming | $ocRoaming | $mmHome | $ocHome" -ForegroundColor Red
+    exit 1
+}
+
+New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
+
+Write-Host "=== MiniMax Agent / OpenCode Identity Reset v1.2 ===" -ForegroundColor Cyan
+Write-Host "MiniMax Agent (Electron): $mmRoaming" -ForegroundColor Gray
+Write-Host "MiniMax CLI home        : $mmHome" -ForegroundColor Gray
+Write-Host "OpenCode (Electron)     : $ocRoaming" -ForegroundColor Gray
+Write-Host "OpenCode CLI home       : $ocHome" -ForegroundColor Gray
+Write-Host "Backup: $backupRoot" -ForegroundColor Gray
+Write-Host "Policy: sessions/sqlite/memory/plans/workspace preserved; no MAC/hostname/registry steps" -ForegroundColor Gray
+if ($KeepLogin) {
+    Write-Host "Option: -KeepLogin (auth.json preserved)" -ForegroundColor Yellow
+}
+if ($SkipVersionCheck) {
+    Write-Host "Option: -SkipVersionCheck (version gate bypassed -- not recommended)" -ForegroundColor Yellow
+}
+
+# v1.1 preflight: OpenCode client version gate. The Zen free tier 403s outdated
+# or non-OpenCode clients server-side, so rotating IDs on an old client just
+# reproduces "free tier can only be used from within OpenCode". Check BEFORE
+# any write or process kill.
+if (-not $SkipVersionCheck) {
+    $ocVersionInfo = Get-OpenCodeVersionInfo
+    if (-not $ocVersionInfo.Found) {
+        Write-Host "[WARN] OpenCode version not detected (no Desktop package.json, no CLI on PATH)." -ForegroundColor Yellow
+        Write-Host "       Install/update OpenCode first, or re-run with -SkipVersionCheck." -ForegroundColor Yellow
+        Add-AuditEntry -Audit ([ref]$audit) -File "preflight" -Key "opencode-version" -Before "unknown" -After "not-detected" -Ok $true
+    }
+    elseif (-not $ocVersionInfo.VersionOk) {
+        Write-Host ("[FAILED] OpenCode {0} detected at {1} -- 1.17.0+ is required for the Zen free tier." -f $ocVersionInfo.Version, $ocVersionInfo.Source) -ForegroundColor Red
+        Write-Host "         Update OpenCode (Desktop + CLI) and re-run. Override: -SkipVersionCheck." -ForegroundColor Red
+        Add-AuditEntry -Audit ([ref]$audit) -File "preflight" -Key "opencode-version" -Before $ocVersionInfo.Version -After "below-minimum-1.17.0" -Ok $false
+        exit 1
+    }
+    else {
+        Write-Host ("[OK] OpenCode {0} detected ({1}) -- meets 1.17.0+ free-tier gate" -f $ocVersionInfo.Version, $ocVersionInfo.Source) -ForegroundColor Green
+        Add-AuditEntry -Audit ([ref]$audit) -File "preflight" -Key "opencode-version" -Before $ocVersionInfo.Version -After "meets-minimum-1.17.0" -Ok $true
+    }
+}
+else {
+    Add-AuditEntry -Audit ([ref]$audit) -File "preflight" -Key "opencode-version" -Before "unknown" -After "check-skipped" -Ok $true
+}
+
+# v1.1 preflight: names-only auth probe so the wipe (step 1) never surprises a
+# paid/topped-up user. Values are never logged.
+$ocAuthPathPre = Join-Path $ocHome "auth.json"
+$ocAuthSummaryPre = Get-AuthJsonSummary -Path $ocAuthPathPre
+if (($ocAuthSummaryPre -ne "missing") -and ($ocAuthSummaryPre -ne "empty") -and ($ocAuthSummaryPre -ne "unparseable")) {
+    if ($KeepLogin) {
+        Write-Host ("[INFO] auth.json has login state ({0}) -- -KeepLogin preserves it." -f $ocAuthSummaryPre) -ForegroundColor Cyan
+    }
+    else {
+        Write-Host ("[WARN] auth.json has login state ({0}) -- step [1/22] will wipe it to {{}}." -f $ocAuthSummaryPre) -ForegroundColor Yellow
+        Write-Host "       Re-login after reset: opencode auth login --provider zen (or restore from backup)." -ForegroundColor Yellow
+        Write-Host "       To keep it instead, re-run with -KeepLogin." -ForegroundColor Yellow
+    }
+    Add-AuditEntry -Audit ([ref]$audit) -File $ocAuthPathPre -Key "auth-preflight" -Before $ocAuthSummaryPre -After "warned" -Ok $true
+}
+
+# Pre-step: aggressive tree-kill. Hard-fails the run if unkillable, so no step
+# ever writes while a live process still holds the files open.
+if (-not (Stop-MiniMaxOpenCodeProcessesAggressive)) {
+    exit 1
+}
+
+$passCount = 0
+$failCount = 0
+
+$newUpdaterIdOC = ([guid]::NewGuid().ToString()).ToLowerInvariant()
+$newGhDeviceIdOC = ([guid]::NewGuid().ToString()).ToLowerInvariant()
+$newUpdaterIdMM = ([guid]::NewGuid().ToString()).ToLowerInvariant()
+$newSalt = -join ((1..32) | ForEach-Object { "{0:X}" -f (Get-Random -Maximum 16) })
+$newDesktopDeviceId = $null
+
+# --- [1/22] OpenCode CLI auth.json wipe (forces re-login) ---
+# v1.1: -KeepLogin preserves the file (paid/topped-up Zen login survives).
+$ocAuthPath = Join-Path $ocHome "auth.json"
+Write-Host "`n[1/22] OpenCode auth.json (wipe unless -KeepLogin)..." -ForegroundColor Cyan
+if ($KeepLogin) {
+    if (Test-Path -LiteralPath $ocAuthPath) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $ocAuthPath -Key "auth-keeplogin" -Before $ocAuthSummaryPre -After "preserved-per-flag" -Ok $true
+        Write-Host "    [OK] auth.json preserved (-KeepLogin)" -ForegroundColor Green
+    }
+    else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $ocAuthPath -Key "auth-keeplogin" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] auth.json not present" -ForegroundColor Yellow
+    }
+    $passCount++
+}
+elseif (Clear-AllJsonNodes -Path $ocAuthPath -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $ocAuthPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+    $passCount++
+}
+else {
+    $failCount++
+}
+
+# --- [2/22] OpenCode CLI home: log/ clear + shared-storage preserves ---
+Write-Host "`n[2/22] Clearing OpenCode CLI log/ + auditing shared-storage preserves..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$ocLogDir = Join-Path $ocHome "log"
+$ocLogResult = Remove-AppPathSafely -Path $ocLogDir -BackupRoot $backupRoot -Audit ([ref]$audit) -Actions ([ref]$actions)
+if ($ocLogResult -eq "missing") {
+    Write-Host "    [SKIP] .local\share\opencode\log (not present)" -ForegroundColor DarkGray
+}
+else {
+    Write-Host "    [OK] .local\share\opencode\log cleared" -ForegroundColor Green
+}
+# opencode.db is app-shared storage (3.7 GB here): preserved in place, NEVER
+# copied. Isolation of this DB is the app-side fix (documented in the summary).
+foreach ($preservedName in @("mcp-auth.json", "opencode.db", "repos", "snapshot", "storage", "tool-output")) {
+    $p = Join-Path $ocHome $preservedName
+    if (Test-Path -LiteralPath $p) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "preserved-per-policy" -Before "present" -After "preserved-per-policy" -Ok $true
+    }
+    else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "preserved-per-policy" -Before "missing" -After "skipped" -Ok $true
+    }
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $ocHome
+if ($status.Success) {
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] OpenCode CLI home step had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [3/22] OpenCode .updaterId + gh\device-id rotation ---
+Write-Host "`n[3/22] Rotating OpenCode .updaterId + gh\device-id..." -ForegroundColor Cyan
+$stepFailed = $false
+$ocUpdaterIdPath = Join-Path $ocRoaming ".updaterId"
+if (Test-Path -LiteralPath $ocUpdaterIdPath) {
+    if (Set-VerifiedMachineIdFile -Path $ocUpdaterIdPath -Value $newUpdaterIdOC -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocUpdaterIdPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -AuditKey "updaterId") {
+        Write-Host "    [OK] .updaterId verified" -ForegroundColor Green
+    }
+    else {
+        Write-Host "    [FAILED] .updaterId verification failed" -ForegroundColor Red
+        $stepFailed = $true
+    }
+}
+else {
+    Write-Host "    [SKIP] .updaterId not present" -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $ocUpdaterIdPath -Key "updaterId" -Before "missing" -After "skipped" -Ok $true
+}
+$ocGhDeviceIdPath = Join-Path $ocRoaming "gh\device-id"
+if (Test-Path -LiteralPath $ocGhDeviceIdPath) {
+    # v1.1: distinct GUID from .updaterId (v1.0 reused one value for both).
+    if (Set-VerifiedMachineIdFile -Path $ocGhDeviceIdPath -Value $newGhDeviceIdOC -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocGhDeviceIdPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -AuditKey "gh-device-id") {
+        Write-Host "    [OK] gh\device-id verified" -ForegroundColor Green
+    }
+    else {
+        Write-Host "    [FAILED] gh\device-id verification failed" -ForegroundColor Red
+        $stepFailed = $true
+    }
+}
+else {
+    Write-Host "    [SKIP] gh\device-id not present" -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $ocGhDeviceIdPath -Key "gh-device-id" -Before "missing" -After "skipped" -Ok $true
+}
+if ($stepFailed) { $failCount++ } else { $passCount++ }
+
+# --- [4/22] OpenCode opencode.global.dat + stale tmp siblings ---
+Write-Host "`n[4/22] Clearing OpenCode opencode.global.dat + stale tmp siblings..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+if ($ocRoamingPresent) {
+    $ocGlobalDat = Join-Path $ocRoaming "opencode.global.dat"
+    $datActions = Clear-BinaryIdentityStore -Paths @($ocGlobalDat) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+    $actions += @($datActions)
+    # v1.2: live installs carry opencode.updater.tmp-* (updater download
+    # residue); v1.1 only swept opencode.global.dat.tmp-*. Sweep both.
+    $staleTmps = @()
+    foreach ($filter in @("opencode.global.dat.tmp-*", "opencode.updater.tmp-*")) {
+        $staleTmps += @(Get-ChildItem -LiteralPath $ocRoaming -Filter $filter -File -Force -ErrorAction SilentlyContinue)
+    }
+    foreach ($tmpFile in $staleTmps) {
+        $tmpActions = Clear-BinaryIdentityStore -Paths @($tmpFile.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+        $actions += @($tmpActions)
+    }
+    if ($staleTmps.Count -gt 0) {
+        Write-Host "    stale tmp siblings removed: $($staleTmps.Count)" -ForegroundColor DarkGray
+    }
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $ocRoaming
+if ($status.Success) {
+    Write-Host "[OK] opencode.global.dat cleared" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] opencode.global.dat step had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [5/22] OpenCode Chromium network stores ---
+Write-Host "`n[5/22] Clearing OpenCode network stores (Cookies/DIPS/SharedStorage/Trust Tokens/NPS)..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$ocNetworkFileRelPaths = @(
+    "Network\Cookies",
+    "Network\Cookies-journal",
+    "DIPS",
+    "DIPS-wal",
+    "DIPS-journal",
+    "DIPS-shm",
+    "SharedStorage",
+    "SharedStorage-wal",
+    "SharedStorage-shm",
+    "SharedStorage-journal",
+    "Network\Trust Tokens",
+    "Network\Trust Tokens-journal",
+    "Network\Network Persistent State",
+    "Network\TransportSecurity",
+    "Network\NetworkDataMigrated"
+)
+if ($ocRoamingPresent) {
+    $ocNetworkFiles = @($ocNetworkFileRelPaths | ForEach-Object { Join-Path $ocRoaming $_ })
+    $ocNetworkActions = Clear-BinaryIdentityStore -Paths $ocNetworkFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+    $actions += @($ocNetworkActions)
+    # v1.2 prefix sweep: catch any other DIPS*/SharedStorage* sibling Chromium
+    # may create at the profile root (future suffixes, -shm on this machine).
+    # Only files directly under the profile root are swept; subdirectories
+    # (e.g. Session Storage) are handled by their own steps.
+    foreach ($prefix in @("DIPS*", "SharedStorage*")) {
+        $leftovers = @(Get-ChildItem -LiteralPath $ocRoaming -Filter $prefix -File -Force -ErrorAction SilentlyContinue)
+        foreach ($leftover in $leftovers) {
+            $sweepActions = Clear-BinaryIdentityStore -Paths @($leftover.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+            $actions += @($sweepActions)
+        }
+    }
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $ocRoaming
+if ($status.Success) {
+    Write-Host "[OK] OpenCode network stores cleared" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] OpenCode network stores had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [6/22] OpenCode cache trees + session/web storage (per-file delete) ---
+Write-Host "`n[6/22] Clearing OpenCode cache trees + Session Storage + Shared Dictionary + runtime locks..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$ocTreeRelPaths = @(
+    "Cache\Cache_Data",
+    "Cache\No_Vary_Search",
+    "Code Cache",
+    "GPUCache",
+    "DawnGraphiteCache",
+    "DawnWebGPUCache",
+    "blob_storage",
+    "VideoDecodeStats",
+    "Session Storage",
+    "Shared Dictionary",
+    "WebStorage",
+    "Crashpad",
+    "logs"
+)
+if ($ocRoamingPresent) {
+    foreach ($relative in $ocTreeRelPaths) {
+        $fullPath = Join-Path $ocRoaming $relative
+        if (Test-Path -LiteralPath $fullPath) {
+            $null = Clear-TreeFilesIndividually -Path $fullPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $fullPath) -Audit ([ref]$audit) -Actions ([ref]$actions)
+        }
+        else {
+            Add-AuditEntry -Audit ([ref]$audit) -File $fullPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+        }
+    }
+    # v1.2: runtime locks (regenerable; the pre-step tree-kill released them).
+    # lockfile pins the running instance; opencode\locks\ holds sidecar locks.
+    $ocLockfilePath = Join-Path $ocRoaming "lockfile"
+    $lockActions = Clear-BinaryIdentityStore -Paths @($ocLockfilePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+    $actions += @($lockActions)
+    $ocLocksDir = Join-Path $ocRoaming "opencode\locks"
+    if (Test-Path -LiteralPath $ocLocksDir) {
+        $null = Clear-TreeFilesIndividually -Path $ocLocksDir -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocLocksDir) -Audit ([ref]$audit) -Actions ([ref]$actions)
+    }
+    else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $ocLocksDir -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+    }
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $ocRoaming
+if ($status.Success) {
+    Write-Host "[OK] OpenCode cache trees cleared" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] OpenCode cache trees had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [7/22] OpenCode Local State os_crypt + uninstall_metrics + Preferences salt + windowIds ---
+Write-Host "`n[7/22] Scrubbing OpenCode os_crypt + install timestamp + rotating salt + windowIds..." -ForegroundColor Cyan
+$stepFailed = $false
+$ocLocalStatePath = Join-Path $ocRoaming "Local State"
+if (-not (Remove-OsCryptEncryptedKey -Path $ocLocalStatePath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocLocalStatePath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+    $stepFailed = $true
+}
+# v1.2: uninstall_metrics.installation_date2 is an install-timestamp
+# fingerprint that survived v1.1. Remove the node; Chromium regenerates it.
+$ocUninstallMetricsPath = Join-Path $ocRoaming "Local State"
+if (-not (Remove-JsonNodesVerified -Path $ocUninstallMetricsPath -NodeNames @("uninstall_metrics") -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocUninstallMetricsPath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+    $stepFailed = $true
+}
+$ocPreferencesPath = Join-Path $ocRoaming "Preferences"
+if (-not (Set-DeviceIdSalt -Path $ocPreferencesPath -NewSalt $newSalt -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocPreferencesPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -OnlyIfPresent)) {
+    $stepFailed = $true
+}
+# v1.2: windowIds[] is a stable cross-reset window fingerprint (it also names
+# the per-window files below). Rotate it, then delete the UUID-suffixed
+# per-window files backup-first. The generic window-state.json (geometry
+# only) is preserved in step [8/22].
+$ocSettingsPath = Join-Path $ocRoaming "opencode.settings"
+$windowIdResult = Reset-OpenCodeWindowIds -Path $ocSettingsPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocSettingsPath) -Audit ([ref]$audit) -Actions ([ref]$actions)
+$ocOldWindowIds = @($windowIdResult.OldIds)
+$ocNewWindowIds = @($windowIdResult.NewIds)
+if (-not $windowIdResult.Ok) {
+    $stepFailed = $true
+}
+if ($ocRoamingPresent) {
+    $ocPerWindowFiles = @()
+    $ocPerWindowFiles += @(Get-ChildItem -LiteralPath $ocRoaming -Filter "window-state-*.json" -File -Force -ErrorAction SilentlyContinue)
+    $ocPerWindowFiles += @(Get-ChildItem -LiteralPath $ocRoaming -Filter "opencode.window.*.dat" -File -Force -ErrorAction SilentlyContinue)
+    foreach ($winFile in $ocPerWindowFiles) {
+        $winActions = Clear-BinaryIdentityStore -Paths @($winFile.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+        $actions += @($winActions)
+    }
+    if ($ocPerWindowFiles.Count -gt 0) {
+        Write-Host "    per-window files removed: $($ocPerWindowFiles.Count)" -ForegroundColor DarkGray
+    }
+    else {
+        Add-AuditEntry -Audit ([ref]$audit) -File (Join-Path $ocRoaming "window-state-*.json") -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+    }
+}
+if ($stepFailed) { $failCount++ } else { $passCount++ }
+
+# --- [8/22] OpenCode preservation audit (userData + .config) ---
+Write-Host "`n[8/22] Auditing OpenCode preserved paths (drafts/window-state/skills/pnpm/.config)..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$ocPreservedNames = @(
+    "drafts.sqlite",
+    "opencode.updater",
+    "opencode",
+    "default.dat",
+    "Local Storage",
+    "skills",
+    "pnpm"
+)
+if ($ocRoamingPresent) {
+    foreach ($name in $ocPreservedNames) {
+        $p = Join-Path $ocRoaming $name
+        if (Test-Path -LiteralPath $p) {
+            Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "preserved-per-policy" -Before "present" -After "preserved-per-policy" -Ok $true
+        }
+        else {
+            Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "preserved-per-policy" -Before "missing" -After "skipped" -Ok $true
+        }
+    }
+    $ocWindowStates = @(Get-ChildItem -LiteralPath $ocRoaming -Filter "window-state*.json" -File -Force -ErrorAction SilentlyContinue)
+    Add-AuditEntry -Audit ([ref]$audit) -File (Join-Path $ocRoaming "window-state*.json") -Key "preserved-per-policy" -Before ("count=" + $ocWindowStates.Count) -After "preserved-per-policy" -Ok $true
+    $ocWindowDats = @(Get-ChildItem -LiteralPath $ocRoaming -Filter "opencode.window.*.dat" -File -Force -ErrorAction SilentlyContinue)
+    $ocWorkspaceDats = @(Get-ChildItem -LiteralPath $ocRoaming -Filter "opencode.workspace.*.dat" -File -Force -ErrorAction SilentlyContinue)
+    Add-AuditEntry -Audit ([ref]$audit) -File (Join-Path $ocRoaming "opencode.*.dat") -Key "preserved-per-policy" -Before ("window=" + $ocWindowDats.Count + " workspace=" + $ocWorkspaceDats.Count) -After "preserved-per-policy" -Ok $true
+    # v1.2: opencode.settings and gh\ are NOT blanket-preserved -- identity
+    # inside them was rotated (windowIds in step [7/22], device-id in [3/22]).
+    $ocGhDir = Join-Path $ocRoaming "gh"
+    if (Test-Path -LiteralPath $ocGhDir) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $ocGhDir -Key "preserved-per-policy" -Before "present" -After "dir-preserved-device-id-rotated" -Ok $true
+    }
+    else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $ocGhDir -Key "preserved-per-policy" -Before "missing" -After "skipped" -Ok $true
+    }
+    if (Test-Path -LiteralPath $ocSettingsPath) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $ocSettingsPath -Key "preserved-per-policy" -Before "present" -After "settings-kept-windowIds-rotated" -Ok $true
+    }
+    else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $ocSettingsPath -Key "preserved-per-policy" -Before "missing" -After "skipped" -Ok $true
+    }
+}
+if (Test-Path -LiteralPath $ocConfig) {
+    Add-AuditEntry -Audit ([ref]$audit) -File $ocConfig -Key "preserved-per-policy" -Before "present" -After "preserved-per-policy" -Ok $true
+    Write-Host "    [INFO] Preserving .config\opencode (user config + skills)" -ForegroundColor Cyan
+}
+else {
+    Add-AuditEntry -Audit ([ref]$audit) -File $ocConfig -Key "preserved-per-policy" -Before "missing" -After "skipped" -Ok $true
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $ocRoaming
+if ($status.Success) {
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] OpenCode preserve audit had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [9/22] MiniMax mcode-public auth.json wipe ---
+$mmPublicAuthPath = Join-Path $mmMcodePublic "auth.json"
+Write-Host "`n[9/22] Wiping MiniMax mcode-public auth.json (records/tokens)..." -ForegroundColor Cyan
+if (Clear-AllJsonNodes -Path $mmPublicAuthPath -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $mmPublicAuthPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+    $passCount++
+}
+else {
+    $failCount++
+}
+
+# --- [10/22] MiniMax mcode-public auth-state.json wipe ---
+$mmAuthStatePath = Join-Path $mmMcodePublic "auth-state.json"
+Write-Host "`n[10/22] Wiping MiniMax auth-state.json..." -ForegroundColor Cyan
+if (Clear-AllJsonNodes -Path $mmAuthStatePath -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $mmAuthStatePath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+    $passCount++
+}
+else {
+    $failCount++
+}
+
+# --- [11/22] MiniMax local-runtime.auth.json wipe ---
+$mmLocalRuntimeAuthPath = Join-Path $mmHome "local-runtime.auth.json"
+Write-Host "`n[11/22] Wiping MiniMax local-runtime.auth.json..." -ForegroundColor Cyan
+if (Clear-AllJsonNodes -Path $mmLocalRuntimeAuthPath -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $mmLocalRuntimeAuthPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+    $passCount++
+}
+else {
+    $failCount++
+}
+
+# --- [12/22] minimax-agent-config.json: remove user/sharedUser ONLY ---
+$mmAgentConfigPath = Join-Path $mmRoaming "minimax-agent-config.json"
+Write-Host "`n[12/22] Removing minimax-agent-config.json user/sharedUser nodes (config kept)..." -ForegroundColor Cyan
+if (Remove-JsonNodesVerified -Path $mmAgentConfigPath -NodeNames @("user", "sharedUser") -MustKeepNames @("config") -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmAgentConfigPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+    $passCount++
+}
+else {
+    $failCount++
+}
+
+# --- [13/22] remote-control\state.json: rotate desktop_device_id ---
+$mmRemoteControlStatePath = Join-Path $mmRoaming "remote-control\state.json"
+Write-Host "`n[13/22] Rotating remote-control state.json desktop_device_id..." -ForegroundColor Cyan
+if (Test-Path -LiteralPath $mmRemoteControlStatePath) {
+    $oldDesktopDeviceId = $null
+    try {
+        $rcContent = Get-Content -LiteralPath $mmRemoteControlStatePath -Raw | ConvertFrom-Json
+        if ($null -ne $rcContent -and $null -ne $rcContent.PSObject.Properties['desktop_device_id']) {
+            $oldDesktopDeviceId = $rcContent.desktop_device_id
+        }
+    }
+    catch {
+        $oldDesktopDeviceId = $null
+    }
+    $newDesktopDeviceId = New-DeviceIdPreservingFormat -CurrentValue $oldDesktopDeviceId
+    if (Set-JsonIdentity -Path $mmRemoteControlStatePath -Updates @{ "desktop_device_id" = $newDesktopDeviceId } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmRemoteControlStatePath) -Actions ([ref]$actions)) {
+        Write-Host "[OK] desktop_device_id rotated + verified" -ForegroundColor Green
+        $passCount++
+    }
+    else {
+        Write-Host "[FAILED] desktop_device_id verification failed" -ForegroundColor Red
+        $failCount++
+    }
+}
+else {
+    Write-Host "[SKIP] remote-control\state.json not present" -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $mmRemoteControlStatePath -Key "desktop_device_id" -Before "missing" -After "skipped" -Ok $true
+    $passCount++
+}
+
+# --- [14/22] MiniMax .updaterId rotation ---
+$mmUpdaterIdPath = Join-Path $mmRoaming ".updaterId"
+Write-Host "`n[14/22] Rotating MiniMax Agent .updaterId..." -ForegroundColor Cyan
+if (Test-Path -LiteralPath $mmUpdaterIdPath) {
+    if (Set-VerifiedMachineIdFile -Path $mmUpdaterIdPath -Value $newUpdaterIdMM -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmUpdaterIdPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -AuditKey "updaterId") {
+        Write-Host "[OK] .updaterId verified" -ForegroundColor Green
+        $passCount++
+    }
+    else {
+        Write-Host "[FAILED] .updaterId verification failed" -ForegroundColor Red
+        $failCount++
+    }
+}
+else {
+    Write-Host "[SKIP] .updaterId not present" -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $mmUpdaterIdPath -Key "updaterId" -Before "missing" -After "skipped" -Ok $true
+    $passCount++
+}
+
+# --- [15/22] MiniMax Agent Chromium stores (profile-wide treatment) ---
+Write-Host "`n[15/22] Clearing MiniMax Agent Chromium stores (Cookies/LocalStorage/IndexedDB/etc.)..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$mmStoreFileRelPaths = @(
+    "Network\Cookies",
+    "Network\Cookies-journal",
+    "DIPS",
+    "DIPS-wal",
+    "SharedStorage",
+    "SharedStorage-wal",
+    "SharedStorage-journal",
+    "Network\Trust Tokens",
+    "Network\Trust Tokens-journal",
+    "Network\Network Persistent State",
+    "Network\TransportSecurity",
+    "Network\NetworkDataMigrated"
+)
+$mmStoreDirRelPaths = @(
+    "Local Storage",
+    "IndexedDB",
+    "Session Storage",
+    "WebStorage",
+    "Shared Dictionary",
+    "VideoDecodeStats",
+    "blob_storage",
+    "browser-cache"
+)
+if ($mmRoamingPresent) {
+    $mmStoreFiles = @($mmStoreFileRelPaths | ForEach-Object { Join-Path $mmRoaming $_ })
+    $mmStoreActions = Clear-BinaryIdentityStore -Paths $mmStoreFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $mmRoaming
+    $actions += @($mmStoreActions)
+    foreach ($relative in $mmStoreDirRelPaths) {
+        $fullPath = Join-Path $mmRoaming $relative
+        if (Test-Path -LiteralPath $fullPath) {
+            $null = Clear-TreeFilesIndividually -Path $fullPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $fullPath) -Audit ([ref]$audit) -Actions ([ref]$actions)
+        }
+        else {
+            Add-AuditEntry -Audit ([ref]$audit) -File $fullPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+        }
+    }
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmRoaming
+if ($status.Success) {
+    Write-Host "[OK] MiniMax Agent Chromium stores cleared" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] MiniMax Agent Chromium stores had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [16/22] MiniMax Agent cache trees + Local State os_crypt + Preferences salt ---
+Write-Host "`n[16/22] Clearing MiniMax Agent cache trees + os_crypt + Preferences salt..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$stepFailed = $false
+$mmCacheRelPaths = @(
+    "Cache\Cache_Data",
+    "Code Cache",
+    "GPUCache",
+    "DawnGraphiteCache",
+    "DawnWebGPUCache",
+    "Crashpad"
+)
+if ($mmRoamingPresent) {
+    foreach ($relative in $mmCacheRelPaths) {
+        $fullPath = Join-Path $mmRoaming $relative
+        if (Test-Path -LiteralPath $fullPath) {
+            $null = Clear-TreeFilesIndividually -Path $fullPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $fullPath) -Audit ([ref]$audit) -Actions ([ref]$actions)
+        }
+        else {
+            Add-AuditEntry -Audit ([ref]$audit) -File $fullPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+        }
+    }
+}
+$mmLocalStatePath = Join-Path $mmRoaming "Local State"
+if (-not (Remove-OsCryptEncryptedKey -Path $mmLocalStatePath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmLocalStatePath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+    $stepFailed = $true
+}
+$mmPreferencesPath = Join-Path $mmRoaming "Preferences"
+if (-not (Set-DeviceIdSalt -Path $mmPreferencesPath -NewSalt $newSalt -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmPreferencesPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -OnlyIfPresent)) {
+    $stepFailed = $true
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmRoaming
+if ($status.Success -and (-not $stepFailed)) {
+    Write-Host "[OK] MiniMax Agent caches + crypto state cleared" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] MiniMax Agent caches step had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [17/22] mavis-browser partition: Local Storage ONLY (per spec) ---
+Write-Host "`n[17/22] Clearing mavis-browser partition Local Storage (only)..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$mmMavisBrowser = Join-Path $mmRoaming "Partitions\mavis-browser"
+$mmMavisLocalStorage = Join-Path $mmMavisBrowser "Local Storage"
+if (Test-Path -LiteralPath $mmMavisLocalStorage) {
+    $null = Clear-TreeFilesIndividually -Path $mmMavisLocalStorage -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmMavisLocalStorage) -Audit ([ref]$audit) -Actions ([ref]$actions)
+}
+else {
+    Add-AuditEntry -Audit ([ref]$audit) -File $mmMavisLocalStorage -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+}
+if (Test-Path -LiteralPath $mmMavisBrowser) {
+    Add-AuditEntry -Audit ([ref]$audit) -File $mmMavisBrowser -Key "embedded-browser" -Before "present" -After "local-storage-only-per-policy" -Ok $true
+}
+else {
+    Add-AuditEntry -Audit ([ref]$audit) -File $mmMavisBrowser -Key "embedded-browser" -Before "missing" -After "skipped" -Ok $true
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmMavisBrowser
+if ($status.Success) {
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] mavis-browser Local Storage had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [18/22] MiniMax misc clears (spec step 8 list) ---
+Write-Host "`n[18/22] Clearing MiniMax misc (shared_proto_db/outbox/tabs/hot-update/logs/locks/tmp/run)..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+# Dirs that might be junctions on odd installs go through the reparse-safe path.
+foreach ($safeDir in @(
+    (Join-Path $mmRoaming "shared_proto_db"),
+    (Join-Path $mmRoaming "hot-update"),
+    (Join-Path $mmHome "tmp"),
+    (Join-Path $mmHome "run")
+)) {
+    $result = Remove-AppPathSafely -Path $safeDir -BackupRoot $backupRoot -Audit ([ref]$audit) -Actions ([ref]$actions)
+    if ($result -eq "missing") {
+        Write-Host "    [SKIP] $(Split-Path -Leaf $safeDir) (not present)" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "    [OK] $(Split-Path -Leaf $safeDir)" -ForegroundColor Green
+    }
+}
+# Flat identity-bearing files (backup-first delete).
+$mmMiscFiles = @(
+    (Join-Path $mmRoaming "observability-outbox.jsonl"),
+    (Join-Path $mmRoaming "embedded-browser-tabs.json"),
+    (Join-Path $mmRoaming "crash-evidence-session.json"),
+    (Join-Path $mmHome "daemon.lock"),
+    (Join-Path $mmHome "auth\auth.lock"),
+    (Join-Path $mmMcodePublic "auth.lock")
+)
+if ($mmRoamingPresent -or $mmHomePresent) {
+    $mmMiscActions = Clear-BinaryIdentityStore -Paths $mmMiscFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
+    $actions += @($mmMiscActions)
+}
+# logs/ embeds request URLs with account/session signals -- identity-bearing.
+foreach ($logsDir in @((Join-Path $mmRoaming "logs"), (Join-Path $mmHome "logs"))) {
+    if (Test-Path -LiteralPath $logsDir) {
+        $null = Clear-TreeFilesIndividually -Path $logsDir -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $logsDir) -Audit ([ref]$audit) -Actions ([ref]$actions)
+    }
+    else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $logsDir -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+    }
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmRoaming
+if ($status.Success) {
+    $statusHome = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmHome
+    if ($statusHome.Success) {
+        Write-Host "[OK] MiniMax misc clears complete" -ForegroundColor Green
+        $passCount++
+    }
+    else {
+        Write-Host "[FAILED] MiniMax .minimax misc clears had failures" -ForegroundColor Red
+        $failCount++
+    }
+}
+else {
+    Write-Host "[FAILED] MiniMax Agent misc clears had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [19/22] MiniMax preservation audit + .mavis junction (link-only) ---
+Write-Host "`n[19/22] Auditing MiniMax preserved paths + .mavis junction..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+if ($mmHomePresent) {
+    # Headline preserves with explicit audit entries.
+    $mmSessionsDir = Join-Path $mmHome "sessions"
+    if (Test-Path -LiteralPath $mmSessionsDir) {
+        $sessionsCount = @(Get-ChildItem -LiteralPath $mmSessionsDir -Force -ErrorAction SilentlyContinue).Count
+        Add-AuditEntry -Audit ([ref]$audit) -File $mmSessionsDir -Key "sessions-preserved" -Before ("entries=" + $sessionsCount) -After "preserved-per-policy" -Ok $true
+        Write-Host "    [INFO] Preserving sessions\ ($sessionsCount entries)" -ForegroundColor Cyan
+    }
+    foreach ($sqliteName in @("sqlite.db", "sqlite.db-shm", "sqlite.db-wal")) {
+        $p = Join-Path $mmHome $sqliteName
+        if (Test-Path -LiteralPath $p) {
+            Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "preserved-per-policy" -Before "present" -After "preserved-per-policy" -Ok $true
+        }
+    }
+    $mmTelegramPath = Join-Path $mmHome "credentials\mavis\telegram.json"
+    if (Test-Path -LiteralPath $mmTelegramPath) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $mmTelegramPath -Key "preserved-per-policy" -Before "present" -After "preserved-per-policy" -Ok $true
+    }
+    # Every other non-targeted top-level item is audited as preserved.
+    $mmClearedRootNames = @("auth", "local-runtime.auth.json", "logs", "daemon.lock", "tmp", "run", "sessions", "sqlite.db", "sqlite.db-shm", "sqlite.db-wal")
+    $mmTopLevelItems = @(Get-ChildItem -LiteralPath $mmHome -Force -ErrorAction SilentlyContinue)
+    foreach ($item in $mmTopLevelItems) {
+        if ($mmClearedRootNames -contains $item.Name) { continue }
+        Add-AuditEntry -Audit ([ref]$audit) -File $item.FullName -Key "preserved-per-policy" -Before "present" -After "preserved-per-policy" -Ok $true
+    }
+}
+# .mavis is a JUNCTION to .minimax. Never recurse, never delete -- audit only.
+if (Test-Path -LiteralPath $mavisJunction) {
+    $mavisItem = Get-Item -LiteralPath $mavisJunction -Force -ErrorAction SilentlyContinue
+    $mavisIsReparse = $mavisItem -and (($mavisItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+    if ($mavisIsReparse) {
+        $linkType = if ($mavisItem.LinkType) { $mavisItem.LinkType } else { "ReparsePoint" }
+        $target = if ($mavisItem.Target) { $mavisItem.Target } else { "<unknown>" }
+        Write-Host "    [INFO] .mavis is a junction ($linkType -> $target) -- not touched" -ForegroundColor Cyan
+        Add-AuditEntry -Audit ([ref]$audit) -File $mavisJunction -Key "junction" -Before ("$linkType->$target") -After "link-only-not-touched" -Ok $true
+    }
+    else {
+        # Not a reparse point (unexpected): still never touched, flagged for review.
+        Write-Host "    [WARN] .mavis is NOT a reparse point -- left untouched, review manually" -ForegroundColor Yellow
+        Add-AuditEntry -Audit ([ref]$audit) -File $mavisJunction -Key "junction" -Before "not-reparse-point" -After "left-untouched-review" -Ok $true
+    }
+}
+else {
+    Add-AuditEntry -Audit ([ref]$audit) -File $mavisJunction -Key "junction" -Before "missing" -After "skipped" -Ok $true
+}
+# system-ca-certs.pem (MiniMax Agent): cert bundle, not identity -- preserved.
+$mmCaCertsPath = Join-Path $mmRoaming "system-ca-certs.pem"
+if (Test-Path -LiteralPath $mmCaCertsPath) {
+    Add-AuditEntry -Audit ([ref]$audit) -File $mmCaCertsPath -Key "preserved-per-policy" -Before "present" -After "preserved-per-policy" -Ok $true
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmHome
+if ($status.Success) {
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] MiniMax preserve audit had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [20/22] Old ID_Backups purge (both apps) ---
+Write-Host "`n[20/22] Purging old ID_Backups (keep current run only)..." -ForegroundColor Cyan
+Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $mmIdBackupsRoot -Audit ([ref]$audit)
+Invoke-OldIdBackupsPurge -BackupRoot (Join-Path $ocIdBackupsRoot $timestamp) -IdBackupsRoot $ocIdBackupsRoot -Audit ([ref]$audit)
+$passCount++
+
+# --- [21/22] Watchdog re-verify (both profiles + mavis partition) ---
+Write-Host "`n[21/22] Watchdog re-verify..." -ForegroundColor Cyan
+$watchdogCoreFiles = @(
+    (Join-Path $ocRoaming "Network\Cookies"),
+    (Join-Path $ocRoaming "DIPS"),
+    (Join-Path $ocRoaming "DIPS-wal"),
+    (Join-Path $ocRoaming "SharedStorage"),
+    (Join-Path $ocRoaming "opencode.global.dat"),
+    (Join-Path $ocRoaming "lockfile"),
+    (Join-Path $mmRoaming "Network\Cookies"),
+    (Join-Path $mmRoaming "DIPS"),
+    (Join-Path $mmRoaming "SharedStorage"),
+    (Join-Path $mmRoaming "Partitions\mavis-browser\Local Storage")
+)
+Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit ([ref]$audit)
+# v1.2: wildcard recreation check for the random-suffix updater tmp files.
+foreach ($wdFilter in @("opencode.updater.tmp-*", "opencode.global.dat.tmp-*", "window-state-*.json", "opencode.window.*.dat")) {
+    $recreated = @(Get-ChildItem -LiteralPath $ocRoaming -Filter $wdFilter -File -Force -ErrorAction SilentlyContinue)
+    foreach ($rc in $recreated) {
+        Write-Host "    [WARN] watchdog recreated file, re-deleting: $($rc.FullName)" -ForegroundColor Yellow
+        Remove-Item -LiteralPath $rc.FullName -Force -ErrorAction SilentlyContinue
+        $afterValue = if (Test-Path -LiteralPath $rc.FullName) { "re-delete-failed" } else { "re-deleted" }
+        Add-AuditEntry -Audit ([ref]$audit) -File $rc.FullName -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok $true
+    }
+}
+$passCount++
+
+# --- [22/22] Final probes ---
+Write-Host "`n[22/22] Final probes..." -ForegroundColor Cyan
+
+function Test-JsonFileEmpty {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $true
+    }
+    try {
+        $j = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        if ($null -eq $j) {
+            return $true
+        }
+        return (@($j.PSObject.Properties).Count -eq 0)
+    }
+    catch {
+        return $false
+    }
+}
+
+if ($KeepLogin) {
+    if (Test-Path -LiteralPath $ocAuthPath) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $ocAuthPath -Key "auth-keeplogin-probe" -Before $ocAuthSummaryPre -After "preserved-per-flag" -Ok $true
+        Write-Host "[OK] OpenCode auth.json preserved (-KeepLogin)" -ForegroundColor Green
+        $passCount++
+    }
+    else {
+        Write-Host "[SKIP] OpenCode auth.json absent (nothing to preserve)" -ForegroundColor Yellow
+        $passCount++
+    }
+}
+elseif (Test-JsonFileEmpty -Path $ocAuthPath) {
+    Write-Host "[OK] OpenCode auth.json is empty/absent" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] OpenCode auth.json still has nodes" -ForegroundColor Red
+    $failCount++
+}
+if (Test-JsonFileEmpty -Path $mmPublicAuthPath) {
+    Write-Host "[OK] mcode-public auth.json is empty/absent" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] mcode-public auth.json still has nodes" -ForegroundColor Red
+    $failCount++
+}
+if (Test-JsonFileEmpty -Path $mmAuthStatePath) {
+    Write-Host "[OK] auth-state.json is empty/absent" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] auth-state.json still has nodes" -ForegroundColor Red
+    $failCount++
+}
+if (Test-JsonFileEmpty -Path $mmLocalRuntimeAuthPath) {
+    Write-Host "[OK] local-runtime.auth.json is empty/absent" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] local-runtime.auth.json still has nodes" -ForegroundColor Red
+    $failCount++
+}
+if (Test-Path -LiteralPath $mmAgentConfigPath) {
+    try {
+        $cfgVerified = Get-Content -LiteralPath $mmAgentConfigPath -Raw | ConvertFrom-Json
+        $userGone = $null -eq $cfgVerified.PSObject.Properties['user']
+        $sharedUserGone = $null -eq $cfgVerified.PSObject.Properties['sharedUser']
+        if ($userGone -and $sharedUserGone) {
+            Write-Host "[OK] minimax-agent-config.json user/sharedUser gone" -ForegroundColor Green
+            $passCount++
+        }
+        else {
+            Write-Host "[FAILED] minimax-agent-config.json still has user/sharedUser" -ForegroundColor Red
+            $failCount++
+        }
+    }
+    catch {
+        Write-Host "[FAILED] minimax-agent-config.json final probe could not parse" -ForegroundColor Red
+        $failCount++
+    }
+}
+if ($null -ne $newDesktopDeviceId) {
+    if (Confirm-JsonValues -Path $mmRemoteControlStatePath -Expected @{ "desktop_device_id" = $newDesktopDeviceId }) {
+        Write-Host "[OK] desktop_device_id final probe passed" -ForegroundColor Green
+        $passCount++
+    }
+    else {
+        Write-Host "[FAILED] desktop_device_id final probe failed" -ForegroundColor Red
+        $failCount++
+    }
+}
+$updaterProbes = @(
+    @{ Path = $ocUpdaterIdPath; Expected = $newUpdaterIdOC; Label = "OpenCode .updaterId" },
+    @{ Path = $ocGhDeviceIdPath; Expected = $newGhDeviceIdOC; Label = "OpenCode gh\device-id" },
+    @{ Path = $mmUpdaterIdPath; Expected = $newUpdaterIdMM; Label = "MiniMax .updaterId" }
+)
+foreach ($probe in $updaterProbes) {
+    if (Test-Path -LiteralPath $probe.Path) {
+        $actualValue = (Get-Content -LiteralPath $probe.Path -Raw).Trim()
+        if ($actualValue -eq $probe.Expected) {
+            Write-Host "[OK] $($probe.Label) final probe passed" -ForegroundColor Green
+            $passCount++
+        }
+        else {
+            Write-Host "[FAILED] $($probe.Label) final probe failed" -ForegroundColor Red
+            $failCount++
+        }
+    }
+}
+# --- v1.2 final probes: lockfile / tmp residue / suffix sweep / timestamp / windowIds ---
+$ocLockfileProbe = Join-Path $ocRoaming "lockfile"
+if (-not (Test-Path -LiteralPath $ocLockfileProbe)) {
+    Write-Host "[OK] lockfile absent" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] lockfile still present" -ForegroundColor Red
+    $failCount++
+}
+$ocTmpResidue = @()
+foreach ($tmpFilter in @("opencode.updater.tmp-*", "opencode.global.dat.tmp-*")) {
+    $ocTmpResidue += @(Get-ChildItem -LiteralPath $ocRoaming -Filter $tmpFilter -File -Force -ErrorAction SilentlyContinue)
+}
+if ($ocTmpResidue.Count -eq 0) {
+    Write-Host "[OK] no updater/global tmp residue" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host ("[FAILED] tmp residue remains: " + (($ocTmpResidue | ForEach-Object { $_.Name }) -join ",")) -ForegroundColor Red
+    $failCount++
+}
+$ocDipsWalProbe = Join-Path $ocRoaming "DIPS-wal"
+if (-not (Test-Path -LiteralPath $ocDipsWalProbe)) {
+    Write-Host "[OK] DIPS-wal absent (suffix sweep)" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] DIPS-wal still present" -ForegroundColor Red
+    $failCount++
+}
+$ocUninstallProbeOk = $true
+if (Test-Path -LiteralPath $ocLocalStatePath) {
+    try {
+        $lsProbe = Get-Content -LiteralPath $ocLocalStatePath -Raw | ConvertFrom-Json
+        if (($null -ne $lsProbe.PSObject.Properties['uninstall_metrics'])) {
+            $ocUninstallProbeOk = $false
+        }
+    }
+    catch {
+        $ocUninstallProbeOk = $false
+    }
+}
+if ($ocUninstallProbeOk) {
+    Write-Host "[OK] uninstall_metrics absent from Local State" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] uninstall_metrics still present in Local State" -ForegroundColor Red
+    $failCount++
+}
+$ocWindowIdsProbeOk = $false
+if (Test-Path -LiteralPath $ocSettingsPath) {
+    try {
+        $wsProbe = Get-Content -LiteralPath $ocSettingsPath -Raw | ConvertFrom-Json
+        $wsIds = @()
+        if (($null -ne $wsProbe.PSObject.Properties['windowIds']) -and ($null -ne $wsProbe.windowIds)) {
+            $wsIds = @($wsProbe.windowIds)
+        }
+        if ($wsIds.Count -gt 0) {
+            $ocWindowIdsProbeOk = $true
+            foreach ($wid in $wsIds) {
+                if (($wid -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') -or ($ocOldWindowIds -contains $wid)) {
+                    $ocWindowIdsProbeOk = $false
+                    break
+                }
+            }
+        }
+    }
+    catch {
+        $ocWindowIdsProbeOk = $false
+    }
+}
+else {
+    $ocWindowIdsProbeOk = $true
+}
+if ($ocWindowIdsProbeOk) {
+    Write-Host "[OK] windowIds final probe passed (fresh GUIDs, old IDs gone)" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] windowIds final probe failed" -ForegroundColor Red
+    $failCount++
+}
+$ocPerWindowResidue = @()
+$ocPerWindowResidue += @(Get-ChildItem -LiteralPath $ocRoaming -Filter "window-state-*.json" -File -Force -ErrorAction SilentlyContinue)
+$ocPerWindowResidue += @(Get-ChildItem -LiteralPath $ocRoaming -Filter "opencode.window.*.dat" -File -Force -ErrorAction SilentlyContinue)
+if ($ocPerWindowResidue.Count -eq 0) {
+    Write-Host "[OK] no per-window UUID files remain" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host ("[FAILED] per-window residue remains: " + (($ocPerWindowResidue | ForEach-Object { $_.Name }) -join ",")) -ForegroundColor Red
+    $failCount++
+}
+
+# --- Zero-change policy -------------------------------------------------------
+# If every step skipped (no real modification), the backup dir holds nothing
+# restorable: delete it, park the audit in %TEMP%, and skip the restore script.
+$anyChange = ($actions.Count -gt 0)
+
+if ($anyChange) {
+    # --- Audit + Restore ---
+    $auditPath = Join-Path $backupRoot ("audit_{0}.json" -f $timestamp)
+    Write-AuditLog -Audit $audit -Path $auditPath
+    $restoreScriptPath = New-RestoreScript -BackupRoot $backupRoot -App "MiniMaxOpenCode" -Actions $actions
+
+    if (-not (Test-Path -LiteralPath $restoreScriptPath) -or ((Get-Item -LiteralPath $restoreScriptPath).Length -le 0)) {
+        Write-Host "[FAILED] restore script missing or empty" -ForegroundColor Red
+        $failCount++
+    }
+}
+else {
+    Write-Host "[INFO] No changes were made (all steps skipped) -- removing empty backup dir." -ForegroundColor Yellow
+    Remove-Item -LiteralPath $backupRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $auditPath = Join-Path $env:TEMP ("minimax_opencode_v1.2_audit_{0}.json" -f $timestamp)
+    Write-AuditLog -Audit $audit -Path $auditPath
+    $restoreScriptPath = "<none - no changes>"
+}
+
+Write-Host "`n=== Summary ===" -ForegroundColor Cyan
+Write-Host "Pass: $passCount" -ForegroundColor Green
+Write-Host "Fail: $failCount" -ForegroundColor Red
+Write-Host "Audit log: $auditPath" -ForegroundColor Gray
+Write-Host "Restore script: $restoreScriptPath" -ForegroundColor Gray
+Write-Host "NOTE: .local\share\opencode\opencode.db is app-shared storage (preserved by design). Storage isolation is the app-side fix -- keep the app updated." -ForegroundColor Yellow
+Write-Host "NOTE: Zen free tier is server-side UA-gated: use the official OpenCode Desktop/CLI 1.17.0+ (User-Agent opencode/<version>). Non-OpenCode clients and outdated builds get 403 FreeTierError even with fresh IDs." -ForegroundColor Yellow
+if ($KeepLogin) {
+    Write-Host "NOTE: -KeepLogin preserved auth.json. If the free-tier 403 persists, re-login anyway: opencode auth login --provider zen, then retry one free model." -ForegroundColor Yellow
+}
+else {
+    Write-Host "NOTE: auth.json was wiped to {}. Re-login after reset: opencode auth login --provider zen (anonymous tier is the most strictly gated)." -ForegroundColor Yellow
+}
+Write-Host "NOTE: minimax-agent-config.json 'tokens' node kept per spec; if re-login is not forced for the desktop app, wipe it too." -ForegroundColor Yellow
+Write-Host "NOTE: opencode.settings windowIds[] was rotated and the UUID-suffixed per-window files deleted (open tabs/window layout reset to fresh; chat history in opencode.db/drafts.sqlite is untouched)." -ForegroundColor Yellow
+Write-Host "NOTE: Local State uninstall_metrics (install timestamp) was removed and regenerates on next launch; lockfile/opencode/locks and updater tmp residue were deleted." -ForegroundColor Yellow
+Write-Host "NOTE: .mavis junction audited only (never touched). change_device_id.ps1 remains the separate, optional system-level step." -ForegroundColor Yellow
+
+[System.IO.File]::WriteAllText("$env:TEMP\minimax_opencode_v1.2_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
+
+if ($failCount -gt 0) {
+    Write-Host "MiniMax/OpenCode reset v1.2 completed with failures. Review $auditPath." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "MiniMax/OpenCode reset v1.2 completed successfully." -ForegroundColor Green

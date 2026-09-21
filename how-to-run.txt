@@ -4,12 +4,15 @@ Device identity reset tools. Prefer the interactive launchers
 
 Windows (PowerShell as Administrator, from the repo root):
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_cursor_windows-v0.2.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_windsurf_windows-v0.2.ps1"
+  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_devin_windows-v0.3.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_trae_windows-v0.2.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoder_windows-v0.4.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoderwork_windows-v0.1.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.3.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.1.ps1"
+  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Primary
+  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Secondary
+  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Both
+  powershell -ExecutionPolicy Bypass -File "scripts\windows\launch_zcode_second_instance.ps1"
+  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.2.ps1"
   powershell -ExecutionPolicy Bypass -File "scripts\windows\change_device_id.ps1"
 
 Or double-click: how-to-run.bat

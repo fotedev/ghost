@@ -1,6 +1,6 @@
 # GHOST — Guided Hardware & OS Scrubbing Toolkit
 
-**GHOST** = **G**uided **H**ardware & **O**S **S**crubbing Toolkit. Fresh-start toolkit for local AI-IDE identity stores: rotate device identifiers for **Cursor**, **Windsurf**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent**, and **OpenCode**, and inspect or reset system machine IDs. For privacy hygiene, multi-account testing, and CI/dev-environment resets. Available for **Windows** (PowerShell) and **Linux** (Bash).
+**GHOST** = **G**uided **H**ardware & **O**S **S**crubbing Toolkit. Fresh-start toolkit for local AI-IDE identity stores: rotate device identifiers for **Cursor**, **Windsurf / Devin Desktop**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent**, and **OpenCode**, and inspect or reset system machine IDs. For privacy hygiene, multi-account testing, and CI/dev-environment resets. Available for **Windows** (PowerShell) and **Linux** (Bash).
 
 ## Repository layout
 
@@ -25,13 +25,13 @@ Applications often create unique IDs to identify your computer. These scripts ge
 | Task | Windows | Linux |
 |------|---------|-------|
 | Reset Cursor | `reset_cursor_windows-v0.2.ps1` | `reset_cursor_linux.sh` |
-| Reset Windsurf | `reset_windsurf_windows-v0.2.ps1` | `reset_windsurf_linux.sh` |
+| Reset Windsurf / Devin Desktop | `reset_devin_windows-v0.3.ps1` | `reset_windsurf_linux.sh` |
 | Reset Trae | `reset_trae_windows-v0.2.ps1` | `reset_trae_linux-v0.1.sh` |
 | Reset Qoder | `reset_qoder_windows-v0.4.ps1` | — |
 | Reset ZCode (+Qoder stores) | `reset_zcode_windows-v1.4.ps1` (`-Target Primary\|Secondary\|Both`) | — |
 | ZCode second instance (dual-instance) | `launch_zcode_second_instance.ps1` + `Launch-ZCode-Second.bat` | — |
 | Reset QoderWork | `reset_qoderwork_windows-v0.1.ps1` | — |
-| Reset MiniMax Agent / OpenCode | `reset_minimax_opencode_windows-v1.1.ps1` | — |
+| Reset MiniMax Agent / OpenCode | `reset_minimax_opencode_windows-v1.2.ps1` | — |
 | Device fingerprint | `change_device_id.ps1` | `change_device_id_linux.sh Fingerprint` |
 | System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` |
 | Interactive menu | `how-to-run.bat` | `how-to-run.sh` |
@@ -112,13 +112,14 @@ sudo ./scripts/linux/change_device_id_linux.sh ResetMachineId
 
 **Before running:** Close Cursor. Run PowerShell as Administrator.
 
-### 2. Reset Windsurf ID (`reset_windsurf_windows-v0.2.ps1`)
+### 2. Reset Windsurf / Devin Desktop ID (`reset_devin_windows-v0.3.ps1`)
 
-- Resets Windsurf and Codeium configuration via `identity_utils.ps1`
-- Updates `machineid`, `storage.json` (4 telemetry keys), `state.vscdb`, deletes auth secrets (`codeium.windsurf-windsurf_auth`, `windsurf_auth-*`), `argv.json` (`crash-reporter-id`, JSONC comments preserved), `.codeium\config.json` (`device_id`), `.windsurf\installation_id`, scrubs username from Preferences/Local State, deletes Cookies / Network state / DIPS / workspace DB entries
-- Timestamped backups + audit log under `%APPDATA%\Windsurf\ID_Backups\<ts>`
+- Windsurf rebranded to **Devin Desktop** (June 2026, over-the-air) — the script auto-detects every existing data root under `%APPDATA%` (`Devin`, `Windsurf`) and resets **all** of them in one pass
+- Resets Windsurf/Devin and Codeium configuration via `identity_utils.ps1`
+- Updates `machineid`, `storage.json` (4 telemetry keys), `state.vscdb`, deletes auth secrets (`codeium.windsurf-windsurf_auth`, `windsurf_auth-*` + devin-named candidates), `argv.json` in `.windsurf` **and** `.devin` (`crash-reporter-id`, JSONC comments preserved), `.codeium\config.json` (`device_id`), `.windsurf\installation_id` + `cli\installation_id`, deletes `credentials.toml` (auth token), blanks `config.json` `devin.org_id`, scrubs username from Preferences/Local State, deletes Cookies / Network state / DIPS / extended cache dirs
+- Timestamped backups + audit log under each root's `%APPDATA%\<root>\ID_Backups\<ts>`
 
-**Before running:** Close Windsurf. Run PowerShell as Administrator.
+**Before running:** Close Windsurf / Devin Desktop. Run PowerShell as Administrator.
 
 ### 3. Reset Trae ID (`reset_trae_windows-v0.2.ps1`)
 
@@ -162,7 +163,9 @@ First launch clones history (`~\.zcode` → `~\ZCodeSecondHome\.zcode`, journals
 
 **Before running:** Close QoderWork. Run PowerShell as Administrator.
 
-### 7. Reset MiniMax Agent / OpenCode (`reset_minimax_opencode_windows-v1.1.ps1`)
+### 7. Reset MiniMax Agent / OpenCode (`reset_minimax_opencode_windows-v1.2.ps1`)
+
+v1.2 closes the remaining OpenCode fingerprint surfaces (ground-truth filesystem audit): `opencode.updater.tmp-*` deletion, DIPS/SharedStorage suffix sweep (`-wal`/`-journal`/`-shm` + future siblings), `lockfile` + `opencode\locks` deletion, `Local State → uninstall_metrics` removal (install-timestamp fingerprint), `opencode.settings → windowIds[]` rotation + per-window UUID file deletion (`window-state-<uuid>.json`, `opencode.window.<uuid>.dat`), extended watchdog + final probes.
 
 v1.1 fixes post-reset `FreeTierError: OpenCode's free tier can only be used from within OpenCode` (server-side UA gate: only `User-Agent: opencode/<version>` on clients ≥1.17.0 passes). New: version preflight (aborts on outdated clients unless `-SkipVersionCheck`), `-KeepLogin` (preserves `auth.json` for paid/topped-up Zen logins; default still wipes to `{}` + prints re-login command), distinct GUIDs for `.updaterId` vs `gh\device-id` (v1.0 reused one value), names-only auth probe before wiping.
 
@@ -212,7 +215,7 @@ Safety features — never wiped:
 
 ```powershell
 .\scripts\windows\reset_cursor_windows-v0.2.ps1
-.\scripts\windows\reset_windsurf_windows-v0.2.ps1
+.\scripts\windows\reset_devin_windows-v0.3.ps1
 .\scripts\windows\reset_zcode_windows-v1.4.ps1 -Target Primary
 .\scripts\windows\change_device_id.ps1
 ```
@@ -231,13 +234,13 @@ Safety features — never wiped:
 **Windows** (`scripts/windows/` — current versions only; superseded ones, incl. Qoder v0.3 and ZCode v1.1, live in `archive/` as fallbacks — do not run them)
 
 - `reset_cursor_windows-v0.2.ps1`
-- `reset_windsurf_windows-v0.2.ps1`
+- `reset_devin_windows-v0.3.ps1` (Windsurf / Devin Desktop; v0.2 lives in `archive/`)
 - `reset_trae_windows-v0.2.ps1`
 - `reset_qoder_windows-v0.4.ps1`
 - `reset_zcode_windows-v1.4.ps1` (`-Target Primary|Secondary|Both`; v1.3 stays beside it as rollback fallback — prefer v1.4)
 - `launch_zcode_second_instance.ps1` + `Launch-ZCode-Second.bat` (dual-instance launcher)
 - `reset_qoderwork_windows-v0.1.ps1`
-- `reset_minimax_opencode_windows-v1.1.ps1`
+- `reset_minimax_opencode_windows-v1.2.ps1` (v1.1 + v1.0 stay beside it as rollback fallbacks — prefer v1.2)
 - `identity_utils.ps1` (shared library — dot-sourced by the IDE reset scripts)
 - `change_device_id.ps1`
 - `how-to-run.bat` (repo root)

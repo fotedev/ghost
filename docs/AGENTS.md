@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent/OpenCode** — for privacy hygiene, multi-account testing, and dev-environment resets. Windows PowerShell (primary) and Linux Bash scripts.
+Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/Devin Desktop**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent/OpenCode** — for privacy hygiene, multi-account testing, and dev-environment resets. Windows PowerShell (primary) and Linux Bash scripts.
 
 ## Repository layout
 
@@ -25,7 +25,7 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
 scripts/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scripts
   New-IdentitySet                  #   -> { devDeviceId, machineId, macMachineId, sqmId }
   Assert-Administrator             #   -> exit 1 if not elevated
-  Stop-AppProcesses                #   -> kill loop (auto-expands Windsurf->codeium, Trae->Broker)
+  Stop-AppProcesses                #   -> kill loop (auto-expands Windsurf->Devin+codeium, Trae->Broker)
   Backup-FileToTimestampDir        #   -> copy to <app>\ID_Backups\<ts>\<label>
   Set-JsonIdentity                 #   -> JSON patch + verify-after re-read
   Set-SqliteKeys                   #   -> Python-backed UPSERT + verify-after (uses $env:TEMP for .py)
@@ -37,9 +37,12 @@ scripts/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scr
 reset_cursor_windows-v0.2.ps1     # Cursor: 15 steps (machineid, storage.json, state.vscdb,
                                    #          auth-secrets scrub, device_id_salt, os_crypt rotation,
                                    #          Cookies/NPS/sentry/DIPS/Trust Tokens/Crashpad/logs, workspace DBs)
-reset_windsurf_windows-v0.2.ps1    # Windsurf: 16 steps (above + argv.json crash-reporter-id,
-                                   #            .codeium\config.json device_id, .windsurf\installation_id,
-                                   #            Preferences/Local State username scrub)
+reset_devin_windows-v0.3.ps1       # Windsurf/Devin Desktop (rebranded 2026-06): 17 steps
+                                   #            x N auto-detected %APPDATA% roots (Devin, Windsurf):
+                                   #            argv.json crash-reporter-id (.windsurf + .devin),
+                                   #            .codeium\config.json device_id, installation_id (.windsurf
+                                   #            + cli\), credentials.toml delete, config.json org_id blank,
+                                   #            extended cache sweep, LOCALAPPDATA updater sweep
 reset_trae_windows-v0.2.ps1      # Trae: 16 steps (above + aha delete,
                                    #         ModularData\ckg_server\local_env.json device_id+host_map,
                                    #         ai-agent identity-rows-only scrub (chat preserved), SharedStorage,
@@ -62,9 +65,12 @@ launch_zcode_second_instance.ps1   # ZCode dual-instance launcher (own window vi
 reset_qoderwork_windows-v0.1.ps1   # QoderWork: 26 steps (agents.db oauth/app_settings scrub,
                                    #          chats preserved; auth.dat, MachineGuid, MAC, hostname;
                                    #          -SkipMac/-SkipHostname/-DryRun)
-reset_minimax_opencode_windows-v1.1.ps1  # MiniMax/OpenCode: 22 steps (auth.json wipe -> {} unless
+reset_minimax_opencode_windows-v1.2.ps1  # MiniMax/OpenCode: 22 steps (auth.json wipe -> {} unless
                                    #          -KeepLogin, version preflight ≥1.17.0, distinct
-                                   #          updater IDs, Chromium state per profile; chat preserved)
+                                   #          updater IDs, Chromium state per profile; v1.2 adds
+                                   #          updater-tmp sweep, DIPS/SharedStorage suffix sweep,
+                                   #          lockfile/locks delete, uninstall_metrics removal,
+                                   #          windowIds rotation + per-window file delete; chat preserved)
 change_device_id.ps1              # System-level: Fingerprint (self-test) / LegacyReset (registry GUIDs)
                                    #   / RepairProfiles (ProfileList .bak keys). Windows-only.
 ```

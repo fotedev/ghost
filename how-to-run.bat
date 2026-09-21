@@ -16,7 +16,7 @@ echo        GHOST - Guided Hardware ^& OS Scrubbing Toolkit
 echo.
 echo [1] Change Device ID [MACHINE-WIDE: affects BOTH ZCode instances + Qoder]
 echo [2] Reset Cursor
-echo [3] Reset Windsurf
+echo [3] Reset Windsurf\Devin
 echo [4] Reset Trae
 echo [5] Reset Qoder
 echo [6] Reset QoderWork
@@ -42,7 +42,7 @@ if "%choice%"=="2" (
     goto MENU
 )
 if "%choice%"=="3" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_windsurf_windows-v0.2.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_devin_windows-v0.3.ps1"
     pause
     goto MENU
 )
@@ -67,7 +67,7 @@ if "%choice%"=="7" (
     goto MENU
 )
 if "%choice%"=="8" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.1.ps1"
+    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.2.ps1"
     pause
     goto MENU
 )
