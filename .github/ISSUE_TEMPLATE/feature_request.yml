@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a new tool, target app, or improvement
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change?
+      options:
+        - New target app (new reset script)
+        - Improvement to an existing reset script
+        - New utility (tools/)
+        - Documentation
+        - CI / tests / repo infrastructure
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to achieve? What is missing?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior, not the implementation. Note which identity stores/paths are involved.

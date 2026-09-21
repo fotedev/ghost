@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: PowerShell lint + tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer + Pester
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force
+
+      - name: PSScriptAnalyzer (fail on Error)
+        shell: pwsh
+        run: |
+          $findings = @()
+          foreach ($p in @('src', 'tools', 'tests')) {
+            $findings += Invoke-ScriptAnalyzer -Path $p -Recurse `
+              -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error
+          }
+          $findings | Format-Table -AutoSize | Out-String | Write-Host
+          if ($findings.Count -gt 0) { exit 1 }
+
+      - name: Pester
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'tests'
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = "$env:TEMP\test-results.xml"
+          Invoke-Pester -Configuration $config
+          if ($config.Run.Exit) { exit $LASTEXITCODE }
+
+  linux:
+    name: Shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: shellcheck src/linux/*.sh how-to-run.sh
+
+      - name: bash -n (syntax)
+        run: |
+          set -e
+          for f in src/linux/*.sh how-to-run.sh; do
+            echo ":: checking $f"
+            bash -n "$f"
+          done

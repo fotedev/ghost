@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a broken reset script or unexpected behavior
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you submit — MANDATORY redaction (see SECURITY.md):**
+        Never paste `audit_*.json` contents, `storage.json`/`state.vscdb` values,
+        `machineid` contents, telemetry GUIDs, auth keys, or `.envlocal` contents.
+        Replace every GUID/hex value with `REDACTED`. Reports containing live
+        identifiers will be edited or closed.
+
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Which tool?
+      options:
+        - src/windows/reset_cursor.ps1
+        - src/windows/reset_devin.ps1
+        - src/windows/reset_trae.ps1
+        - src/windows/reset_qoder.ps1
+        - src/windows/reset_qoderwork.ps1
+        - src/windows/reset_zcode.ps1
+        - src/windows/reset_minimax_opencode.ps1
+        - src/windows/change_device_id.ps1
+        - tools/watch_zcode_captcha.ps1
+        - src/linux/... (bash scripts)
+        - other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS + PowerShell version
+      description: e.g. "Windows 10 22H2, PowerShell 5.1" — omit anything that identifies you
+      placeholder: Windows 10 22H2, PS 5.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you ran, what you expected, what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Script output (REDACTED)
+      description: Replace all GUIDs/hex values/paths with usernames in them by REDACTED.
+      render: text

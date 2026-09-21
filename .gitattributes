@@ -1,0 +1,26 @@
+# Normalize line endings across platforms.
+* text=auto
+
+# Windows scripts: CRLF working tree (PowerShell/cmd editors expect it).
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Shell scripts: LF + executable bit.
+*.sh   text eol=lf
+
+# Docs and data.
+*.md   text
+*.json text
+*.yml  text
+*.yaml text
+*.toml text
+*.example text
+
+# Binary safety.
+*.png  binary
+*.jpg  binary
+*.exe  binary
+*.zip  binary
