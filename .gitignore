@@ -3,6 +3,10 @@
 .windsurf/
 .codeium/
 
+# Legacy/archived script versions — local-only rollback copies, never committed.
+# Versioning lives in Git tags + CHANGELOG.md.
+archive/
+
 # Backup files
 *.backup
 *.bak
