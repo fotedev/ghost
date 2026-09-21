@@ -36,7 +36,7 @@
 # RandomNumberGenerator via .GetBytes() only.
 #
 # Usage (Windows 10, PowerShell 5.1 or 7 -- just double-click or run):
-#   powershell -ExecutionPolicy Bypass -File reset_devin_windows-v0.3.ps1
+#   powershell -ExecutionPolicy Bypass -File reset_devin.ps1
 # Prerequisite: close Windsurf / Devin Desktop first (the script force-kills both).
 # Requirement: Python (python or python3) for SQLite writes.
 

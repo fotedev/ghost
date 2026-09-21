@@ -32,42 +32,42 @@ echo.
 set /p choice=Enter your choice: 
 
 if "%choice%"=="1" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\change_device_id.ps1"
+    powershell -ExecutionPolicy Bypass -File "src\windows\change_device_id.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="2" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_cursor_windows-v0.2.ps1"
+    powershell -ExecutionPolicy Bypass -File "src\windows\reset_cursor.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="3" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_devin_windows-v0.3.ps1"
+    powershell -ExecutionPolicy Bypass -File "src\windows\reset_devin.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="4" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_trae_windows-v0.2.ps1"
+    powershell -ExecutionPolicy Bypass -File "src\windows\reset_trae.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="5" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoder_windows-v0.4.ps1"
+    powershell -ExecutionPolicy Bypass -File "src\windows\reset_qoder.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="6" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoderwork_windows-v0.1.ps1"
+    powershell -ExecutionPolicy Bypass -File "src\windows\reset_qoderwork.ps1"
     pause
     goto MENU
 )
 if "%choice%"=="7" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Primary
+    powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Primary
     pause
     goto MENU
 )
 if "%choice%"=="8" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.2.ps1"
+    powershell -ExecutionPolicy Bypass -File "src\windows\reset_minimax_opencode.ps1"
     pause
     goto MENU
 )
@@ -79,18 +79,18 @@ if "%choice%"=="9" (
     goto MENU
 )
 if "%choice%"=="10" (
-    start "ZCode Second Instance" powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\windows\launch_zcode_second_instance.ps1"
+    start "ZCode Second Instance" powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1"
     echo Launcher opened in a separate window - it closes automatically when done.
     pause
     goto MENU
 )
 if "%choice%"=="11" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Secondary
+    powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Secondary
     pause
     goto MENU
 )
 if "%choice%"=="12" (
-    powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Both
+    powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Both
     pause
     goto MENU
 )

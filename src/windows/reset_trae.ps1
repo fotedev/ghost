@@ -1,24 +1,24 @@
-# Cursor Identity Reset v0.2
+# Trae Identity Reset v0.2
 #
-# Hardened rebuild of reset_cursor_windows-v0.1.ps1 on the v1.1 template:
+# Hardened rebuild of reset_trae_windows-v0.1.ps1 on the v1.1 template:
 #   - Self-elevation to Administrator (auto re-launch, no manual "run as admin")
-#   - Aggressive multi-process kill (Cursor + helpers, 2 consecutive clean checks)
+#   - Aggressive multi-process kill (Trae + Broker + helpers, 2 clean checks)
 #   - No-BOM UTF-8 on EVERY write (v0.1 used Set-Content -Encoding UTF8, which
 #     emits a BOM under PowerShell 5.1 and can corrupt Chromium/Electron parsers)
 #   - Delete (not rename) for binary stores: renames left *.backup files with
 #     the OLD fingerprint on disk. Backups live in ID_Backups for restore.
-#   - NEW targets over v0.1: state.vscdb auth-secrets scrub (key list verified
-#     live on 2026-09-12), os_crypt rotation, Preferences device_id_salt,
-#     SharedStorage, Trust Tokens, Crashpad, logs, stale .backup deletion,
-#     old ID_Backups purge, watchdog re-verify.
+#   - POLICY CHANGE over v0.1: ModularData\ai-agent (chat DB) is PRESERVED.
+#     v0.1 renamed the whole tree (wiped chat). v0.2 backs it up and scrubs
+#     only key-name-matched identity rows, never chat content.
+#   - NEW targets over v0.1: os_crypt rotation, Preferences device_id_salt,
+#     Trust Tokens, Crashpad, logs, stale .backup deletion, old ID_Backups
+#     purge, watchdog re-verify.
 #
 # PRESERVATION (chat history + workspaces are never wiped):
-#   - composerHeaders table + all chat/composer keys: never touched.
-#   - Local Storage\leveldb (UI state) + Backups\ (editor backups): preserved.
+#   - ModularData\ai-agent: identity-row scrub only (see above).
+#   - Local Storage\leveldb (UI state) + Backups\: preserved.
 #   - User\workspaceStorage\**: serviceMachineId UPSERT only; tables/files and
 #     stale .backup sidecars are never deleted.
-#   - Third-party secrets (mcpOAuth.*, vscode.git git-ipc tokens, other
-#     extensions' secret:// entries): never touched.
 #
 # SCOPE ISOLATION: no MAC / hostname / registry-source steps here. Those belong
 # strictly to change_device_id.ps1.
@@ -27,8 +27,8 @@
 # RandomNumberGenerator via .GetBytes() only.
 #
 # Usage (Windows 10, PowerShell 5.1 or 7 -- just double-click or run):
-#   powershell -ExecutionPolicy Bypass -File reset_cursor_windows-v0.2.ps1
-# Prerequisite: close Cursor first (the script also force-kills it).
+#   powershell -ExecutionPolicy Bypass -File reset_trae.ps1
+# Prerequisite: close Trae first (the script also force-kills it).
 # Requirement: Python (python or python3) for SQLite writes.
 
 . "$PSScriptRoot\identity_utils.ps1"
@@ -36,26 +36,26 @@
 $ErrorActionPreference = "Stop"
 
 # --- Self-elevation -----------------------------------------------------------
-$cursorIsAdmin = [Security.Principal.WindowsPrincipal]::new(
+$traeIsAdmin = [Security.Principal.WindowsPrincipal]::new(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $cursorIsAdmin) {
-    $cursorLogOut = "$env:TEMP\cursor_v0.2_result.log"
-    $cursorScript = $MyInvocation.MyCommand.Path
-    $cursorArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$cursorScript`" *> `"$cursorLogOut`""
-    Start-Process powershell -Verb RunAs -ArgumentList $cursorArgs -WindowStyle Normal -Wait
-    if (Test-Path -LiteralPath $cursorLogOut) {
-        Get-Content -LiteralPath $cursorLogOut
+if (-not $traeIsAdmin) {
+    $traeLogOut = "$env:TEMP\trae_v0.2_result.log"
+    $traeScript = $MyInvocation.MyCommand.Path
+    $traeArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$traeScript`" *> `"$traeLogOut`""
+    Start-Process powershell -Verb RunAs -ArgumentList $traeArgs -WindowStyle Normal -Wait
+    if (Test-Path -LiteralPath $traeLogOut) {
+        Get-Content -LiteralPath $traeLogOut
     }
-    if (Test-Path -LiteralPath "$env:TEMP\cursor_v0.2_done.txt") {
-        Get-Content -LiteralPath "$env:TEMP\cursor_v0.2_done.txt"
+    if (Test-Path -LiteralPath "$env:TEMP\trae_v0.2_done.txt") {
+        Get-Content -LiteralPath "$env:TEMP\trae_v0.2_done.txt"
     }
     exit
 }
 
-Write-GhostBanner -Target "Cursor Identity Reset" -Version "0.2"
+Write-GhostBanner -Target "Trae Identity Reset" -Version "0.2"
 
-# === Local helpers (Cursor reference pattern, no-BOM throughout) ==============
+# === Local helpers (Trae pattern, no-BOM throughout) ==========================
 
 function Add-ActionEntry {
     param(
@@ -171,13 +171,32 @@ function Invoke-WorkspaceSqliteUpdate {
     }
 }
 
-# DELETE Cursor account secrets from state.vscdb ItemTable and verify survivors
-# are zero via read-only reopen. Key list verified live on 2026-09-12 against
-# %APPDATA%\Cursor\User\globalStorage\state.vscdb. composerHeaders (chat),
-# cursorDiskKV, MCP/third-party secrets and git-ipc tokens are never touched.
-function Clear-CursorSecrets {
+# Generate a fresh 19-digit numeric device_id matching the format Trae's
+# ckg_server stores (e.g. "7647529847245473300"). First digit is non-zero.
+function New-RandomDeviceId19 {
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $bytes = New-Object byte[] 9
+        $rng.GetBytes($bytes)
+        $firstDigit = ($bytes[0] % 9) + 1
+        $chars = @([string]$firstDigit)
+        for ($i = 1; $i -lt 19; $i++) {
+            $chars += [string]($bytes[$i % 9] % 10)
+        }
+        return ($chars -join '')
+    }
+    finally {
+        if ($rng) { $rng.Dispose() }
+    }
+}
+
+# Trae storage.json holds the standard 4 telemetry keys PLUS iCubeAuthInfo://*
+# auth keys and a has_device_id_updated_to_aha flag. Rewrites all of them in
+# one verified pass. No-BOM write.
+function Update-TraeStorageJson {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][hashtable]$Telemetry,
         [Parameter(Mandatory = $true)][string]$BackupRoot,
         [Parameter(Mandatory = $true)][string]$BackupLabel,
         [Parameter(Mandatory = $true)][ref]$Audit,
@@ -185,8 +204,105 @@ function Clear-CursorSecrets {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "missing" -After "skipped" -Ok $true
-        Write-Host "    [SKIP] secrets DB not found: $Path" -ForegroundColor Yellow
+        foreach ($key in $Telemetry.Keys) {
+            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $Telemetry[$key] -Ok $false
+        }
+        Write-Host "    [FAILED] storage.json not found: $Path" -ForegroundColor Red
+        return $false
+    }
+
+    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+    if ($backupPath) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        foreach ($key in $Telemetry.Keys) {
+            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $Telemetry[$key] -Ok $false
+        }
+        Write-Host "    [FAILED] could not parse storage.json: $Path" -ForegroundColor Red
+        return $false
+    }
+
+    $beforeValues = @{}
+    foreach ($key in $Telemetry.Keys) {
+        $beforeValues[$key] = if ($null -ne $content.PSObject.Properties[$key]) { $content.$key } else { $null }
+    }
+    $icubeKeys = @($content.PSObject.Properties | Where-Object { $_.Name -like 'iCubeAuthInfo://*' } | ForEach-Object { $_.Name })
+    $icubeBeforeCount = $icubeKeys.Count
+    $ahaBefore = if ($null -ne $content.PSObject.Properties['has_device_id_updated_to_aha']) { [string]$content.'has_device_id_updated_to_aha' } else { $null }
+
+    foreach ($icubeKey in $icubeKeys) {
+        $content.PSObject.Properties.Remove($icubeKey)
+    }
+
+    foreach ($key in $Telemetry.Keys) {
+        if ($null -ne $content.PSObject.Properties[$key]) {
+            $content.$key = $Telemetry[$key]
+        }
+        else {
+            Add-Member -InputObject $content -NotePropertyName $key -NotePropertyValue $Telemetry[$key]
+        }
+    }
+    if ($null -ne $content.PSObject.Properties['has_device_id_updated_to_aha']) {
+        $content.'has_device_id_updated_to_aha' = $false
+    }
+    else {
+        Add-Member -InputObject $content -NotePropertyName 'has_device_id_updated_to_aha' -NotePropertyValue $false
+    }
+
+    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+
+    try {
+        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        foreach ($key in $Telemetry.Keys) {
+            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $beforeValues[$key] -After $null -Ok $false
+        }
+        Write-Host "    [FAILED] could not re-read storage.json after write: $Path" -ForegroundColor Red
+        return $false
+    }
+
+    $allMatched = $true
+    foreach ($key in $Telemetry.Keys) {
+        $actualValue = if ($null -ne $verified.PSObject.Properties[$key]) { $verified.$key } else { $null }
+        $ok = $actualValue -eq $Telemetry[$key]
+        Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $beforeValues[$key] -After $actualValue -Ok $ok
+        if (-not $ok) { $allMatched = $false }
+    }
+
+    $icubeAfter = @($verified.PSObject.Properties | Where-Object { $_.Name -like 'iCubeAuthInfo://*' } | ForEach-Object { $_.Name })
+    $icubeOk = $icubeAfter.Count -eq 0
+    Add-AuditEntry -Audit $Audit -File $Path -Key "iCubeAuthInfo.*" -Before ("count=" + $icubeBeforeCount) -After ("count=" + $icubeAfter.Count) -Ok $icubeOk
+    if (-not $icubeOk) { $allMatched = $false }
+
+    $ahaAfter = if ($null -ne $verified.PSObject.Properties['has_device_id_updated_to_aha']) { [string]$verified.'has_device_id_updated_to_aha' } else { $null }
+    $ahaOk = $ahaAfter -eq "False"
+    Add-AuditEntry -Audit $Audit -File $Path -Key "has_device_id_updated_to_aha" -Before $ahaBefore -After $ahaAfter -Ok $ahaOk
+    if (-not $ahaOk) { $allMatched = $false }
+
+    return $allMatched
+}
+
+# Trae ckg_server/local_env.json: device_id -> fresh 19-digit string,
+# host_map.default -> "". No-BOM write.
+function Update-TraeLocalEnv {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$NewDeviceId,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] local_env.json not present: $Path" -ForegroundColor Yellow
         return $true
     }
 
@@ -195,112 +311,178 @@ function Clear-CursorSecrets {
         Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
     }
 
-    $pythonCommand = Get-PythonCommandInfo
-    if (-not $pythonCommand) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "python-not-found" -Ok $false
-        Write-Host "    [FAILED] Python not found -- secrets deletion SKIPPED: $Path" -ForegroundColor Red
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id" -Before $null -After $null -Ok $false
+        Write-Host "    [FAILED] could not parse local_env.json: $Path" -ForegroundColor Red
         return $false
     }
 
-    $tempScriptPath = Join-Path $env:TEMP ("cursor_scrub_secrets_{0}.py" -f ([guid]::NewGuid().ToString("N")))
+    $deviceBefore = if ($null -ne $content.PSObject.Properties['device_id']) { [string]$content.device_id } else { $null }
+    $hostBefore = $null
+    if ($null -ne $content.PSObject.Properties['host_map'] -and $null -ne $content.host_map.PSObject.Properties['default']) {
+        $hostBefore = [string]$content.host_map.default
+    }
+
+    if ($null -ne $content.PSObject.Properties['device_id']) {
+        $content.device_id = $NewDeviceId
+    }
+    else {
+        Add-Member -InputObject $content -NotePropertyName 'device_id' -NotePropertyValue $NewDeviceId
+    }
+
+    if ($null -eq $content.PSObject.Properties['host_map']) {
+        $hostMap = [ordered]@{ default = "" }
+        Add-Member -InputObject $content -NotePropertyName 'host_map' -NotePropertyValue $hostMap
+    }
+    else {
+        if ($null -ne $content.host_map.PSObject.Properties['default']) {
+            $content.host_map.default = ""
+        }
+        else {
+            Add-Member -InputObject $content.host_map -NotePropertyName 'default' -NotePropertyValue ""
+        }
+    }
+
+    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+
+    try {
+        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id" -Before $deviceBefore -After $null -Ok $false
+        Write-Host "    [FAILED] could not re-read local_env.json after write: $Path" -ForegroundColor Red
+        return $false
+    }
+
+    $deviceAfter = if ($null -ne $verified.PSObject.Properties['device_id']) { [string]$verified.device_id } else { $null }
+    $deviceOk = $deviceAfter -eq $NewDeviceId
+    Add-AuditEntry -Audit $Audit -File $Path -Key "device_id" -Before $deviceBefore -After $deviceAfter -Ok $deviceOk
+
+    $hostAfter = $null
+    $hostOk = $true
+    if ($null -ne $verified.PSObject.Properties['host_map'] -and $null -ne $verified.host_map.PSObject.Properties['default']) {
+        $hostAfter = [string]$verified.host_map.default
+        $hostOk = ($hostAfter -eq "")
+    }
+    Add-AuditEntry -Audit $Audit -File $Path -Key "host_map.default" -Before $hostBefore -After $hostAfter -Ok $hostOk
+
+    return ($deviceOk -and $hostOk)
+}
+
+# Identity-row scrub for ModularData\ai-agent (chat DB). POLICY: the tree is
+# never renamed/deleted (v0.1 wiped chat). Instead, back it up, then in every
+# *.db delete only rows whose KEY column name-matches identity patterns
+# (device/machine/telemetry/auth-token key names). Matching is on key NAMES
+# only -- values (chat content) are never inspected or modified. Tables
+# without a key-like TEXT column are skipped with an audit entry.
+function Clear-TraeAiAgentIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$AiAgentPath,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$BackupLabel,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    if (-not (Test-Path -LiteralPath $AiAgentPath)) {
+        Add-AuditEntry -Audit $Audit -File $AiAgentPath -Key "ai-agent-scrub" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "    [SKIP] ai-agent not present: $AiAgentPath" -ForegroundColor Yellow
+        return $true
+    }
+
+    $backupPath = Backup-FileToTimestampDir -Source $AiAgentPath -BackupRoot $BackupRoot -Label $BackupLabel
+    if ($backupPath) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $AiAgentPath -BackupPath $backupPath
+    }
+
+    $dbFiles = @(Get-ChildItem -LiteralPath $AiAgentPath -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -ieq ".db" })
+    if ($dbFiles.Count -eq 0) {
+        Add-AuditEntry -Audit $Audit -File $AiAgentPath -Key "ai-agent-scrub" -Before "present" -After "no-db-files-preserved" -Ok $true
+        Write-Host "    [INFO] ai-agent has no .db files; tree preserved" -ForegroundColor Cyan
+        return $true
+    }
+
+    $pythonCommand = Get-PythonCommandInfo
+    if (-not $pythonCommand) {
+        Add-AuditEntry -Audit $Audit -File $AiAgentPath -Key "ai-agent-scrub" -Before "present" -After "python-not-found" -Ok $false
+        Write-Host "    [FAILED] Python not found -- ai-agent scrub SKIPPED: $AiAgentPath" -ForegroundColor Red
+        return $false
+    }
+
+    $tempScriptPath = Join-Path $env:TEMP ("trae_scrub_aiagent_{0}.py" -f ([guid]::NewGuid().ToString("N")))
     $pythonScript = @'
 import sqlite3
 import json
 import sys
 
 db_path = sys.argv[1]
+patterns = ("%device%id%", "%machine%id%", "%telemetry%", "%auth%token%")
+deleted = 0
+skipped_tables = []
 
-exact_keys = [
-    "cursorAuth/accessToken",
-    "cursorAuth/refreshToken",
-    "cursorAuth/cachedEmail",
-    "cursorAuth/cachedScopedProfile",
-    "cursorAuth/cachedSignUpType",
-    "cursorAuth/onboardingDate",
-    "cursorAuth/stripeMembershipAuthId",
-    "cursorAuth/stripeMembershipType",
-    "secret://cursorAuth/openAIKey",
-    "glass.lastSignedInAuthId",
-    "adminSettings.cachedAuthId",
-    "cursor.customize.userDisplayNameCache",
-]
-like_patterns = [
-    "cursorAuth/%",
-    "%google-oauth2|user%",
-]
-
-deleted = []
 conn = sqlite3.connect(db_path)
 try:
     cursor = conn.cursor()
-    for key in exact_keys:
-        cursor.execute("SELECT key FROM ItemTable WHERE key = ?", (key,))
-        for row in cursor.fetchall():
-            cursor.execute("DELETE FROM ItemTable WHERE key = ?", (row[0],))
-            deleted.append(row[0])
-    for pattern in like_patterns:
-        cursor.execute("SELECT key FROM ItemTable WHERE key LIKE ?", (pattern,))
-        for row in cursor.fetchall():
-            cursor.execute("DELETE FROM ItemTable WHERE key = ?", (row[0],))
-            deleted.append(row[0])
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = [r[0] for r in cursor.fetchall()]
+    for table in tables:
+        if not table.replace("_", "").isalnum():
+            skipped_tables.append(table)
+            continue
+        cursor.execute("PRAGMA table_info(" + table + ")")
+        cols = cursor.fetchall()
+        text_cols = [c[1] for c in cols if c[2].upper() == "TEXT" and c[1].replace("_", "").isalnum()]
+        key_cols = [c for c in text_cols if c.lower() in ("key", "name", "k", "id", "itemkey")]
+        if len(key_cols) == 0 or len(text_cols) < 1:
+            skipped_tables.append(table)
+            continue
+        key_col = key_cols[0]
+        for pattern in patterns:
+            cursor.execute("SELECT COUNT(*) FROM " + table + " WHERE " + key_col + " LIKE ?", (pattern,))
+            n = cursor.fetchone()[0]
+            if n > 0:
+                cursor.execute("DELETE FROM " + table + " WHERE " + key_col + " LIKE ?", (pattern,))
+                deleted += n
     conn.commit()
 finally:
     conn.close()
 
-verify_conn = sqlite3.connect("file:" + db_path + "?mode=ro", uri=True)
-try:
-    verify_cursor = verify_conn.cursor()
-    survivors = 0
-    for key in exact_keys:
-        verify_cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key = ?", (key,))
-        survivors += verify_cursor.fetchone()[0]
-    for pattern in like_patterns:
-        verify_cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key LIKE ?", (pattern,))
-        survivors += verify_cursor.fetchone()[0]
-finally:
-    verify_conn.close()
-
-print(json.dumps({"deleted": deleted, "survivors": survivors}))
+print(json.dumps({"deleted": deleted, "skipped_tables": skipped_tables}))
 '@
 
+    $allOk = $true
     try {
         [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
-        $commandOutput = & $pythonCommand.Source $tempScriptPath $Path
-        if ($LASTEXITCODE -ne 0) {
-            Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "failed" -Ok $false
-            Write-Host "    [FAILED] secrets deletion command failed: $Path" -ForegroundColor Red
-            return $false
+        foreach ($dbFile in $dbFiles) {
+            $commandOutput = & $pythonCommand.Source $tempScriptPath $dbFile.FullName
+            if ($LASTEXITCODE -ne 0) {
+                Add-AuditEntry -Audit $Audit -File $dbFile.FullName -Key "ai-agent-scrub" -Before "present" -After "failed" -Ok $false
+                Write-Host "    [FAILED] ai-agent scrub command failed: $($dbFile.FullName)" -ForegroundColor Red
+                $allOk = $false
+                continue
+            }
+            $result = ($commandOutput -join "`n") | ConvertFrom-Json
+            Add-AuditEntry -Audit $Audit -File $dbFile.FullName -Key "ai-agent-scrub" -Before "present" -After ("identity-rows-deleted " + $result.deleted) -Ok $true
+            Write-Host "    [OK] ai-agent scrub: $($result.deleted) identity rows from $($dbFile.FullName)" -ForegroundColor Green
         }
-
-        $result = ($commandOutput -join "`n") | ConvertFrom-Json
-        $ok = ($result.survivors -eq 0)
-        $deletedCount = $result.deleted.Count
-        if ($ok) {
-            Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After ("deleted " + $deletedCount) -Ok $true
-            Write-Host "    [OK] secrets deleted: $deletedCount keys from $Path" -ForegroundColor Green
-        }
-        else {
-            Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After ("survivors=" + $result.survivors) -Ok $false
-            Write-Host "    [FAILED] secrets survivors remain: $($result.survivors) in $Path" -ForegroundColor Red
-        }
-        return $ok
     }
     catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "exception" -Ok $false
-        Write-Host "    [FAILED] secrets deletion threw exception: $Path" -ForegroundColor Red
-        return $false
+        Add-AuditEntry -Audit $Audit -File $AiAgentPath -Key "ai-agent-scrub" -Before "present" -After "exception" -Ok $false
+        Write-Host "    [FAILED] ai-agent scrub threw exception: $AiAgentPath" -ForegroundColor Red
+        $allOk = $false
     }
     finally {
         if (Test-Path -LiteralPath $tempScriptPath) {
             Remove-Item -LiteralPath $tempScriptPath -Force -ErrorAction SilentlyContinue
         }
     }
+    return $allOk
 }
 
-# Delete every file under $Path individually with retry, then prune empty dirs.
-# A whole-tree Remove-Item fails FAST on the first locked file; per-file delete
-# means one stuck file cannot block the rest. Appends a restorable delete
-# action (whole-tree backup) to $Actions.
 function Clear-TreeFilesIndividually {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -363,8 +545,6 @@ function Clear-TreeFilesIndividually {
     return @{ Deleted = $deleted; Failed = $failed; FailedPaths = $failedPaths }
 }
 
-# Delete a stale file WITHOUT backing it up (regenerable sidecars only).
-# Verifies the path is gone afterwards.
 function Remove-VerifiedFileNoBackup {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -521,21 +701,22 @@ function Set-DeviceIdSalt {
     }
 }
 
-# Aggressive tree-kill for Cursor plus extension helpers that hold file
-# handles. Requires 2 consecutive clean checks; hard-fails when unkillable.
-function Stop-CursorProcessesAggressive {
+# Aggressive tree-kill for Trae + Broker + extension helpers.
+# Requires 2 consecutive clean checks; hard-fails the run when unkillable.
+function Stop-TraeProcessesAggressive {
     param(
         [int]$MaxAttempts = 10,
         [int]$DelayMs = 1500
     )
 
-    Write-Host "[*] Terminating all Cursor + extension-helper processes (aggressive tree-kill)..." -ForegroundColor Cyan
+    Write-Host "[*] Terminating all Trae + extension-helper processes (aggressive tree-kill)..." -ForegroundColor Cyan
 
     $processesToKill = @(
-        "Cursor",
-        "Cursor Helper",
-        "Cursor Helper (GPU)",
-        "Cursor Helper (Renderer)",
+        "Trae",
+        "Trae Broker",
+        "Trae Helper",
+        "Trae Helper (GPU)",
+        "Trae Helper (Renderer)",
         "kilo",
         "roo",
         "cline",
@@ -553,18 +734,18 @@ function Stop-CursorProcessesAggressive {
 
         Start-Sleep -Milliseconds $DelayMs
 
-        $cursorRemaining = @(Get-Process -Name "Cursor*" -ErrorAction SilentlyContinue)
+        $traeRemaining = @(Get-Process -Name "Trae*" -ErrorAction SilentlyContinue)
         $helperRemaining = 0
         foreach ($helperName in @("kilo", "cline", "roo", "blackbox")) {
             $helperRemaining += @(Get-Process -Name $helperName -ErrorAction SilentlyContinue).Count
         }
-        $count = $cursorRemaining.Count + $helperRemaining
+        $count = $traeRemaining.Count + $helperRemaining
         Write-Host "    attempt $attempt/$MaxAttempts - remaining processes: $count" -ForegroundColor DarkGray
 
         if ($count -eq 0) {
             $consecutiveClean++
             if ($consecutiveClean -ge 2) {
-                Write-Host "[OK] all Cursor + extension-helper processes terminated (confirmed across 2 checks)" -ForegroundColor Green
+                Write-Host "[OK] all Trae + extension-helper processes terminated (confirmed across 2 checks)" -ForegroundColor Green
                 return $true
             }
         }
@@ -574,8 +755,8 @@ function Stop-CursorProcessesAggressive {
     }
 
     Write-Host "[FAILED] processes still running after $MaxAttempts attempts. Aborting reset." -ForegroundColor Red
-    foreach ($p in @(Get-Process -Name "Cursor*" -ErrorAction SilentlyContinue)) {
-        Write-Host ("    Cursor PID {0}: {1}" -f $p.Id, $p.Path) -ForegroundColor Red
+    foreach ($p in @(Get-Process -Name "Trae*" -ErrorAction SilentlyContinue)) {
+        Write-Host ("    Trae PID {0}: {1}" -f $p.Id, $p.Path) -ForegroundColor Red
     }
     foreach ($helperName in @("kilo", "cline", "roo", "blackbox")) {
         foreach ($p in @(Get-Process -Name $helperName -ErrorAction SilentlyContinue)) {
@@ -585,9 +766,6 @@ function Stop-CursorProcessesAggressive {
     return $false
 }
 
-# Post-reset watchdog probe: a slow-shutdown helper can recreate core identity
-# files within seconds of deletion. Re-delete with a WARN audit entry (the
-# reset itself already succeeded, so this never FAILs the run).
 function Test-WatchdogRecreation {
     param(
         [Parameter(Mandatory = $true)][string[]]$CoreFiles,
@@ -618,8 +796,6 @@ function Test-WatchdogRecreation {
     }
 }
 
-# Old ID_Backups directories preserve complete snapshots of every identity file
-# with the OLD IDs still embedded. Keep the current run only; delete the rest.
 function Invoke-OldIdBackupsPurge {
     param(
         [Parameter(Mandatory = $true)][string]$BackupRoot,
@@ -651,8 +827,6 @@ function Invoke-OldIdBackupsPurge {
     }
 }
 
-# Audit entries added since $StartIndex that pertain to $Path (or children)
-# with ok=$false mean the step partially failed.
 function Get-StepAuditStatus {
     param(
         [Parameter(Mandatory = $true)][ref]$Audit,
@@ -677,7 +851,7 @@ function Get-StepAuditStatus {
 
 Assert-Administrator
 
-$app = "Cursor"
+$app = "Trae"
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $root = Join-Path $env:APPDATA $app
 $backupRoot = Join-Path $root ("ID_Backups\" + $timestamp)
@@ -691,19 +865,18 @@ $actions = @()
 $ids = New-IdentitySet
 
 if (-not (Test-Path -LiteralPath $root)) {
-    Write-Host "Cursor installation not found at: $root" -ForegroundColor Red
+    Write-Host "Trae installation not found at: $root" -ForegroundColor Red
     exit 1
 }
 
 New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
 
-Write-Host "=== Cursor Identity Reset v0.2 ===" -ForegroundColor Cyan
+Write-Host "=== Trae Identity Reset v0.2 ===" -ForegroundColor Cyan
 Write-Host "Root: $root" -ForegroundColor Gray
 Write-Host "Backup: $backupRoot" -ForegroundColor Gray
 Write-Host "Policy: chat history + workspaces preserved; no MAC/hostname/registry steps" -ForegroundColor Gray
 
-# Pre-step: aggressive tree-kill. Hard-fails the run if unkillable.
-if (-not (Stop-CursorProcessesAggressive)) {
+if (-not (Stop-TraeProcessesAggressive)) {
     exit 1
 }
 
@@ -711,15 +884,15 @@ $passCount = 0
 $failCount = 0
 
 $newSalt = -join ((1..32) | ForEach-Object { "{0:X}" -f (Get-Random -Maximum 16) })
-$storageUpdates = @{
+$telemetryUpdates = @{
     "telemetry.machineId"    = $ids.machineId
     "telemetry.macMachineId" = $ids.macMachineId
     "telemetry.sqmId"        = $ids.sqmId
     "telemetry.devDeviceId"  = $ids.devDeviceId
 }
 
-# --- [1/15] machineid ---
-Write-Host "`n[1/15] Updating machineid..." -ForegroundColor Cyan
+# --- [1/16] machineid ---
+Write-Host "`n[1/16] Updating machineid..." -ForegroundColor Cyan
 if (Set-VerifiedMachineIdFile -Path $machineIdPath -Value $ids.devDeviceId -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $machineIdPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
     Write-Host "[OK] machineid verified" -ForegroundColor Green
     $passCount++
@@ -729,9 +902,9 @@ else {
     $failCount++
 }
 
-# --- [2/15] storage.json (4 telemetry keys; verified live: no auth keys here) ---
-Write-Host "`n[2/15] Updating storage.json..." -ForegroundColor Cyan
-if (Set-JsonIdentity -Path $storagePath -Updates $storageUpdates -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $storagePath) -Actions ([ref]$actions)) {
+# --- [2/16] storage.json (telemetry + iCubeAuthInfo removal + aha flag) ---
+Write-Host "`n[2/16] Updating storage.json (telemetry + iCubeAuthInfo removal + aha flag)..." -ForegroundColor Cyan
+if (Update-TraeStorageJson -Path $storagePath -Telemetry $telemetryUpdates -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $storagePath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
     Write-Host "[OK] storage.json verified" -ForegroundColor Green
     $passCount++
 }
@@ -740,9 +913,13 @@ else {
     $failCount++
 }
 
-# --- [3/15] state.vscdb serviceMachineId ---
-Write-Host "`n[3/15] Updating global state.vscdb (serviceMachineId)..." -ForegroundColor Cyan
-if (Set-SqliteKeys -Path $sqlitePath -Updates @{ "storage.serviceMachineId" = $ids.devDeviceId } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $sqlitePath) -Actions ([ref]$actions)) {
+# --- [3/16] state.vscdb (serviceMachineId + aha flag) ---
+Write-Host "`n[3/16] Updating global state.vscdb (serviceMachineId + aha flag)..." -ForegroundColor Cyan
+$stateSqliteUpdates = @{
+    "storage.serviceMachineId"     = $ids.devDeviceId
+    "has_device_id_updated_to_aha" = "false"
+}
+if (Set-SqliteKeys -Path $sqlitePath -Updates $stateSqliteUpdates -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $sqlitePath) -Actions ([ref]$actions)) {
     Write-Host "[OK] global state.vscdb verified" -ForegroundColor Green
     $passCount++
 }
@@ -751,17 +928,8 @@ else {
     $failCount++
 }
 
-# --- [4/15] state.vscdb auth secrets DELETE (NEW in v0.2) ---
-Write-Host "`n[4/15] Clearing global state.vscdb auth secrets..." -ForegroundColor Cyan
-if (Clear-CursorSecrets -Path $sqlitePath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $sqlitePath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
-    $passCount++
-}
-else {
-    $failCount++
-}
-
-# --- [5/15] stale state.vscdb.backup deletion (NEW in v0.2, no backup of backup) ---
-Write-Host "`n[5/15] Deleting stale state.vscdb.backup..." -ForegroundColor Cyan
+# --- [4/16] stale state.vscdb.backup deletion (NEW in v0.2) ---
+Write-Host "`n[4/16] Deleting stale state.vscdb.backup..." -ForegroundColor Cyan
 if (Remove-VerifiedFileNoBackup -Path (Join-Path $root "User\globalStorage\state.vscdb.backup") -AuditKey "state.vscdb.backup" -Audit ([ref]$audit)) {
     $passCount++
 }
@@ -769,35 +937,95 @@ else {
     $failCount++
 }
 
-# --- [6/15] Preferences device_id_salt (NEW in v0.2) ---
-Write-Host "`n[6/15] Updating Preferences (device_id_salt)..." -ForegroundColor Cyan
-if (Set-DeviceIdSalt -Path (Join-Path $root "Preferences") -NewSalt $newSalt -BackupRoot $backupRoot -BackupLabel "Preferences" -Audit ([ref]$audit) -Actions ([ref]$actions)) {
-    $passCount++
-}
-else {
-    $failCount++
-}
-
-# --- [7/15] Local State os_crypt rotation (NEW in v0.2) ---
-Write-Host "`n[7/15] Rotating os_crypt.encrypted_key..." -ForegroundColor Cyan
-if (Remove-OsCryptEncryptedKey -Path (Join-Path $root "Local State") -BackupRoot $backupRoot -BackupLabel "Local State" -Audit ([ref]$audit) -Actions ([ref]$actions)) {
-    $passCount++
-}
-else {
-    $failCount++
-}
-
-# --- [8/15] Cookies + transport state (delete; v0.1 renamed, leaving old IDs) ---
-Write-Host "`n[8/15] Clearing Cookies + transport state..." -ForegroundColor Cyan
+# --- [5/16] aha tree (delete; v0.1 renamed, leaving encrypted device blobs) ---
+Write-Host "`n[5/16] Clearing aha tree (encrypted TinyStorage device blobs)..." -ForegroundColor Cyan
 $auditStart = $audit.Count
-$cookiePaths = @(
+$ahaPath = Join-Path $root "aha"
+if (Test-Path -LiteralPath $ahaPath) {
+    $null = Clear-TreeFilesIndividually -Path $ahaPath -BackupRoot $backupRoot -BackupLabel "aha" -Audit ([ref]$audit) -Actions ([ref]$actions)
+}
+else {
+    Add-AuditEntry -Audit ([ref]$audit) -File $ahaPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+}
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $ahaPath
+if ($status.Success) {
+    Write-Host "[OK] aha tree cleared" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] aha tree had failures" -ForegroundColor Red
+    $failCount++
+}
+
+# --- [6/16] ckg_server local_env.json ---
+Write-Host "`n[6/16] Updating ModularData\ckg_server\local_env.json (device_id + host_map)..." -ForegroundColor Cyan
+$localEnvPath = Join-Path $root "ModularData\ckg_server\local_env.json"
+if (Update-TraeLocalEnv -Path $localEnvPath -NewDeviceId (New-RandomDeviceId19) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $localEnvPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+    $passCount++
+}
+else {
+    $failCount++
+}
+
+# --- [7/16] env_codekg.db (delete; v0.1 renamed) ---
+Write-Host "`n[7/16] Clearing ckg_server\env_codekg.db..." -ForegroundColor Cyan
+$envCodekgPath = Join-Path $root "ModularData\ckg_server\env_codekg.db"
+if (Test-Path -LiteralPath $envCodekgPath) {
+    $auditStart = $audit.Count
+    $envActions = Clear-BinaryIdentityStore -Paths @($envCodekgPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
+    $actions += @($envActions)
+    $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $envCodekgPath
+    if ($status.Success) {
+        Write-Host "[OK] env_codekg.db cleared" -ForegroundColor Green
+        $passCount++
+    }
+    else {
+        Write-Host "[FAILED] env_codekg.db had failures" -ForegroundColor Red
+        $failCount++
+    }
+}
+else {
+    Write-Host "[SKIP] env_codekg.db not present" -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $envCodekgPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+    $passCount++
+}
+
+# --- [8/16] ai-agent identity scrub (PRESERVE chat -- policy change from v0.1) ---
+Write-Host "`n[8/16] Scrubbing ModularData\ai-agent identity rows (chat preserved)..." -ForegroundColor Cyan
+$aiAgentPath = Join-Path $root "ModularData\ai-agent"
+if (Clear-TraeAiAgentIdentity -AiAgentPath $aiAgentPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $aiAgentPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+    $passCount++
+}
+else {
+    $failCount++
+}
+
+# --- [9/16] Preferences salt + Local State os_crypt (NEW in v0.2) ---
+Write-Host "`n[9/16] Updating Preferences/Local State (salt + os_crypt)..." -ForegroundColor Cyan
+$stepFailed = $false
+if (-not (Set-DeviceIdSalt -Path (Join-Path $root "Preferences") -NewSalt $newSalt -BackupRoot $backupRoot -BackupLabel "Preferences" -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+    $stepFailed = $true
+}
+if (-not (Remove-OsCryptEncryptedKey -Path (Join-Path $root "Local State") -BackupRoot $backupRoot -BackupLabel "Local State" -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+    $stepFailed = $true
+}
+if ($stepFailed) {
+    Write-Host "[FAILED] Preferences/Local State step had failures" -ForegroundColor Red
+    $failCount++
+}
+else {
+    $passCount++
+}
+
+# --- [10/16] Cookies + transport state (delete; v0.1 renamed) ---
+Write-Host "`n[10/16] Clearing Cookies + transport state..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$cookieActions = Clear-BinaryIdentityStore -Paths @(
     (Join-Path $root "Network\Cookies"),
     (Join-Path $root "Network\Cookies-journal"),
     (Join-Path $root "Network\Network Persistent State"),
-    (Join-Path $root "Network\TransportSecurity"),
-    (Join-Path $root "Network\NetworkDataMigrated")
-)
-$cookieActions = Clear-BinaryIdentityStore -Paths $cookiePaths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
+    (Join-Path $root "Network\TransportSecurity")
+) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 $actions += @($cookieActions)
 $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $root
 if ($status.Success) {
@@ -809,8 +1037,8 @@ else {
     $failCount++
 }
 
-# --- [9/15] DIPS stores (delete; v0.1 renamed) ---
-Write-Host "`n[9/15] Clearing DIPS stores..." -ForegroundColor Cyan
+# --- [11/16] DIPS stores (delete; v0.1 renamed) ---
+Write-Host "`n[11/16] Clearing DIPS stores..." -ForegroundColor Cyan
 $auditStart = $audit.Count
 $dipsActions = Clear-BinaryIdentityStore -Paths @((Join-Path $root "DIPS"), (Join-Path $root "DIPS-wal")) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 $actions += @($dipsActions)
@@ -824,8 +1052,8 @@ else {
     $failCount++
 }
 
-# --- [10/15] SharedStorage + Trust Tokens (NEW in v0.2) ---
-Write-Host "`n[10/15] Clearing SharedStorage + Trust Tokens..." -ForegroundColor Cyan
+# --- [12/16] SharedStorage + Trust Tokens (delete; v0.1 renamed SharedStorage) ---
+Write-Host "`n[12/16] Clearing SharedStorage + Trust Tokens..." -ForegroundColor Cyan
 $auditStart = $audit.Count
 $sharedActions = Clear-BinaryIdentityStore -Paths @(
     (Join-Path $root "SharedStorage"),
@@ -844,30 +1072,18 @@ else {
     $failCount++
 }
 
-# --- [11/15] sentry tree (delete; v0.1 renamed -- scope_v3.json holds email + fingerprint) ---
-Write-Host "`n[11/15] Clearing sentry tree..." -ForegroundColor Cyan
+# --- [13/16] trae-webview partition + caches + Session Storage ---
+Write-Host "`n[13/16] Clearing trae-webview partition + caches..." -ForegroundColor Cyan
 $auditStart = $audit.Count
-$sentryPath = Join-Path $root "sentry"
-if (Test-Path -LiteralPath $sentryPath) {
-    $null = Clear-TreeFilesIndividually -Path $sentryPath -BackupRoot $backupRoot -BackupLabel "sentry" -Audit ([ref]$audit) -Actions ([ref]$actions)
+$webviewPath = Join-Path $root "Partitions\trae-webview"
+if (Test-Path -LiteralPath $webviewPath) {
+    $null = Clear-TreeFilesIndividually -Path $webviewPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $webviewPath) -Audit ([ref]$audit) -Actions ([ref]$actions)
 }
 else {
-    Add-AuditEntry -Audit ([ref]$audit) -File $sentryPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
+    Write-Host "[SKIP] Partitions\trae-webview not present" -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $webviewPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
 }
-$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $sentryPath
-if ($status.Success) {
-    Write-Host "[OK] sentry tree cleared" -ForegroundColor Green
-    $passCount++
-}
-else {
-    Write-Host "[FAILED] sentry tree had failures" -ForegroundColor Red
-    $failCount++
-}
-
-# --- [12/15] cache dirs + Session Storage (per-file; chat stores preserved) ---
-Write-Host "`n[12/15] Clearing cache directories + Session Storage..." -ForegroundColor Cyan
-$auditStart = $audit.Count
-foreach ($relative in @("Cache\Cache_Data", "Code Cache", "GPUCache", "blob_storage", "Service Worker", "Session Storage")) {
+foreach ($relative in @("Cache\Cache_Data", "Code Cache", "GPUCache", "blob_storage", "Service Worker", "Session Storage", "WebStorage", "Shared Dictionary")) {
     $fullPath = Join-Path $root $relative
     if (Test-Path -LiteralPath $fullPath) {
         $null = Clear-TreeFilesIndividually -Path $fullPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $fullPath) -Audit ([ref]$audit) -Actions ([ref]$actions)
@@ -876,8 +1092,6 @@ foreach ($relative in @("Cache\Cache_Data", "Code Cache", "GPUCache", "blob_stor
         Add-AuditEntry -Audit ([ref]$audit) -File $fullPath -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
     }
 }
-# Preserve Local Storage\leveldb (persistent UI state, no server-side identity
-# signal) and Backups\ (untitled/editor backups are user content).
 foreach ($preservedRelative in @("Local Storage\leveldb", "Backups")) {
     $preservedPath = Join-Path $root $preservedRelative
     if (Test-Path -LiteralPath $preservedPath) {
@@ -890,16 +1104,16 @@ foreach ($preservedRelative in @("Local Storage\leveldb", "Backups")) {
 }
 $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $root
 if ($status.Success) {
-    Write-Host "[OK] cache directories cleared" -ForegroundColor Green
+    Write-Host "[OK] trae-webview partition + caches cleared" -ForegroundColor Green
     $passCount++
 }
 else {
-    Write-Host "[FAILED] cache directories had failures" -ForegroundColor Red
+    Write-Host "[FAILED] trae-webview partition + caches had failures" -ForegroundColor Red
     $failCount++
 }
 
-# --- [13/15] Crashpad + logs (NEW in v0.2; crash dumps embed device IDs) ---
-Write-Host "`n[13/15] Clearing Crashpad + logs..." -ForegroundColor Cyan
+# --- [14/16] Crashpad + logs (NEW in v0.2) ---
+Write-Host "`n[14/16] Clearing Crashpad + logs..." -ForegroundColor Cyan
 $auditStart = $audit.Count
 foreach ($relative in @("Crashpad", "logs")) {
     $fullPath = Join-Path $root $relative
@@ -920,8 +1134,8 @@ else {
     $failCount++
 }
 
-# --- [14/15] workspace UPSERT-only (never delete workspace files) ---
-Write-Host "`n[14/15] Updating workspace state.vscdb files (UPSERT only)..." -ForegroundColor Cyan
+# --- [15/16] workspace UPSERT-only (never delete workspace files) ---
+Write-Host "`n[15/16] Updating workspace state.vscdb files (UPSERT only)..." -ForegroundColor Cyan
 $workspaceDbPaths = @()
 if (Test-Path -LiteralPath $workspaceStorageRoot) {
     $workspaceDbPaths = Get-ChildItem -LiteralPath $workspaceStorageRoot -Directory -ErrorAction SilentlyContinue |
@@ -948,8 +1162,6 @@ else {
             $workspaceFailures++
         }
     }
-    # Stale workspace .backup sidecars retain the OLD device ID but stay on
-    # disk per the preservation policy.
     $workspaceBackupCount = @(Get-ChildItem -LiteralPath $workspaceStorageRoot -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Join-Path $_.FullName "state.vscdb.backup" } |
         Where-Object { Test-Path -LiteralPath $_ }).Count
@@ -965,13 +1177,14 @@ else {
     }
 }
 
-# --- [15/15] Old ID_Backups purge + watchdog re-verify ---
-Write-Host "`n[15/15] Purging old ID_Backups + watchdog re-verify..." -ForegroundColor Cyan
+# --- [16/16] Old ID_Backups purge + watchdog re-verify ---
+Write-Host "`n[16/16] Purging old ID_Backups + watchdog re-verify..." -ForegroundColor Cyan
 Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit)
 $watchdogCoreFiles = @(
     (Join-Path $root "Network\Cookies"),
     (Join-Path $root "DIPS"),
-    (Join-Path $root "SharedStorage")
+    (Join-Path $root "SharedStorage"),
+    (Join-Path $root "aha")
 )
 Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit ([ref]$audit)
 $passCount++
@@ -983,7 +1196,7 @@ $restoreScriptPath = New-RestoreScript -BackupRoot $backupRoot -App $app -Action
 
 $finalJsonOk = $false
 if (Test-Path -LiteralPath $storagePath) {
-    $finalJsonOk = Confirm-JsonValues -Path $storagePath -Expected $storageUpdates
+    $finalJsonOk = Confirm-JsonValues -Path $storagePath -Expected $telemetryUpdates
 }
 $finalSqliteAuditEntries = @($audit | Where-Object { $_.file -eq $sqlitePath -and $_.key -eq "storage.serviceMachineId" })
 $finalSqliteOk = ($finalSqliteAuditEntries.Count -gt 0) -and ($finalSqliteAuditEntries[-1].ok -eq $true)
@@ -1014,14 +1227,15 @@ Write-Host "Pass: $passCount" -ForegroundColor Green
 Write-Host "Fail: $failCount" -ForegroundColor Red
 Write-Host "Audit log: $auditPath" -ForegroundColor Gray
 Write-Host "Restore script: $restoreScriptPath" -ForegroundColor Gray
+Write-Host "NOTE: ai-agent chat DB was scrubbed for identity rows only (chat preserved)." -ForegroundColor Gray
 Write-Host "NOTE: workspace .backup sidecars were preserved per policy (they still embed the old device ID)." -ForegroundColor Yellow
 Write-Host "NOTE: change_device_id.ps1 remains the separate, optional system-level step." -ForegroundColor Yellow
 
-[System.IO.File]::WriteAllText("$env:TEMP\cursor_v0.2_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText("$env:TEMP\trae_v0.2_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
 
 if ($failCount -gt 0) {
-    Write-Host "Cursor reset v0.2 completed with failures. Review $auditPath." -ForegroundColor Red
+    Write-Host "Trae reset v0.2 completed with failures. Review $auditPath." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "Cursor reset v0.2 completed successfully." -ForegroundColor Green
+Write-Host "Trae reset v0.2 completed successfully." -ForegroundColor Green

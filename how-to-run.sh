@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LINUX_DIR="$SCRIPT_DIR/scripts/linux"
+LINUX_DIR="$SCRIPT_DIR/src/linux"
 source "$LINUX_DIR/id_reset_common.sh"
 
 while true; do
@@ -17,10 +17,10 @@ while true; do
     echo ""
     read -r -p "Select an option [0-4]: " choice
     case "$choice" in
-        1) bash "$LINUX_DIR/change_device_id_linux.sh" Fingerprint    ;;
-        2) bash "$LINUX_DIR/reset_cursor_linux.sh"                    ;;
-        3) bash "$LINUX_DIR/reset_windsurf_linux.sh"                  ;;
-        4) bash "$LINUX_DIR/change_device_id_linux.sh" ResetMachineId ;;
+        1) bash "$LINUX_DIR/change_device_id.sh" Fingerprint    ;;
+        2) bash "$LINUX_DIR/reset_cursor.sh"                    ;;
+        3) bash "$LINUX_DIR/reset_windsurf.sh"                  ;;
+        4) bash "$LINUX_DIR/change_device_id.sh" ResetMachineId ;;
         0) info "Goodbye."; exit 0                                     ;;
         *) err "Invalid option: $choice"                               ;;
     esac

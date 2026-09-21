@@ -3,17 +3,17 @@ Device identity reset tools. Prefer the interactive launchers
 (how-to-run.bat on Windows / how-to-run.sh on Linux); direct commands below.
 
 Windows (PowerShell as Administrator, from the repo root):
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_cursor_windows-v0.2.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_devin_windows-v0.3.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_trae_windows-v0.2.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoder_windows-v0.4.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_qoderwork_windows-v0.1.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Primary
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Secondary
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_zcode_windows-v1.4.ps1" -Target Both
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\launch_zcode_second_instance.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\reset_minimax_opencode_windows-v1.2.ps1"
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\change_device_id.ps1"
+  powershell -ExecutionPolicy Bypass -File "src\windows\reset_cursor.ps1"
+  powershell -ExecutionPolicy Bypass -File "src\windows\reset_devin.ps1"
+  powershell -ExecutionPolicy Bypass -File "src\windows\reset_trae.ps1"
+  powershell -ExecutionPolicy Bypass -File "src\windows\reset_qoder.ps1"
+  powershell -ExecutionPolicy Bypass -File "src\windows\reset_qoderwork.ps1"
+  powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Primary
+  powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Secondary
+  powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Both
+  powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1"
+  powershell -ExecutionPolicy Bypass -File "src\windows\reset_minimax_opencode.ps1"
+  powershell -ExecutionPolicy Bypass -File "src\windows\change_device_id.ps1"
 
 Or double-click: how-to-run.bat
 
@@ -25,17 +25,17 @@ Telegram escalation reads TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from .envlocal
 NOTE: the watchdog monitors the PRIMARY instance only.
 
 ZCode dual-instance (two independent windows/accounts, Windows only):
-  powershell -ExecutionPolicy Bypass -File "scripts\windows\launch_zcode_second_instance.ps1"
+  powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1"
 First launch clones history into %USERPROFILE%\ZCodeSecondHome, scrubs it to
 fresh IDs, and routes Telegram channel bots to Primary (one-time, automatic).
 Both instances share one install, so one update covers both.
 
 Linux:
-  chmod +x scripts/linux/*.sh
+  chmod +x src/linux/*.sh
   ./how-to-run.sh
 
 Or run directly:
-  ./scripts/linux/reset_cursor_linux.sh
-  ./scripts/linux/reset_windsurf_linux.sh
-  ./scripts/linux/change_device_id_linux.sh Fingerprint
-  sudo ./scripts/linux/change_device_id_linux.sh ResetMachineId
+  ./src/linux/reset_cursor.sh
+  ./src/linux/reset_windsurf.sh
+  ./src/linux/change_device_id.sh Fingerprint
+  sudo ./src/linux/change_device_id.sh ResetMachineId

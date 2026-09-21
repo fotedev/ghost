@@ -63,7 +63,7 @@
 # no ternary, no $Input variable, RandomNumberGenerator via .GetBytes() only.
 #
 # Usage (Windows 10, PowerShell 5.1 or 7 -- just double-click or run):
-#   powershell -ExecutionPolicy Bypass -File reset_zcode_windows-v1.4.ps1 [-Target Primary|Secondary|Both]
+#   powershell -ExecutionPolicy Bypass -File reset_zcode.ps1 [-Target Primary|Secondary|Both]
 # Prerequisite: the TARGET instance is force-killed by the script; the survivor
 # instance (in Single mode) is intentionally left running.
 # Requirement: Python (python or python3) for SQLite writes; steps that need it

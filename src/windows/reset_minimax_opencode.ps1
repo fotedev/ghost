@@ -85,7 +85,7 @@
 # databases are preserved), so Python is NOT required.
 #
 # Usage (Windows 10, PowerShell 5.1 or 7 -- run from OUTSIDE OpenCode/MiniMax):
-#   powershell -ExecutionPolicy Bypass -File reset_minimax_opencode_windows-v1.2.ps1 [-KeepLogin] [-SkipVersionCheck]
+#   powershell -ExecutionPolicy Bypass -File reset_minimax_opencode.ps1 [-KeepLogin] [-SkipVersionCheck]
 # Prerequisite: close MiniMax Agent + OpenCode first (the script also force-kills them).
 #   -KeepLogin         : preserve .local\share\opencode\auth.json (paid/topped-up
 #                        Zen login survives; default wipes it to {} and forces re-login).

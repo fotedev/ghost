@@ -7,22 +7,20 @@ Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/
 ## Repository layout
 
 ```
-README.md  how-to-run.bat/txt/sh   # root launchers (scripts live under scripts/)
-scripts/windows/                   # current .ps1 resetters + identity_utils.ps1 + change_device_id.ps1
-                                   #   (superseded Qoder v0.3 / ZCode v1.1 moved to archive/)
-scripts/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters)
-docs/                              # AGENTS.md, IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes
-archive/                           # superseded versions (fallbacks — do not run)
+README.md  AGENTS.md  how-to-run.bat/txt/sh   # root launchers (scripts live under src/)
+src/windows/                        # current .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
+src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters)
+docs/                              # IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes (local-only)
+archive/                           # superseded versions (local-only fallbacks — do not run, never committed)
 tools/                             # reviewed utilities (block_qoder_domains.ps1,
                                    #   watch_zcode_captcha.ps1 — captcha-stall watchdog;
                                    #   Telegram creds via params or .envlocal at repo root)
-.trash/                            # moved-aside junk (git-ignored, never committed)
 ```
 
 ## Architecture
 
 ```
-scripts/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scripts
+src/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scripts
   New-IdentitySet                  #   -> { devDeviceId, machineId, macMachineId, sqmId }
   Assert-Administrator             #   -> exit 1 if not elevated
   Stop-AppProcesses                #   -> kill loop (auto-expands Windsurf->Devin+codeium, Trae->Broker)
@@ -34,27 +32,27 @@ scripts/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scr
   New-RestoreScript                #   -> self-contained .ps1 that reverses all changes
   Get-NewCrashReporterId           #   -> lowercase GUID
 
-reset_cursor_windows-v0.2.ps1     # Cursor: 15 steps (machineid, storage.json, state.vscdb,
+reset_cursor.ps1     # Cursor: 15 steps (machineid, storage.json, state.vscdb,
                                    #          auth-secrets scrub, device_id_salt, os_crypt rotation,
                                    #          Cookies/NPS/sentry/DIPS/Trust Tokens/Crashpad/logs, workspace DBs)
-reset_devin_windows-v0.3.ps1       # Windsurf/Devin Desktop (rebranded 2026-06): 17 steps
+reset_devin.ps1       # Windsurf/Devin Desktop (rebranded 2026-06): 17 steps
                                    #            x N auto-detected %APPDATA% roots (Devin, Windsurf):
                                    #            argv.json crash-reporter-id (.windsurf + .devin),
                                    #            .codeium\config.json device_id, installation_id (.windsurf
                                    #            + cli\), credentials.toml delete, config.json org_id blank,
                                    #            extended cache sweep, LOCALAPPDATA updater sweep
-reset_trae_windows-v0.2.ps1      # Trae: 16 steps (above + aha delete,
+reset_trae.ps1      # Trae: 16 steps (above + aha delete,
                                    #         ModularData\ckg_server\local_env.json device_id+host_map,
                                    #         ai-agent identity-rows-only scrub (chat preserved), SharedStorage,
                                    #         Partitions\trae-webview, iCubeAuthInfo://* removal,
                                    #         has_device_id_updated_to_aha=false)
-reset_qoder_windows-v0.4.ps1       # Qoder: 31 steps (main + CORS_Profile, expanded
+reset_qoder.ps1       # Qoder: 31 steps (main + CORS_Profile, expanded
                                    #          state.vscdb scrub incl. loginBroadcast +
                                    #          secret.local.machine.variables, .qoder
                                    #          installation_id/.auth machine_id rotation,
                                    #          webview stores, tmp/telemetry+logs, probe;
                                    #          system steps: HKCU deviceid, HKLM SQM, MAC, hostname)
-reset_zcode_windows-v1.4.ps1       # ZCode: 27 steps + [6b/27] config.json provider-apiKey strip
+reset_zcode.ps1       # ZCode: 27 steps + [6b/27] config.json provider-apiKey strip
                                    #          (Unlink-loop fix) + telemetry-state deviceMid, RUM store,
                                    #          setting.json deviceSid, embedded-browser partition;
                                    #          -Target Primary|Secondary|Both (selective tree-kill,
@@ -62,10 +60,10 @@ reset_zcode_windows-v1.4.ps1       # ZCode: 27 steps + [6b/27] config.json provi
 launch_zcode_second_instance.ps1   # ZCode dual-instance launcher (own window via cmd/start;
                                    #          first run clones+scrubs profile, routes Telegram bots
                                    #          to Primary via marker; Launch-ZCode-Second.bat wrapper)
-reset_qoderwork_windows-v0.1.ps1   # QoderWork: 26 steps (agents.db oauth/app_settings scrub,
+reset_qoderwork.ps1   # QoderWork: 26 steps (agents.db oauth/app_settings scrub,
                                    #          chats preserved; auth.dat, MachineGuid, MAC, hostname;
                                    #          -SkipMac/-SkipHostname/-DryRun)
-reset_minimax_opencode_windows-v1.2.ps1  # MiniMax/OpenCode: 22 steps (auth.json wipe -> {} unless
+reset_minimax_opencode.ps1  # MiniMax/OpenCode: 22 steps (auth.json wipe -> {} unless
                                    #          -KeepLogin, version preflight ≥1.17.0, distinct
                                    #          updater IDs, Chromium state per profile; v1.2 adds
                                    #          updater-tmp sweep, DIPS/SharedStorage suffix sweep,
@@ -74,9 +72,10 @@ reset_minimax_opencode_windows-v1.2.ps1  # MiniMax/OpenCode: 22 steps (auth.json
 change_device_id.ps1              # System-level: Fingerprint (self-test) / LegacyReset (registry GUIDs)
                                    #   / RepairProfiles (ProfileList .bak keys). Windows-only.
 ```
-(All .ps1 above live in scripts/windows/; .sh scripts in scripts/linux/;
-older Qoder v0.1-v0.3 / ZCode v1.0-v1.2 (+ Cursor/Windsurf/Trae v0.1) files
-live in archive/ as fallbacks — do not run them.)
+(All .ps1 above live in src/windows/; .sh scripts in src/linux/;
+superseded versions (Qoder v0.1-v0.3, ZCode v1.0-v1.3, MiniMax v1.0-v1.1,
+Cursor/Windsurf/Trae v0.1 legacy) live in archive/ as local-only fallbacks —
+never committed, do not run them.)
 
 Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin -> Stop-App -> New-IdentitySet -> per-target [n/N] steps with verify-after -> audit log -> restore script -> summary.
 
@@ -145,5 +144,5 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 - **Do NOT auto-commit.** Leave changes in the working tree for review. The user handles versioning.
 - **Windows-first.** This is a Windows PowerShell project. Linux scripts exist but are out of scope for changes.
 - **Run IDE scripts as Administrator** with the target app **closed first**. Each script calls `Assert-Administrator` and `Stop-AppProcesses` early.
-- **Follow the Cursor pattern.** `scripts/windows/reset_cursor_windows-v0.2.ps1` is the canonical reference implementation (v0.1 has the BOM + rename-leaves-old-fingerprint bugs). New IDE scripts should mirror its structure, local helpers, and error handling.
+- **Follow the Cursor pattern.** `src/windows/reset_cursor.ps1` is the canonical reference implementation (v0.1 had the BOM + rename-leaves-old-fingerprint bugs). New IDE scripts should mirror its structure, local helpers, and error handling.
 - **Parse-check before declaring done.** Use `[System.Management.Automation.Language.Parser]::ParseFile` to verify syntax of every `.ps1` change.
