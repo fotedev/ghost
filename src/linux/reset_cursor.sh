@@ -4,7 +4,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=id_reset_common.sh
 # shellcheck source=src/linux/id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
