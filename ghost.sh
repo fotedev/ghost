@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Interactive launcher for device ID reset tools.
-# Run: bash how-to-run.sh
+# GHOST — interactive launcher for device ID reset tools.
+# Run: bash ghost.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
