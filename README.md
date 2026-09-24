@@ -30,13 +30,13 @@ touches, and emits an audit log plus a self-contained restore script.
 | Reset Windsurf / Devin Desktop | `reset_devin.ps1` | `reset_windsurf.sh` |
 | Reset Trae | `reset_trae.ps1` | — (legacy only, local) |
 | Reset Qoder | `reset_qoder.ps1` | — |
-| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Both`) | — |
-| ZCode second instance (dual-instance) | `launch_zcode_second_instance.ps1` + `Launch-ZCode-Second.bat` | — |
+| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Both\|All`) | — |
+| ZCode clones (Primary + 3 branded instances) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth` + `Launch-ZCode-*.bat` | — |
 | Reset QoderWork | `reset_qoderwork.ps1` | — |
 | Reset MiniMax Agent / OpenCode | `reset_minimax_opencode.ps1` | — |
 | Device fingerprint | `change_device_id.ps1` | `change_device_id.sh Fingerprint` |
 | System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` |
-| Interactive menu | `how-to-run.bat` | `how-to-run.sh` |
+| Interactive menu | `GHOST.bat` | `ghost.sh` |
 
 Detailed per-tool walkthroughs (paths touched, preservation lists, flags):
 **[docs/getting-started.md](docs/getting-started.md)**.
@@ -62,12 +62,12 @@ Prefer the interactive menus:
 
 ```powershell
 # Windows (PowerShell as Administrator, from the repo root)
-.\how-to-run.bat
+.\GHOST.bat
 ```
 
 ```bash
 # Linux
-./how-to-run.sh
+./ghost.sh
 ```
 
 Or run a script directly — full examples in
@@ -75,7 +75,8 @@ Or run a script directly — full examples in
 
 ```powershell
 .\src\windows\reset_devin.ps1                        # Windsurf + Devin Desktop roots, one pass
-.\src\windows\reset_zcode.ps1 -Target Secondary      # survivor instance keeps running
+.\src\windows\reset_zcode.ps1 -Target Secondary      # survivor instances keep running
+.\src\windows\launch_zcode_second_instance.ps1 -Instance Third   # yellow-branded clone
 ```
 
 ```bash
@@ -87,10 +88,18 @@ sudo ./src/linux/change_device_id.sh ResetMachineId  # /etc/machine-id (root)
 
 ```
 ghost/
+├── GHOST.bat       # Windows interactive launcher (double-click)
+├── ghost.sh        # Linux interactive launcher
 ├── src/
 │   ├── windows/    # .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
 │   └── linux/      # .sh resetters + id_reset_common.sh
-├── tools/          # standalone utilities (watch_zcode_captcha.ps1)
+├── tools/          # watch_zcode_captcha.ps1 (captcha watchdog),
+│                   #   patch_zcode_icon_override.ps1 + .mjs (app.asar icon /
+│                   #   accent / AUMID patch — re-run after app updates),
+│                   #   install_zcode_second_shortcuts.ps1 (clone shortcuts),
+│                   #   refresh_zcode_second_chats.ps1 (cross-instance chat
+│                   #   refresh + -Watch error watcher),
+│                   #   zcode-{blue,yellow,green}-branding/ (icon assets)
 ├── tests/          # Pester 5 suite (unit + repo integrity)
 ├── docs/           # getting-started / architecture / troubleshooting / faq
 ├── .github/        # CI workflow, issue forms, PR template, CODEOWNERS
@@ -103,11 +112,22 @@ libraries; the per-app scripts are thin target manifests on top. Details:
 
 ## Configuration
 
-- `reset_zcode.ps1 -Target Primary|Secondary|Both` — per-instance resets with
-  independent ID sets (survivor instance untouched in Single mode)
+- `reset_zcode.ps1 -Target Primary|Secondary|Third|Fourth|Both|All` — per-instance
+  resets with independent ID sets (survivors untouched in Single mode)
 - `reset_qoder.ps1` / `reset_qoderwork.ps1` — `-SkipMac`, `-SkipHostname`,
   `-DryRun`
 - `reset_minimax_opencode.ps1` — `-KeepLogin`, `-SkipVersionCheck`
+- `tools/patch_zcode_icon_override.ps1` — one-time `app.asar` patch enabling
+  `ZCODE_ICON_DIR` / `ZCODE_AUMID_SUFFIX` / `ZCODE_ACCENT_HEX` /
+  `ZCODE_INSTANCE_NAME` (per-clone icon, taskbar identity, accent color,
+  window title); re-run after every ZCode app update (`-Restore` undoes it)
+- `tools/install_zcode_second_shortcuts.ps1` — Desktop + Start-menu shortcuts
+  for all three clones with per-clone AppUserModel IDs (`-Remove` uninstalls,
+  `-RepairPrimaryAumid` fixes a collided Primary pin)
+- `tools/refresh_zcode_second_chats.ps1 -Target Primary|Second|Third|Fourth|All`
+  — shows another instance's chats in a running sidebar without an app
+  restart; `-Watch` runs as a daemon that auto-refreshes on quota/captcha
+  failures
 - Telegram alerts for `tools/watch_zcode_captcha.ps1` come from
   `-TelegramBotToken`/`-TelegramChatId` params or `TELEGRAM_BOT_TOKEN` /
   `TELEGRAM_CHAT_ID` in `.envlocal` (copy [.env.example](.env.example) to
@@ -116,13 +136,13 @@ libraries; the per-app scripts are thin target manifests on top. Details:
 ## Testing
 
 ```powershell
-Invoke-ScriptAnalyzer -Path src,tools,tests -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error
+Invoke-ScriptAnalyzer -Path src,tools,tests -Recurse -Settings ./tests/PSScriptAnalyzerSettings.psd1 -Severity Error
 Invoke-Pester -CI -Output Detailed
 ```
 
 ```bash
-shellcheck src/linux/*.sh how-to-run.sh
-for f in src/linux/*.sh how-to-run.sh; do bash -n "$f"; done
+shellcheck src/linux/*.sh ghost.sh
+for f in src/linux/*.sh ghost.sh; do bash -n "$f"; done
 ```
 
 CI runs both jobs on every push/PR (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).

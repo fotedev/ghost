@@ -29,7 +29,7 @@ jobs:
           $findings = @()
           foreach ($p in @('src', 'tools', 'tests')) {
             $findings += Invoke-ScriptAnalyzer -Path $p -Recurse `
-              -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error
+              -Settings ./tests/PSScriptAnalyzerSettings.psd1 -Severity Error
           }
           $findings | Format-Table -AutoSize | Out-String | Write-Host
           if ($findings.Count -gt 0) { exit 1 }
@@ -52,12 +52,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: ShellCheck
-        run: shellcheck src/linux/*.sh how-to-run.sh
+        run: shellcheck src/linux/*.sh ghost.sh
 
       - name: bash -n (syntax)
         run: |
           set -e
-          for f in src/linux/*.sh how-to-run.sh; do
+          for f in src/linux/*.sh ghost.sh; do
             echo ":: checking $f"
             bash -n "$f"
           done

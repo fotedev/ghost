@@ -78,5 +78,16 @@ block_qoder_domains.ps1
 # Local-only: agent context/settings (per-machine) — never commit.
 .context/
 
+# Vendored clone of the ZCode app source (reverse-engineering reference,
+# ~124 MB with its own git history) — never commit.
+ZCode/
+
+# Agent sync-ignore config — per-machine, mirrors .gitignore locally.
+.zcodeignore
+
 # Local-only: hosts-file firewall tool (security-sensitive) — never commit.
 tools/block_qoder_domains.ps1
+
+# Shortcuts are per-machine binaries (paths embed the repo location) — regenerate
+# with tools\install_ghost_shortcut.ps1 instead of committing.
+*.lnk

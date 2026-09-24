@@ -7,7 +7,7 @@ folder with an audit log and a self-contained restore script.
 ## Windows
 
 Scripts live in `src/windows/`. Run PowerShell **as Administrator** from the
-repo root, or use `how-to-run.bat` (interactive menu).
+repo root, or use `GHOST.bat` (interactive menu).
 
 ```powershell
 .\src\windows\reset_cursor.ps1
@@ -53,21 +53,31 @@ repo root, or use `how-to-run.bat` (interactive menu).
 
 - 27 steps + `[6b/27]`: everything Qoder-side above (for the Qoder stores ZCode shares) plus `.updaterId`, `telemetry-state.json` (`deviceMid`), credentials OAuth clear, **config.json provider `apiKey` strip (fixes the Unlink → Checking loop)**, coding-plan-cache invalidation, RUM store, `setting.json` (`deviceSid`), session/embedded-browser Chromium data
 - Chat stores (`tasks-index.sqlite`, checkpoints, IndexedDB webview data, Local Storage leveldb) are never touched
-- Timestamped backups + audit log under `%APPDATA%\ZCode\ID_Backups\<ts>` (per-target: Secondary uses `%APPDATA%\ZCode-Second\ID_Backups\<ts>`)
-- `-Target Primary` (default reset scope + Qoder steps), `-Target Secondary` (selective tree-kill, survivor keeps running, Qoder untouched), `-Target Both` (two independent child runs, Secondary first; each generates its OWN fresh ID set — IDs are never duplicated across instances)
+- Timestamped backups + audit log under `%APPDATA%\ZCode\ID_Backups\<ts>` (per-target: Secondary uses `%APPDATA%\ZCode-Second\ID_Backups\<ts>`, Third `%APPDATA%\ZCode-Third`, Fourth `%APPDATA%\ZCode-Fourth`)
+- `-Target Primary` (default reset scope + Qoder steps), `-Target Secondary|Third|Fourth` (selective tree-kill, survivors keep running, Qoder untouched), `-Target Both` (Secondary then Primary, back-compat), `-Target All` (Third + Fourth + Secondary, then Primary incl. Qoder; each child generates its OWN fresh ID set — IDs are never duplicated across instances)
 
-**Before running:** close only the TARGET instance (the script kills it; the survivor keeps running in Single mode). Run PowerShell as Administrator. After the reset, ZCode prompts for a fresh login. `change_device_id.ps1` is machine-wide and affects BOTH instances + Qoder.
+**Before running:** close only the TARGET instance (the script kills it; survivors keep running in Single mode). Run PowerShell as Administrator. After the reset, ZCode prompts for a fresh login. `change_device_id.ps1` is machine-wide and affects ALL instances + Qoder.
 
-### 5b. ZCode second instance (dual-instance setup)
+### 5b. ZCode clones (multi-instance setup: Primary + Second + Third + Fourth)
 
-Run two fully independent ZCode windows side by side (separate Electron locks, separate SQLite stores, separate accounts):
+Run up to four fully independent ZCode windows side by side (separate Electron locks, separate SQLite stores, separate accounts):
 
 ```powershell
-# Option A — menu: how-to-run.bat → [10]
-# Option B — double-click: src\windows\Launch-ZCode-Second.bat
+# Option A — menu: GHOST.bat → [10] Second / [16] Third / [17] Fourth / [18] all clones
+# Option B — double-click: src\windows\Launch-ZCode-Second.bat / -Third.bat / -Fourth.bat
+powershell -File src\windows\launch_zcode_second_instance.ps1 -Instance Third   # example
 ```
 
-First launch clones history (`~\.zcode` → `~\ZCodeSecondHome\.zcode`, journals excluded), then scrubs the clone to fresh independent IDs (deviceMid, deviceSid, OAuth tokens, provider apiKeys) and routes Telegram bots to Primary only (marker-guarded, runs once — a deliberate re-enable in Secondary is never reverted). Later launches reuse the independent profile. Isolation is driven by five process-scoped env vars (`ZCODE_DATA_BASE_DIR`, `ZCODE_DESKTOP_USER_DATA_DIR`, `ZCODE_DESKTOP_SESSION_DATA_DIR`, `ZCODE_DESKTOP_HOME_DIR`, `HOME`) — the app overwrites `--user-data-dir`, so env vars are the only working lever. Both instances share one install: a single update covers both. Telegram channel bots must live on ONE instance only (two pollers on one token cause HTTP 409 conflicts and random cross-account billing); the launcher enforces Primary-only automatically.
+First launch of each clone copies history (`~\.zcode` → `~\ZCodeSecondHome\.zcode` / `ZCodeThirdHome` / `ZCodeFourthHome`, journals excluded), then scrubs the clone to fresh independent IDs (deviceMid, deviceSid, OAuth tokens, provider apiKeys) and routes Telegram bots to Primary only (marker-guarded, runs once per clone — a deliberate re-enable is never reverted). Later launches reuse the independent profile. Isolation is driven by five process-scoped env vars (`ZCODE_DATA_BASE_DIR`, `ZCODE_DESKTOP_USER_DATA_DIR`, `ZCODE_DESKTOP_SESSION_DATA_DIR`, `ZCODE_DESKTOP_HOME_DIR`, `HOME`) — the app overwrites `--user-data-dir`, so env vars are the only working lever. All instances share one install: a single update covers all, but re-run the icon patch (menu [13]) after updates. Clone branding: Second = blue, Third = yellow, Fourth = green (separate taskbar buttons + window titles "ZCode Blue"/"ZCode Yellow"/"ZCode Green"). Telegram channel bots must live on ONE instance only (two pollers on one token cause HTTP 409 conflicts and random cross-account billing); the launcher enforces Primary-only automatically.
+
+### 5c. ZCode clone utilities (`tools/`)
+
+| Menu | Script | What it does |
+|---|---|---|
+| [13] | `tools\patch_zcode_icon_override.ps1` | One-time `app.asar` patch (engine v6) enabling the `ZCODE_ICON_DIR` / `ZCODE_AUMID_SUFFIX` / `ZCODE_ACCENT_HEX` / `ZCODE_INSTANCE_NAME` overrides — per-clone icon, separate taskbar button + pins, accent color, "ZCode <Color>" window title. Auto-detects the install dir; re-run after **every ZCode app update**. `-Restore` rolls back, `-Force` re-patches, `-InstallDir` overrides detection; the marker file auto-upgrades patches made by older engines. |
+| [14] | `tools\install_zcode_second_shortcuts.ps1` | Desktop + Start-menu shortcuts for all three clones (`ZCode Second/Third/Fourth.lnk`), each stamped with its own AppUserModel ID so taskbar pins never collide with the Primary. `-Instance Second\|Third\|Fourth` scopes, `-Remove` uninstalls, `-RepairPrimaryAumid` strips a stray clone AUMID from the Primary's `ZCode.lnk`. |
+| [15] / [23] | `tools\refresh_zcode_second_chats.ps1` | Shows chats created in another instance inside a running sidebar, no app restart: finds shared-store chats missing from the target's tasks-index, recycles its app-server(s) (auto-respawn reseeds the index), then verifies. `-Target Primary\|Second\|Third\|Fourth\|All`; a hot-activity guard waits out in-flight turns (up to ~90 s, `-Force` bypasses). Menu [15] = Second only, [23] = all instances. |
+| [22] | same script, `-Watch -Target All` | Detached watcher: tails the CLI JSONL logs for terminal failures (captcha stall / quota / rate-limit — same signatures as `watch_zcode_captcha.ps1`) and refreshes every RUNNING instance on a 300 s cooldown. |
 
 ### 6. Reset QoderWork ID (`reset_qoderwork.ps1`)
 
@@ -118,7 +128,7 @@ Safety features — never wiped:
 .\src\windows\change_device_id.ps1 -Mode RepairProfiles
 ```
 
-> Note: machine-wide — affects **both** ZCode instances + Qoder at once.
+> Note: machine-wide — affects **all four** ZCode instances + Qoder at once.
 
 ## Linux
 
@@ -127,7 +137,7 @@ Scripts live in `src/linux/`. Requirements: bash 4+, python3 (recommended), `uui
 ```bash
 cd /path/to/this/repo
 chmod +x src/linux/*.sh
-./how-to-run.sh
+./ghost.sh
 ```
 
 Or run scripts directly:
@@ -166,6 +176,6 @@ sudo ./src/linux/change_device_id.sh ResetMachineId
 - Trae Linux: no current wrapper yet — the legacy standalone lives in `archive/` (local-only, never committed)
 - `change_device_id.sh` — `Fingerprint` or `ResetMachineId`
 - `id_reset_common.sh` — Shared helpers sourced by the thin-wrapper scripts above
-- `how-to-run.sh` — Interactive menu (repo root)
+- `ghost.sh` — Interactive menu (repo root)
 
 > **Note:** `change_device_id.ps1` modes `LegacyReset` and `RepairProfiles` are **Windows-only** (registry and profile list). On Linux use `ResetMachineId` for system ID changes.

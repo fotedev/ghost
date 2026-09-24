@@ -47,4 +47,4 @@ steps require elevation. The scripts self-elevate and log to `%TEMP%`.
 **Does this work on Linux for every tool?**
 No. Linux currently covers Cursor, Windsurf, fingerprint, and machine-id.
 Trae/Qoder/ZCode/MiniMax resetters are Windows-only — the platform table in
-the [README](../README.md#platform-overview) is authoritative.
+the [README](../README.md#how-it-works) is authoritative.
