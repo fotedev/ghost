@@ -1,3 +1,21 @@
+# Repo-relative anchor for the Python core (src/python/ghost). Captured at
+# dot-source time: $PSScriptRoot here is the directory of THIS file
+# (src/windows), stable no matter which script dot-sources it. The SQLite
+# bridge (Set-SqliteKeys) invokes src\python\ghost_cli.py instead of writing
+# a temp .py per call -- same base64/JSON/stdout contract, single source of
+# truth for the logic (tests/python/test_ghost_core.py).
+$script:GhostPythonDir = Join-Path (Split-Path -Parent $PSScriptRoot) "python"
+
+function Get-GhostPythonCli {
+    # Absolute path to the repo's Python core bootstrap, or $null when the
+    # package is missing (broken checkout / utils file copied out alone).
+    $cliPath = Join-Path $script:GhostPythonDir "ghost_cli.py"
+    if (Test-Path -LiteralPath $cliPath) {
+        return $cliPath
+    }
+    return $null
+}
+
 function Add-AuditEntry {
     param(
         [Parameter(Mandatory = $true)][ref]$Audit,
@@ -378,50 +396,22 @@ function Set-SqliteKeys {
     }
 
     $updatesBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(($Updates | ConvertTo-Json -Compress)))
-    $tempScriptPath = Join-Path $env:TEMP ("sqlite_update_{0}.py" -f ([guid]::NewGuid().ToString("N")))
-    $pythonScript = @"
-import base64
-import json
-import sqlite3
-import sys
 
-db_path = sys.argv[1]
-updates = json.loads(base64.b64decode(sys.argv[2]).decode("utf-8"))
-table_name = "$Table"
-
-conn = sqlite3.connect(db_path)
-try:
-    cursor = conn.cursor()
-    before = {}
-    for key in updates.keys():
-        cursor.execute("SELECT value FROM " + table_name + " WHERE key = ?", (key,))
-        row = cursor.fetchone()
-        before[key] = None if row is None else row[0]
-
-    cursor.execute("CREATE TABLE IF NOT EXISTS " + table_name + " (key TEXT PRIMARY KEY, value TEXT)")
-    for key, value in updates.items():
-        cursor.execute("INSERT OR REPLACE INTO " + table_name + " (key, value) VALUES (?, ?)", (key, value))
-    conn.commit()
-finally:
-    conn.close()
-
-verify_conn = sqlite3.connect("file:" + db_path + "?mode=ro", uri=True)
-try:
-    verify_cursor = verify_conn.cursor()
-    after = {}
-    for key in updates.keys():
-        verify_cursor.execute("SELECT value FROM " + table_name + " WHERE key = ?", (key,))
-        row = verify_cursor.fetchone()
-        after[key] = None if row is None else row[0]
-finally:
-    verify_conn.close()
-
-print(json.dumps({"before": before, "after": after}))
-"@
+    # Single-source Python core (src\python\ghost\sqlite_keys.py) replaces the
+    # per-call temp .py: same base64-in / JSON-stdout contract, verify-after
+    # re-read included. The table name was validated above; the Python side
+    # re-validates as defense in depth.
+    $ghostCli = Get-GhostPythonCli
+    if (-not $ghostCli) {
+        foreach ($key in $Updates.Keys) {
+            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $Updates[$key] -Ok $false
+        }
+        Write-Host "[FAILED] GHOST Python core not found (src\python\ghost_cli.py): $Path" -ForegroundColor Red
+        return $false
+    }
 
     try {
-        Set-Content -LiteralPath $tempScriptPath -Value $pythonScript -Encoding UTF8
-        $commandOutput = & $pythonCommand.Source $tempScriptPath $Path $updatesBase64
+        $commandOutput = & $pythonCommand.Source $ghostCli "sqlite-update" $Path $updatesBase64 $Table
         if ($LASTEXITCODE -ne 0) {
             foreach ($key in $Updates.Keys) {
                 Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $Updates[$key] -Ok $false
@@ -449,11 +439,6 @@ print(json.dumps({"before": before, "after": after}))
         }
         Write-Host "[FAILED] SQLite update threw an error: $Path" -ForegroundColor Red
         return $false
-    }
-    finally {
-        if (Test-Path -LiteralPath $tempScriptPath) {
-            Remove-Item -LiteralPath $tempScriptPath -Force -ErrorAction SilentlyContinue
-        }
     }
 }
 

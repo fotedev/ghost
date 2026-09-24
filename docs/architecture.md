@@ -12,6 +12,9 @@ src/windows/
 ├── change_device_id.ps1               # system-level: fingerprint / registry / profiles
 ├── launch_zcode_second_instance.ps1   # ZCode clone launcher (-Instance Second|Third|Fourth)
 └── Launch-ZCode-Second|Third|Fourth.bat  # double-click wrappers around the launcher
+src/python/
+├── ghost_cli.py                       # bootstrap: PS scripts call this absolute path
+└── ghost/                             # stdlib-only Python core (identity + SQLite logic)
 tools/
 ├── watch_zcode_captcha.ps1            # captcha-stall watchdog (no identity writes)
 ├── patch_zcode_icon_override.ps1/.mjs # app.asar icon/accent/AUMID patch (engine v6)
@@ -29,11 +32,35 @@ tools/
 | `Stop-AppProcesses` | kill loop with helper expansion (e.g. `Windsurf` → `Devin` + `codeium`) |
 | `Backup-FileToTimestampDir` | copy to `<app>\ID_Backups\<ts>\<label>` before any mutation |
 | `Set-JsonIdentity` | JSON patch + verify-after re-read |
-| `Set-SqliteKeys` | Python-backed SQLite UPSERT + verify-after (temp `.py` in `$env:TEMP`, parameterized SQL) |
+| `Set-SqliteKeys` | Python-backed SQLite UPSERT + verify-after (invokes `src\python\ghost_cli.py sqlite-update`, parameterized SQL) |
 | `Clear-BinaryIdentityStore` | rename or delete binary stores; clobbers stale `.backup` first |
 | `Write-AuditLog` | JSON audit entries `{file, key, before, after, ok}` |
 | `New-RestoreScript` | emits a self-contained `.ps1` that reverses every recorded change |
 | `Get-NewCrashReporterId` | lowercase GUID |
+
+## Python core (`src/python/ghost`)
+
+Stdlib-only Python package that owns the SQLite/JSON identity logic the
+PowerShell scripts used to embed as per-call temp `.py` here-strings. The
+PowerShell side detects an interpreter (`python`, then `python3`, via
+`Get-Command`) and invokes `src\python\ghost_cli.py <command>` — a bootstrap
+that puts `src/python` on `sys.path`, so no `PYTHONPATH` or working-directory
+assumptions.
+
+| Subcommand | Replaces | Stdout contract |
+|---|---|---|
+| `sqlite-update <db> <updates_b64> [table]` | `Set-SqliteKeys` temp script | JSON `{before, after}` |
+| `delete-secrets <db>` | `reset_zcode.ps1` secrets bridge | JSON `{deleted, survivors}` |
+| `clear-cli-telemetry <db>` | `reset_zcode.ps1` [26/27] bridge | JSON `{deleted}` (connect failure → `{deleted: 0, error}` + exit 0) |
+| `chat-check missing\|hot <db> [index]` | `refresh_zcode_second_chats.ps1` helper | `COUNT:`/`MISSING:`/`AGE_MS:`/`INFLIGHT_*:` lines |
+| `json-patch`, `identity`, `restore-script`, `audit-log` | Python twins of the utils functions | JSON reports |
+
+Payloads travel base64-encoded to sidestep native-argument quoting; values
+always use `?` placeholders; table names are validated against
+`^[A-Za-z_][A-Za-z0-9_]*$` on both the PowerShell and Python sides; every
+mutation is verified by a read-only re-open. Tests:
+`tests/python/test_ghost_core.py` (stdlib `unittest`, mirrors the Pester
+cases + real-SQLite coverage; CI runs it in the `python-core` job).
 
 ## The per-script step pattern
 

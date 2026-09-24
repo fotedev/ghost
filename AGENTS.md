@@ -11,6 +11,11 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (scripts live unde
                                              #   CLI cheat sheet: docs/cli.md)
 src/windows/                        # current .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
 src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters)
+src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
+                               #   owns the shared SQLite/JSON identity logic; the PS bridges
+                               #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,
+                               #   refresh_zcode_second_chats chat-check) invoke it by absolute
+                               #   path; tested by tests/python/test_ghost_core.py (unittest)
 docs/                              # IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes (local-only);
                                    #   ZCODE_CHAT_SYNC_WATCHER_PLAN.md (tracked — chat-sync root cause)
 archive/                           # superseded versions (local-only fallbacks — do not run, never committed)
@@ -88,7 +93,8 @@ src/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scripts
   Stop-AppProcesses                #   -> kill loop (auto-expands Windsurf->Devin+codeium, Trae->Broker)
   Backup-FileToTimestampDir        #   -> copy to <app>\ID_Backups\<ts>\<label>
   Set-JsonIdentity                 #   -> JSON patch + verify-after re-read
-  Set-SqliteKeys                   #   -> Python-backed UPSERT + verify-after (uses $env:TEMP for .py)
+  Set-SqliteKeys                   #   -> Python-backed UPSERT + verify-after (invokes src/python/ghost_cli.py sqlite-update)
+  Get-GhostPythonCli               #   -> absolute path to the Python core bootstrap (or $null if missing)
   Clear-BinaryIdentityStore        #   -> rename or delete; clobbers old .backup first
   Write-AuditLog                   #   -> JSON audit with {file, key, before, after, ok}
   New-RestoreScript                #   -> self-contained .ps1 that reverses all changes
@@ -154,7 +160,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 
 - **Never silent-success.** Every write must be followed by a re-read and comparison. If a value doesn't match after write, emit `FAILED` and record in the audit log. This is the single most important anti-pattern to avoid.
 - **Detect Python via `Get-Command`.** Fall back to `python3`. Never hardcode a Python path.
-- **Write temp `.py` to `$env:TEMP`.** Never next to the database file (clutters user dirs).
+- **SQLite logic lives in `src/python/ghost` — never re-embed Python in PS.** The four old per-call temp `.py` here-strings were de-duplicated into the stdlib-only package; PS invokes `ghost_cli.py <command>` (base64 payloads in, JSON/line contracts out). If a future change genuinely needs an embedded script, write the temp `.py` to `$env:TEMP` — never next to the database file — and fold the logic into the core instead when possible.
 - **Parameterize SQL.** Never f-string/interpolate values into SQL. Use `?` placeholders.
 - **"File existed" is not "value changed".** A backup existing does not mean the new ID is in place. Always verify.
 - **Clobber old `.backup` before renaming.** If `target.backup` already exists, remove it first — otherwise `Rename-Item` fails.

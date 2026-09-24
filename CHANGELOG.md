@@ -9,6 +9,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Python core extracted (de-duplicated bridges)**: the four embedded
+  Python here-strings that lived inside PowerShell scripts now live in one
+  stdlib-only package `src/python/ghost` invoked via
+  `src\python\ghost_cli.py` — `Set-SqliteKeys` (identity_utils.ps1), the
+  secrets-delete and CLI-telemetry bridges (reset_zcode.ps1), and the
+  chat-sync helper (refresh_zcode_second_chats.ps1) no longer write temp
+  `.py` files to `$env:TEMP`. Base64-in / JSON-stdout contracts, audit
+  wording, and verify-after behavior are unchanged; per-call temp files are
+  gone.
 - **Launcher rebranded**: `how-to-run.bat` → `GHOST.bat` and
   `how-to-run.sh` → `ghost.sh`; all docs now reference the GHOST launcher by
   name. The direct-command cheat sheet moved from `how-to-run.txt` to
@@ -18,6 +27,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Python core** — `src/python/ghost/` (stdlib only: sqlite3, json,
+  secrets, uuid) + `ghost_cli.py` bootstrap; owns the shared SQLite/JSON
+  identity logic (identity sets, key UPSERT with verify-after re-read,
+  secrets deletion, CLI telemetry scrub, chat-sync diff/hot-activity probe,
+  JSON patch, audit log, restore-script generator). Tested by
+  `tests/python/test_ghost_core.py` (30 stdlib `unittest` cases, mirrors the
+  Pester suite + real-SQLite coverage) and a new CI `python-core` job.
 - **GHOST launcher icon + shortcuts** — `assets/ghost.ico` (16–256, generated
   from the poster art by `tools/make_ghost_icon.ps1`: auto tile detection,
   rounded-corner transparency, committed `assets/ghost-source.png` master for

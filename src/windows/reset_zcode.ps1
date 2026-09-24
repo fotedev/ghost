@@ -240,8 +240,9 @@ function Invoke-WorkspaceSqliteUpdate {
 }
 
 # DELETE auth-secret keys from state.vscdb ItemTable and verify survivors are
-# zero via read-only reopen. Parameterized ? placeholders only. Temp .py goes
-# to $env:TEMP (never next to the DB) and is written without BOM.
+# zero via read-only reopen. Parameterized ? placeholders only. Logic lives in
+# the shared Python core (src\python\ghost\sqlite_keys.py delete_secrets);
+# invoked via ghost_cli.py -- no per-call temp .py.
 function Clear-SecretsFromSqlite {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -269,53 +270,15 @@ function Clear-SecretsFromSqlite {
         return $false
     }
 
-    $tempScriptPath = Join-Path $env:TEMP ("sqlite_delete_secrets_{0}.py" -f ([guid]::NewGuid().ToString("N")))
-    $pythonScript = @'
-import sqlite3
-import json
-import sys
-
-db_path = sys.argv[1]
-deleted = []
-
-patterns = ("secret://aicoding.auth.%", "secret://blackbox.%")
-target_keys = ("gituser",)
-
-conn = sqlite3.connect(db_path)
-try:
-    cursor = conn.cursor()
-    for pattern in patterns:
-        cursor.execute("SELECT key FROM ItemTable WHERE key LIKE ?", (pattern,))
-        for row in cursor.fetchall():
-            key = row[0]
-            cursor.execute("DELETE FROM ItemTable WHERE key = ?", (key,))
-            deleted.append(key)
-    for key in target_keys:
-        cursor.execute("DELETE FROM ItemTable WHERE key = ?", (key,))
-        deleted.append(key)
-    conn.commit()
-finally:
-    conn.close()
-
-verify_conn = sqlite3.connect("file:" + db_path + "?mode=ro", uri=True)
-try:
-    verify_cursor = verify_conn.cursor()
-    survivors = []
-    for pattern in patterns:
-        verify_cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key LIKE ?", (pattern,))
-        survivors.append(verify_cursor.fetchone()[0])
-    for key in target_keys:
-        verify_cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key = ?", (key,))
-        survivors.append(verify_cursor.fetchone()[0])
-finally:
-    verify_conn.close()
-
-print(json.dumps({"deleted": deleted, "survivors": survivors}))
-'@
+    $ghostCli = Get-GhostPythonCli
+    if (-not $ghostCli) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "ghost-core-missing" -Ok $false
+        Write-Host "    [FAILED] GHOST Python core not found -- secrets deletion SKIPPED: $Path" -ForegroundColor Red
+        return $false
+    }
 
     try {
-        [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
-        $commandOutput = & $pythonCommand.Source $tempScriptPath $Path
+        $commandOutput = & $pythonCommand.Source $ghostCli "delete-secrets" $Path
         if ($LASTEXITCODE -ne 0) {
             Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "failed" -Ok $false
             Write-Host "    [FAILED] secrets deletion command failed: $Path" -ForegroundColor Red
@@ -340,11 +303,6 @@ print(json.dumps({"deleted": deleted, "survivors": survivors}))
         Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "exception" -Ok $false
         Write-Host "    [FAILED] secrets deletion threw exception: $Path" -ForegroundColor Red
         return $false
-    }
-    finally {
-        if (Test-Path -LiteralPath $tempScriptPath) {
-            Remove-Item -LiteralPath $tempScriptPath -Force -ErrorAction SilentlyContinue
-        }
     }
 }
 
@@ -2365,43 +2323,11 @@ if (Test-Path -LiteralPath $zcodeCliDbPath) {
     }
 
     $pythonCommand = Get-PythonCommandInfo
-    if ($pythonCommand) {
-        $tempScriptPath = Join-Path $env:TEMP ("sqlite_clear_cli_telemetry_{0}.py" -f ([guid]::NewGuid().ToString("N")))
-        $pythonScript = @'
-import sqlite3
-import json
-import sys
-
-db_path = sys.argv[1]
-deleted = 0
-
-patterns = ("%telemetry%", "%machineId%", "%deviceId%")
-
-try:
-    conn = sqlite3.connect(db_path)
-except sqlite3.Error as exc:
-    print(json.dumps({"deleted": 0, "error": str(exc)}))
-    sys.exit(0)
-
-try:
-    cursor = conn.cursor()
-    for pattern in patterns:
-        try:
-            cursor.execute("SELECT key FROM ItemTable WHERE key LIKE ?", (pattern,))
-        except sqlite3.OperationalError:
-            continue
-        for row in cursor.fetchall():
-            cursor.execute("DELETE FROM ItemTable WHERE key = ?", (row[0],))
-            deleted += 1
-    conn.commit()
-finally:
-    conn.close()
-
-print(json.dumps({"deleted": deleted}))
-'@
+    $ghostCli = $null
+    if ($pythonCommand) { $ghostCli = Get-GhostPythonCli }
+    if ($pythonCommand -and $ghostCli) {
         try {
-            [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
-            $commandOutput = & $pythonCommand.Source $tempScriptPath $zcodeCliDbPath
+            $commandOutput = & $pythonCommand.Source $ghostCli "clear-cli-telemetry" $zcodeCliDbPath
             if ($LASTEXITCODE -eq 0) {
                 $result = ($commandOutput -join "`n") | ConvertFrom-Json
                 Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After ("deleted " + $result.deleted) -Ok $true
@@ -2419,11 +2345,11 @@ print(json.dumps({"deleted": deleted}))
             Write-Host "[FAILED] CLI db telemetry clear threw exception" -ForegroundColor Red
             $failCount++
         }
-        finally {
-            if (Test-Path -LiteralPath $tempScriptPath) {
-                Remove-Item -LiteralPath $tempScriptPath -Force -ErrorAction SilentlyContinue
-            }
-        }
+    }
+    elseif ($pythonCommand) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "ghost-core-missing" -Ok $false
+        Write-Host "[FAILED] GHOST Python core not found -- CLI db telemetry NOT cleared" -ForegroundColor Red
+        $failCount++
     }
     else {
         Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "python-not-found" -Ok $false

@@ -91,80 +91,11 @@ foreach ($cand in @('python', 'python3')) {
   if ($c) { $Py = $c.Source; break }
 }
 
-# --- temp helper .py in $env:TEMP (never next to the databases) ---
-$PyFile = Join-Path $env:TEMP 'zcode_chat_sync_check.py'
-$PySrc = @'
-import sqlite3, sys, time, json
-
-def ro(p):
-    return sqlite3.connect('file:' + p.replace('\\', '/') + '?mode=ro', uri=True, timeout=10)
-
-mode = sys.argv[1]
-if mode == 'missing':
-    db = ro(sys.argv[2])
-    rows = db.execute("SELECT id, title, time_updated FROM session "
-                      "WHERE time_archived IS NULL "
-                      "AND task_type IN ('interactive','fork','workflow_parent')").fetchall()
-    db.close()
-    tdb = ro(sys.argv[3])
-    have = set(r[0] for r in tdb.execute('SELECT task_id FROM tasks'))
-    tdb.close()
-    miss = sorted((r for r in rows if r[0] not in have), key=lambda r: r[2] or 0, reverse=True)
-    print('COUNT:%d' % len(miss))
-    for r in miss:
-        print('MISSING:%s|%s' % (r[0], (r[1] or '').replace('|', ' ')[:80]))
-elif mode == 'hot':
-    db = ro(sys.argv[2])
-    now_ms = int(time.time() * 1000)
-    # A: global commit activity (commits happen at step/tool boundaries)
-    mx = 0
-    for t in ('session', 'message', 'part'):
-        v = db.execute('SELECT COALESCE(MAX(time_updated),0) FROM %s' % t).fetchone()[0]
-        if v and v > mx:
-            mx = v
-    print('AGE_MS:%d' % (now_ms - mx))
-    # B: youngest in-flight assistant step. The row is CREATED when a step
-    # starts and data.time.completed is filled when it ends, so an
-    # uncompleted recent row == a turn is streaming right now (covers long
-    # "Thought" phases that produce no commits). Killed turns orphan such
-    # rows, hence the hard 125s recency window.
-    msg_age = -1
-    rows = db.execute('SELECT time_created, data FROM message WHERE time_created > ? '
-                      'ORDER BY time_created DESC LIMIT 40', (now_ms - 125000,)).fetchall()
-    for created, data in rows:
-        try:
-            d = json.loads(data)
-        except Exception:
-            continue
-        if d.get('role') != 'assistant':
-            continue
-        if not (d.get('time') or {}).get('completed'):
-            a = now_ms - (created or 0)
-            if msg_age < 0 or a < msg_age:
-                msg_age = a
-    print('INFLIGHT_MSG_AGE_MS:%d' % msg_age)
-    # C: youngest running tool (row committed at tool START; covers long
-    # tool executions with no other db writes). Orphans expire after 305s.
-    tool_age = -1
-    tool_name = ''
-    rows = db.execute("SELECT tool_name, started_at FROM tool_usage "
-                      "WHERE (completed_at IS NULL OR completed_at = 0) AND started_at > ? "
-                      "ORDER BY started_at DESC LIMIT 5", (now_ms - 305000,)).fetchall()
-    for name, started in rows:
-        a = now_ms - (started or 0)
-        if tool_age < 0 or a < tool_age:
-            tool_age = a
-            tool_name = name or ''
-    print('INFLIGHT_TOOL_AGE_MS:%d' % tool_age)
-    print('INFLIGHT_TOOL_NAME:%s' % tool_name.replace('|', ' ')[:40])
-    db.close()
-else:
-    print('UNKNOWN-MODE')
-    sys.exit(2)
-'@
-Set-Content -Path $PyFile -Value $PySrc -Encoding ASCII
-
 if (-not $Py) { Stop-WithError 'Python not found on PATH (needed for sqlite access)' }
+
+# --- shared Python core (src/python/ghost sqlite_keys.chat_check); no per-run temp .py ---
+$GhostCli = Join-Path (Split-Path -Parent $PSScriptRoot) 'src\python\ghost_cli.py'
+if (-not (Test-Path $GhostCli)) { Stop-WithError "GHOST Python core not found: $GhostCli" }
 
 # --- per-instance helpers -----------------------------------------------------
 function Get-TasksIndexPath([hashtable]$def) {
@@ -219,7 +150,7 @@ function Get-InstanceState([hashtable]$def) {
   $desc = @(Get-DescendantProcesses ($mains | ForEach-Object { [int]$_.Id }))
   $st.Servers = @($desc | Where-Object { $_.CommandLine -like '*app-server*' })
   if ($st.Servers.Count -eq 0) { $st.Status = 'no-appserver'; return $st }
-  $out = @(& $Py $PyFile 'missing' $SharedDb $st.TasksIndex 2>&1)
+  $out = @(& $Py $GhostCli 'chat-check' 'missing' $SharedDb $st.TasksIndex 2>&1)
   $countLine = $out | Where-Object { $_ -like 'COUNT:*' } | Select-Object -First 1
   if (($LASTEXITCODE -ne 0) -or (-not $countLine)) {
     $st.Status = 'error'
@@ -263,7 +194,7 @@ function Wait-ForIdleGuard([array]$Servers) {
       if ($pr -and ($pr.CPU - $cpuBefore[$pidKey]) -gt 0.25) { $cpuBusy = $true }
     }
     # signals A-C from the shared store
-    $hot = @(& $Py $PyFile 'hot' $SharedDb 2>&1)
+    $hot = @(& $Py $GhostCli 'chat-check' 'hot' $SharedDb 2>&1)
     $reasons = New-Object System.Collections.Generic.List[string]
     foreach ($line in $hot) {
       if ($line -like 'AGE_MS:*') {
@@ -412,7 +343,7 @@ function Invoke-RefreshPass {
     $c2 = ''
     for ($i = 0; $i -lt 22; $i++) {
       Start-Sleep -Seconds 2
-      $out2 = @(& $Py $PyFile 'missing' $SharedDb $w.TasksIndex 2>&1)
+      $out2 = @(& $Py $GhostCli 'chat-check' 'missing' $SharedDb $w.TasksIndex 2>&1)
       $c2 = $out2 | Where-Object { $_ -like 'COUNT:*' } | Select-Object -First 1
       if ($c2 -eq 'COUNT:0') { $synced = $true; break }
     }
