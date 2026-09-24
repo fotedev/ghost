@@ -1,22 +1,27 @@
 # ZCode / Qoder Identity Reset v1.4
 #
-# v1.4 adds multi-instance targeting (Primary / Secondary / Both) on top of v1.3:
+# v1.4 adds multi-instance targeting (Primary / Secondary / Third / Fourth /
+# Both / All) on top of v1.3:
 #   - -Target Primary   -> %APPDATA%\ZCode + %USERPROFILE%\.zcode only
 #   - -Target Secondary -> %APPDATA%\ZCode-Second + %USERPROFILE%\ZCodeSecondHome\.zcode only
-#   - -Target Both      -> orchestrates two independent child runs (Secondary first,
-#                          then Primary incl. Qoder), each with its OWN fresh ID set.
-#     Dual-identity rule: Both mode NEVER duplicates IDs across instances.
+#   - -Target Third     -> %APPDATA%\ZCode-Third + %USERPROFILE%\ZCodeThirdHome\.zcode only
+#   - -Target Fourth    -> %APPDATA%\ZCode-Fourth + %USERPROFILE%\ZCodeFourthHome\.zcode only
+#   - -Target Both      -> orchestrates Secondary then Primary (back-compat)
+#   - -Target All       -> orchestrates Third + Fourth + Secondary, then Primary
+#                          (incl. Qoder), each child with its OWN fresh ID set.
+#     Per-instance identity rule: orchestrator modes NEVER duplicate IDs
+#     across instances.
 #   - Single-target mode uses selective PID-tree killing (target mains via
 #     taskkill /T /PID, classified by descendant CommandLine markers) so the
-#     survivor instance keeps running. Primary additionally uses a Qoder-only
+#     surviving instances keep running. Primary additionally uses a Qoder-only
 #     kill that never touches ZCode (shared helpers spared when they descend
-#     from the Secondary tree). v1.3 killed every ZCode* process
+#     from ANY clone's tree). v1.3 killed every ZCode* process
 #     unconditionally (that path survives as Stop-ZcodeQoderProcessesAggressive
 #     but is NOT used by single-target modes).
 #   - Backups (ID_Backups), watchdog probes and final validation are scoped
 #     strictly per-target. v1.3 is kept intact for rollback.
-#   - -SkipQoder is internal (used by the Both orchestrator so Qoder steps run
-#     exactly once, in the Primary child).
+#   - -SkipQoder is internal (used by the Both/All orchestrators so Qoder steps
+#     run exactly once, in the Primary child).
 #
 # v1.3 adds telemetry.macMachineId to $storageUpdates (was 3 keys, now 4 --
 # Cursor/Windsurf/Trae/Qoder all rotate 4; the missing key was a cross-IDE
@@ -69,10 +74,10 @@
 # Requirement: Python (python or python3) for SQLite writes; steps that need it
 # FAIL honestly when it is missing.
 # NOTE: change_device_id.ps1 is machine-wide (MAC/hostname/registry) and affects
-# BOTH ZCode instances + Qoder by design. This script is app-data-only.
+# ALL ZCode instances + Qoder by design. This script is app-data-only.
 
 param(
-    [ValidateSet('Primary', 'Secondary', 'Both')][string]$Target = 'Both',
+    [ValidateSet('Primary', 'Secondary', 'Third', 'Fourth', 'Both', 'All')][string]$Target = 'Both',
     [switch]$SkipQoder
 )
 
@@ -1211,22 +1216,41 @@ function Get-StepAuditStatus {
 # === v1.4 multi-instance helpers (selective targeting) ==========================
 
 # Resolve the roaming + userprofile roots for a ZCode instance label.
+# Must stay in sync with the InstanceMap in launch_zcode_second_instance.ps1.
 function Get-ZcodeTargetRoots {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('Primary', 'Secondary')][string]$Label
+        [Parameter(Mandatory = $true)][ValidateSet('Primary', 'Secondary', 'Third', 'Fourth')][string]$Label
     )
 
-    if ($Label -eq 'Secondary') {
-        return @{
-            Label       = 'Secondary'
-            Roaming     = Join-Path $env:APPDATA 'ZCode-Second'
-            UserProfile = Join-Path $env:USERPROFILE 'ZCodeSecondHome\.zcode'
+    switch ($Label) {
+        'Secondary' {
+            return @{
+                Label       = 'Secondary'
+                Roaming     = Join-Path $env:APPDATA 'ZCode-Second'
+                UserProfile = Join-Path $env:USERPROFILE 'ZCodeSecondHome\.zcode'
+            }
         }
-    }
-    return @{
-        Label       = 'Primary'
-        Roaming     = Join-Path $env:APPDATA 'ZCode'
-        UserProfile = Join-Path $env:USERPROFILE '.zcode'
+        'Third' {
+            return @{
+                Label       = 'Third'
+                Roaming     = Join-Path $env:APPDATA 'ZCode-Third'
+                UserProfile = Join-Path $env:USERPROFILE 'ZCodeThirdHome\.zcode'
+            }
+        }
+        'Fourth' {
+            return @{
+                Label       = 'Fourth'
+                Roaming     = Join-Path $env:APPDATA 'ZCode-Fourth'
+                UserProfile = Join-Path $env:USERPROFILE 'ZCodeFourthHome\.zcode'
+            }
+        }
+        default {
+            return @{
+                Label       = 'Primary'
+                Roaming     = Join-Path $env:APPDATA 'ZCode'
+                UserProfile = Join-Path $env:USERPROFILE '.zcode'
+            }
+        }
     }
 }
 
@@ -1235,11 +1259,22 @@ function Get-ZcodeTargetRoots {
 # args). Helpers (glm app-server, plugin-host, cua-helper --socket, --type=*)
 # all carry extra args and must NOT be treated as mains -- v1.4 pre-release
 # dry-run caught this (--type filter alone misclassified 12 helpers as mains).
-# A main whose subtree contains 'ZCode-Second' or 'ZCodeSecondHome' is Secondary;
-# any other ZCode main is Primary. Returns @{ Primary = @(pids); Secondary = @(pids) }.
+# A main whose subtree carries one clone's marker strings (its roaming dir name
+# or clone home dir name) belongs to that clone; any other ZCode main is
+# Primary. Clone home dirs are disjoint, so the first marker match is decisive.
+# Returns @{ Primary = @(pids); Secondary = @(pids); Third = @(pids); Fourth = @(pids) }.
+$script:ZcodeCloneMarkers = @{
+    Secondary = @('*ZCode-Second*', '*ZCodeSecondHome*')
+    Third     = @('*ZCode-Third*', '*ZCodeThirdHome*')
+    Fourth    = @('*ZCode-Fourth*', '*ZCodeFourthHome*')
+}
+$script:ZcodeAllLabels = @('Primary', 'Secondary', 'Third', 'Fourth')
+
 function Get-ZcodeTargetMains {
+    $result = @{}
+    foreach ($k in $script:ZcodeAllLabels) { $result[$k] = @() }
     $procs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)
-    if ($procs.Count -eq 0) { return @{ Primary = @(); Secondary = @() } }
+    if ($procs.Count -eq 0) { return $result }
 
     $byParent = @{}
     foreach ($p in $procs) {
@@ -1255,29 +1290,33 @@ function Get-ZcodeTargetMains {
         ([string]::IsNullOrWhiteSpace($cmd)) -or
         ($cmd -match '^"[^"]*ZCode\.exe"$') -or ($cmd -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
     })
-    $primary = @()
-    $secondary = @()
     foreach ($m in $mains) {
         $seen = @{}
         $queue = New-Object System.Collections.Queue
         $queue.Enqueue([int]$m.ProcessId) | Out-Null
-        $isSecondary = $false
-        while ($queue.Count -gt 0) {
+        $matchedLabel = $null
+        while (($queue.Count -gt 0) -and (-not $matchedLabel)) {
             $childPid = $queue.Dequeue()
             if ($seen.ContainsKey($childPid)) { continue }
             $seen[$childPid] = $true
             if ($byParent.ContainsKey($childPid)) {
                 foreach ($c in $byParent[$childPid]) {
                     $cmd = [string]$c.CommandLine
-                    if (($cmd -like '*ZCode-Second*') -or ($cmd -like '*ZCodeSecondHome*')) { $isSecondary = $true; break }
+                    foreach ($label in @('Secondary', 'Third', 'Fourth')) {
+                        foreach ($mk in $script:ZcodeCloneMarkers[$label]) {
+                            if ($cmd -like $mk) { $matchedLabel = $label; break }
+                        }
+                        if ($matchedLabel) { break }
+                    }
+                    if ($matchedLabel) { break }
                     $queue.Enqueue([int]$c.ProcessId) | Out-Null
                 }
             }
-            if ($isSecondary) { break }
         }
-        if ($isSecondary) { $secondary += [int]$m.ProcessId } else { $primary += [int]$m.ProcessId }
+        if (-not $matchedLabel) { $matchedLabel = 'Primary' }
+        $result[$matchedLabel] += [int]$m.ProcessId
     }
-    return @{ Primary = $primary; Secondary = $secondary }
+    return $result
 }
 
 # Selective tree-kill for ONE ZCode instance. Kills only target mains (+ whole
@@ -1286,36 +1325,37 @@ function Get-ZcodeTargetMains {
 # Returns $true when the target is gone across 2 consecutive checks AND (when
 # requested AND a survivor existed at entry) the survivor mains still exist.
 # -RequireSurvivor is conditional: when no survivor main exists at entry
-# (target-only running, or Both-mode Primary child after Secondary already
-# exited) the run succeeds without a survivor instead of failing.
-# Ambiguity guard: when Label=Primary and 2+ mains exist but ZERO classify as
-# Secondary (classifier found no ZCode-Second/ZCodeSecondHome marker in any
-# subtree), killing "Primary" would kill EVERYTHING including the survivor, so
-# the run aborts with a diagnostic dump instead of killing both.
+# (target-only running, or Primary child after the clones already exited) the
+# run succeeds without a survivor instead of failing.
+# Ambiguity guard: when Label=Primary and 2+ mains exist but NONE classify as
+# any clone (classifier found no clone marker in any subtree), killing
+# "Primary" would kill EVERYTHING including the survivor, so the run aborts
+# with a diagnostic dump instead of killing all.
 function Stop-ZcodeTargetTree {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('Primary', 'Secondary')][string]$Label,
+        [Parameter(Mandatory = $true)][ValidateSet('Primary', 'Secondary', 'Third', 'Fourth')][string]$Label,
         [int]$MaxAttempts = 10,
         [int]$DelayMs = 1500,
         [switch]$RequireSurvivor
     )
 
-    Write-Host "[*] Terminating ZCode $Label instance tree only (survivor preserved)..." -ForegroundColor Cyan
-    $otherLabel = if ($Label -eq 'Primary') { 'Secondary' } else { 'Primary' }
+    Write-Host "[*] Terminating ZCode $Label instance tree only (survivors preserved)..." -ForegroundColor Cyan
     $entryMap = Get-ZcodeTargetMains
-    $entrySurvivors = @($entryMap[$otherLabel]).Count
+    $entryTotal = 0
+    foreach ($k in $script:ZcodeAllLabels) { $entryTotal += @($entryMap[$k]).Count }
     $entryTargets = @($entryMap[$Label]).Count
+    $entrySurvivors = $entryTotal - $entryTargets
     $enforceSurvivor = $RequireSurvivor -and ($entrySurvivors -gt 0)
     if ($RequireSurvivor -and (-not $enforceSurvivor)) {
-        Write-Host "    [INFO] no $otherLabel survivor running at entry -- survivor check disabled" -ForegroundColor DarkGray
+        Write-Host "    [INFO] no survivor instance running at entry -- survivor check disabled" -ForegroundColor DarkGray
     }
     if (($Label -eq 'Primary') -and ($entryTargets -ge 2) -and ($entrySurvivors -eq 0)) {
-        Write-Host "[FAILED] ambiguous classification: $($entryTargets) ZCode mains running but none classify as Secondary." -ForegroundColor Red
-        Write-Host "    Refusing to kill: every main looks like Primary, so a Primary tree-kill would close BOTH windows." -ForegroundColor Red
+        Write-Host "[FAILED] ambiguous classification: $($entryTargets) ZCode mains running but none classify as a clone." -ForegroundColor Red
+        Write-Host "    Refusing to kill: every main looks like Primary, so a Primary tree-kill would close ALL windows." -ForegroundColor Red
         foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)) {
             Write-Host ("    PID {0} PPID {1}: {2}" -f $p.ProcessId, $p.ParentProcessId, [string]$p.CommandLine) -ForegroundColor Red
         }
-        Write-Host "    Hint: restart the Secondary via option [10] (env-var isolated launch) so its subtree carries the ZCode-Second marker, then retry." -ForegroundColor Yellow
+        Write-Host "    Hint: restart the clone via its shortcut / launcher (env-var isolated launch) so its subtree carries the clone home marker, then retry." -ForegroundColor Yellow
         return $false
     }
     $consecutiveClean = 0
@@ -1328,7 +1368,9 @@ function Stop-ZcodeTargetTree {
         Start-Sleep -Milliseconds $DelayMs
         $map = Get-ZcodeTargetMains
         $remaining = @($map[$Label]).Count
-        $survivors = @($map[$otherLabel]).Count
+        $totalNow = 0
+        foreach ($k in $script:ZcodeAllLabels) { $totalNow += @($map[$k]).Count }
+        $survivors = $totalNow - $remaining
         Write-Host ("    attempt {0}/{1} - target remaining: {2}, survivor mains: {3}" -f $attempt, $MaxAttempts, $remaining, $survivors) -ForegroundColor DarkGray
         if ($remaining -eq 0) {
             if ($enforceSurvivor -and ($survivors -eq 0)) {
@@ -1353,22 +1395,25 @@ function Stop-ZcodeTargetTree {
 # own children are reaped) plus orphaned extension helpers that lock Qoder
 # files (kilo.exe kept a log locked as an orphan process). NEVER touches any
 # ZCode* process: shared helpers (kilo/roo/cline/blackbox) are killed ONLY when
-# their ancestor chain does NOT lead to a surviving Secondary ZCode main, so a
-# running Secondary instance keeps its helpers. Secondary mode never calls this
-# (Qoder stays running there by design).
+# their ancestor chain does NOT lead to a surviving CLONE ZCode main (any of
+# Secondary/Third/Fourth), so running clone instances keep their helpers.
+# Clone targets never call this (Qoder stays running there by design).
 function Stop-QoderProcessesOnly {
     param(
         [int]$MaxAttempts = 10,
         [int]$DelayMs = 1500
     )
 
-    Write-Host "[*] Terminating Qoder processes only (ZCode survivor untouched)..." -ForegroundColor Cyan
+    Write-Host "[*] Terminating Qoder processes only (ZCode survivors untouched)..." -ForegroundColor Cyan
     $qoderImageNames = @("Qoder", "Qoder Helper", "Qoder Helper (GPU)", "Qoder Helper (Renderer)")
     $sharedHelperNames = @("kilo", "roo", "cline", "cline-host", "blackbox")
     $consecutiveClean = 0
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         $zmap = Get-ZcodeTargetMains
-        $secondaryPids = @($zmap['Secondary'])
+        $clonePids = @()
+        foreach ($cloneLabel in @('Secondary', 'Third', 'Fourth')) {
+            $clonePids += @($zmap[$cloneLabel])
+        }
 
         $allProcs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
         $byPid = @{}
@@ -1385,13 +1430,13 @@ function Stop-QoderProcessesOnly {
             foreach ($m in $matches) {
                 $helperPid = [int]$m.ProcessId
                 # Inline ancestor walk: spare helpers descending from a
-                # surviving Secondary ZCode main (dynamic scoping of nested
+                # surviving clone ZCode main (dynamic scoping of nested
                 # functions is fragile, so no helper function here).
-                $isSecondaryHelper = $false
+                $isCloneHelper = $false
                 $seenPids = @{}
                 $currentPid = $helperPid
                 while ($true) {
-                    if ($secondaryPids -contains $currentPid) { $isSecondaryHelper = $true; break }
+                    if ($clonePids -contains $currentPid) { $isCloneHelper = $true; break }
                     if ($seenPids.ContainsKey($currentPid)) { break }
                     $seenPids[$currentPid] = $true
                     if (-not $byPid.ContainsKey($currentPid)) { break }
@@ -1399,7 +1444,7 @@ function Stop-QoderProcessesOnly {
                     if (($parentPid -eq 0) -or ($parentPid -eq $currentPid)) { break }
                     $currentPid = $parentPid
                 }
-                if ($isSecondaryHelper) { continue }
+                if ($isCloneHelper) { continue }
                 $null = & taskkill /F /T /PID $helperPid 2>&1
             }
         }
@@ -1408,12 +1453,15 @@ function Stop-QoderProcessesOnly {
 
         $qoderRemaining = @(Get-Process -Name "Qoder*" -ErrorAction SilentlyContinue).Count
         $zmapAfter = Get-ZcodeTargetMains
-        $secondarySurvivors = @($zmapAfter['Secondary']).Count
-        Write-Host ("    attempt {0}/{1} - Qoder remaining: {2}, Secondary survivors: {3}" -f $attempt, $MaxAttempts, $qoderRemaining, $secondarySurvivors) -ForegroundColor DarkGray
+        $cloneSurvivors = 0
+        foreach ($cloneLabel in @('Secondary', 'Third', 'Fourth')) {
+            $cloneSurvivors += @($zmapAfter[$cloneLabel]).Count
+        }
+        Write-Host ("    attempt {0}/{1} - Qoder remaining: {2}, clone survivors: {3}" -f $attempt, $MaxAttempts, $qoderRemaining, $cloneSurvivors) -ForegroundColor DarkGray
         if ($qoderRemaining -eq 0) {
             $consecutiveClean++
             if ($consecutiveClean -ge 2) {
-                Write-Host "[OK] Qoder processes terminated (2 clean checks); Secondary survivors: $secondarySurvivors" -ForegroundColor Green
+                Write-Host "[OK] Qoder processes terminated (2 clean checks); clone survivors: $cloneSurvivors" -ForegroundColor Green
                 return $true
             }
         }
@@ -1433,24 +1481,48 @@ $qoderUserProfile = Join-Path $env:USERPROFILE ".qoder"
 $qoderIdBackupsRoot = Join-Path $qoderRoaming "ID_Backups"
 
 # --- v1.4 target resolution ---------------------------------------------------
-# Both mode orchestrates two INDEPENDENT child runs (Secondary first with
-# -SkipQoder so Qoder steps execute exactly once, in the Primary child).
-# Each child generates its OWN fresh ID set -> dual-identity rule holds.
-if ($Target -eq 'Both') {
+# Both/All modes orchestrate INDEPENDENT child runs (clones first with -SkipQoder
+# so Qoder steps execute exactly once, in the Primary child). Each child
+# generates its OWN fresh ID set -> per-instance identity rule holds.
+# 'Both' = Secondary + Primary (kept for backward compatibility with menus).
+# 'All'  = Third + Fourth + Secondary + Primary.
+if (($Target -eq 'Both') -or ($Target -eq 'All')) {
     $v14Script = $MyInvocation.MyCommand.Path
-    Write-Host "=== ZCode Identity Reset v1.4 (Both: independent IDs per instance) ===" -ForegroundColor Cyan
-    Write-Host "[Both 1/2] Resetting Secondary instance (Qoder steps skipped)..." -ForegroundColor Cyan
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $v14Script -Target Secondary -SkipQoder
-    $secondaryCode = $LASTEXITCODE
-    Write-Host "[Both 2/2] Resetting Primary instance (incl. Qoder)..." -ForegroundColor Cyan
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $v14Script -Target Primary
-    $primaryCode = $LASTEXITCODE
-    Write-Host "`n=== Both-mode summary ===" -ForegroundColor Cyan
-    Write-Host ("Secondary exit: {0}" -f $secondaryCode) -ForegroundColor Gray
-    Write-Host ("Primary exit:   {0}" -f $primaryCode) -ForegroundColor Gray
+    if ($Target -eq 'Both') {
+        $children = @(
+            @{ Label = 'Secondary'; SkipQoder = $true },
+            @{ Label = 'Primary';   SkipQoder = $false }
+        )
+    } else {
+        $children = @(
+            @{ Label = 'Third';     SkipQoder = $true },
+            @{ Label = 'Fourth';    SkipQoder = $true },
+            @{ Label = 'Secondary'; SkipQoder = $true },
+            @{ Label = 'Primary';   SkipQoder = $false }
+        )
+    }
+    $childCount = $children.Count
+    Write-Host "=== ZCode Identity Reset v1.4 (${Target}: independent IDs per instance) ===" -ForegroundColor Cyan
+    $exitCodes = @()
+    for ($ci = 0; $ci -lt $childCount; $ci++) {
+        $child = $children[$ci]
+        $qoderNote = ''
+        if (-not $child.SkipQoder) { $qoderNote = ' (incl. Qoder)' }
+        Write-Host ("[{0} {1}/{2}] Resetting {3} instance{4}..." -f $Target, ($ci + 1), $childCount, $child.Label, $qoderNote) -ForegroundColor Cyan
+        $fwdArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $v14Script, '-Target', $child.Label)
+        if ($child.SkipQoder) { $fwdArgs += '-SkipQoder' }
+        & powershell @fwdArgs
+        $exitCodes += $LASTEXITCODE
+    }
+    Write-Host "`n=== $Target-mode summary ===" -ForegroundColor Cyan
+    for ($ci = 0; $ci -lt $childCount; $ci++) {
+        Write-Host ("{0} exit: {1}" -f $children[$ci].Label, $exitCodes[$ci]) -ForegroundColor Gray
+    }
     Write-Host "NOTE: IDs were generated independently per instance (never duplicated)." -ForegroundColor Yellow
-    Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects BOTH instances + Qoder." -ForegroundColor Yellow
-    if (($secondaryCode -ne 0) -or ($primaryCode -ne 0)) { exit 1 }
+    Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects ALL ZCode instances + Qoder." -ForegroundColor Yellow
+    $anyFail = $false
+    foreach ($code in $exitCodes) { if ($code -ne 0) { $anyFail = $true } }
+    if ($anyFail) { exit 1 }
     exit 0
 }
 
@@ -1465,7 +1537,7 @@ $ids = New-IdentitySet
 
 if (-not (Test-Path -LiteralPath $zcodeRoaming)) {
     Write-Host "ZCode $Target instance not found at: $zcodeRoaming" -ForegroundColor Red
-    Write-Host "Hint: launch it once via Launch-ZCode-Second.bat (Secondary) or ZCode.exe (Primary)." -ForegroundColor Yellow
+    Write-Host "Hint: launch it once via its clone shortcut / launcher (Secondary/Third/Fourth) or ZCode.exe (Primary)." -ForegroundColor Yellow
     exit 1
 }
 
@@ -1475,7 +1547,7 @@ if ($qoderPresent) {
     $qoderProfiles = @(Get-QoderProfileRoots -MainRoot $qoderRoaming)
 }
 if ($SkipQoder) {
-    # Secondary child in Both mode: Qoder belongs to the Primary run only.
+    # Clone child in Both/All mode: Qoder belongs to the Primary run only.
     $qoderPresent = $false
     $qoderProfiles = @()
 }
@@ -1494,19 +1566,14 @@ else {
 }
 Write-Host "Backup: $backupRoot" -ForegroundColor Gray
 Write-Host "Policy: chat history + workspaces preserved; no MAC/hostname/registry steps" -ForegroundColor Gray
-Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects BOTH instances + Qoder." -ForegroundColor Yellow
+Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects ALL ZCode instances + Qoder." -ForegroundColor Yellow
 
 # Pre-step: scoped tree-kill. Single-target mode kills ONLY the target ZCode
-# tree (survivor keeps running). Qoder processes are killed only when the
+# tree (survivors keep running). Qoder processes are killed only when the
 # Primary target needs its Qoder steps (via Qoder-only kill that never touches
-# ZCode); Secondary never touches Qoder. The aggressive kill-all helper is
-# intentionally NOT used here (it closes BOTH ZCode windows).
-if ($Target -eq 'Secondary') {
-    if (-not (Stop-ZcodeTargetTree -Label Secondary -RequireSurvivor)) {
-        exit 1
-    }
-}
-else {
+# ZCode); clone targets never touch Qoder. The aggressive kill-all helper is
+# intentionally NOT used here (it closes ALL ZCode windows).
+if ($Target -eq 'Primary') {
     if (-not (Stop-ZcodeTargetTree -Label Primary -RequireSurvivor)) {
         exit 1
     }
@@ -1514,6 +1581,11 @@ else {
         if (-not (Stop-QoderProcessesOnly)) {
             exit 1
         }
+    }
+}
+else {
+    if (-not (Stop-ZcodeTargetTree -Label $Target -RequireSurvivor)) {
+        exit 1
     }
 }
 
@@ -2438,7 +2510,7 @@ Write-Host "Fail: $failCount" -ForegroundColor Red
 Write-Host "Audit log: $auditPath" -ForegroundColor Gray
 Write-Host "Restore script: $restoreScriptPath" -ForegroundColor Gray
 Write-Host "NOTE: workspace .backup sidecars were preserved per policy (they still embed the old device ID)." -ForegroundColor Yellow
-Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects BOTH ZCode instances + Qoder." -ForegroundColor Yellow
+Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects ALL ZCode instances + Qoder." -ForegroundColor Yellow
 
 [System.IO.File]::WriteAllText("$env:TEMP\zcode_v1.3_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
 
