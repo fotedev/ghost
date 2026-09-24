@@ -29,7 +29,7 @@ archive/       superseded versions — local-only, NEVER committed
 
 ```powershell
 # Lint (must produce zero Error-severity findings)
-Invoke-ScriptAnalyzer -Path src,tools,tests -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error
+Invoke-ScriptAnalyzer -Path src,tools,tests -Recurse -Settings ./tests/PSScriptAnalyzerSettings.psd1 -Severity Error
 
 # Test suite
 Invoke-Pester -CI -Output Detailed
@@ -37,8 +37,8 @@ Invoke-Pester -CI -Output Detailed
 
 ```bash
 # Shell scripts
-shellcheck src/linux/*.sh how-to-run.sh
-for f in src/linux/*.sh how-to-run.sh; do bash -n "$f"; done
+shellcheck src/linux/*.sh ghost.sh
+for f in src/linux/*.sh ghost.sh; do bash -n "$f"; done
 ```
 
 ## Non-negotiable conventions

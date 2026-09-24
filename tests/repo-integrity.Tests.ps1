@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Repository integrity tests: syntax gates + launcher/README drift guards.
 # These exist so a rename or path change can never silently break the
-# launchers (how-to-run.bat/.sh) or the documented entry points.
+# launchers (GHOST.bat/ghost.sh) or the documented entry points.
 #
 # Pester 6 scope note: It bodies see ONLY what they compute themselves
 # ($PSScriptRoot is reliable; Describe/file-scope variables are not).
@@ -34,9 +34,9 @@ Describe "PowerShell syntax (Parser zero-errors)" {
 }
 
 Describe "Bash syntax (bash -n)" -Skip:(-not $script:bashAvailable) {
-    It "every .sh in src/linux plus how-to-run.sh passes bash -n" {
+    It "every .sh in src/linux plus ghost.sh passes bash -n" {
         $files = @(Get-ChildItem -Path (Join-Path $PSScriptRoot "..\src\linux") -Filter "*.sh" -File)
-        $files += Get-Item -LiteralPath (Join-Path $PSScriptRoot "..\how-to-run.sh")
+        $files += Get-Item -LiteralPath (Join-Path $PSScriptRoot "..\ghost.sh")
         $broken = @()
         foreach ($file in $files) {
             $null = & bash -n $file.FullName 2>&1
@@ -48,18 +48,20 @@ Describe "Bash syntax (bash -n)" -Skip:(-not $script:bashAvailable) {
     }
 }
 
-Describe "how-to-run.bat dispatch integrity" {
-    It "resolves every PowerShell -File target to an existing file" {
+Describe "GHOST.bat dispatch integrity" {
+    It "resolves every menu-dispatched script to an existing file" {
         $repoRoot = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
-        $targets = @([regex]::Matches(
-            (Get-Content -LiteralPath (Join-Path $repoRoot "how-to-run.bat") -Raw),
-            '-File "([^"]+)"') |
+        $raw = Get-Content -LiteralPath (Join-Path $repoRoot "GHOST.bat") -Raw
+        # Direct -File "..." targets plus the script path argument handed to the
+        # :Run / :RunWith / :Detached / :StartClone subroutines (which invoke
+        # -File "%~N" themselves, so those %-tokens never match below).
+        $targets = @([regex]::Matches($raw, '-File "([^"]+\.ps1)"') +
+                     [regex]::Matches($raw, 'call :\w+\s+(?:"[^"]*"\s+)*?"((?:src|tools)\\[^"]+\.ps1)"') |
             ForEach-Object { $_.Groups[1].Value } |
-            Where-Object { $_ -match "\.ps1" } |
             Select-Object -Unique)
         $targets.Count | Should -BeGreaterOrEqual 8
 
-        # %~dp0 in how-to-run.bat resolves to the repo root.
+        # %~dp0 in GHOST.bat resolves to the repo root.
         $missing = @($targets |
             ForEach-Object { $_ -replace [regex]::Escape("%~dp0"), ($repoRoot + "\") } |
             Where-Object { -not (Test-Path -LiteralPath $_) })
@@ -70,11 +72,11 @@ Describe "how-to-run.bat dispatch integrity" {
     }
 }
 
-Describe "how-to-run.sh dispatch integrity" {
+Describe "ghost.sh dispatch integrity" {
     It "resolves every \$LINUX_DIR target to an existing file in src/linux" {
         $repoRoot = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
         $targets = @([regex]::Matches(
-            (Get-Content -LiteralPath (Join-Path $repoRoot "how-to-run.sh") -Raw),
+            (Get-Content -LiteralPath (Join-Path $repoRoot "ghost.sh") -Raw),
             '\$LINUX_DIR/([a-z_]+\.sh)') |
             ForEach-Object { $_.Groups[1].Value } |
             Select-Object -Unique)
@@ -112,7 +114,7 @@ Describe "Governance files present" {
     It "has all governance/config files, non-empty" {
         $repoRoot = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
         $missing = @()
-        foreach ($name in @("LICENSE", "NOTICE", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "CHANGELOG.md", ".env.example", ".gitattributes", "PSScriptAnalyzerSettings.psd1")) {
+        foreach ($name in @("LICENSE", "NOTICE", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "CHANGELOG.md", ".env.example", ".gitattributes", "tests\PSScriptAnalyzerSettings.psd1")) {
             $p = Join-Path $repoRoot $name
             if (-not (Test-Path -LiteralPath $p) -or (Get-Item -LiteralPath $p).Length -le 0) {
                 $missing += $name

@@ -5,6 +5,65 @@ All notable changes to GHOST are documented here. Versions are Git tags
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- **Launcher rebranded**: `how-to-run.bat` → `GHOST.bat` and
+  `how-to-run.sh` → `ghost.sh`; all docs now reference the GHOST launcher by
+  name. The direct-command cheat sheet moved from `how-to-run.txt` to
+  [docs/cli.md](docs/cli.md), and the analyzer settings moved from the repo
+  root to `tests/PSScriptAnalyzerSettings.psd1` (CI + test paths updated).
+  Menu numbers are unchanged.
+
+### Added
+
+- **GHOST launcher icon + shortcuts** — `assets/ghost.ico` (16–256, generated
+  from the poster art by `tools/make_ghost_icon.ps1`: auto tile detection,
+  rounded-corner transparency, committed `assets/ghost-source.png` master for
+  regeneration). Since a `.bat` cannot carry an Explorer icon, the icon ships
+  via `tools/install_ghost_shortcut.ps1` (menu [24]): `GHOST.lnk` on the
+  Desktop and in the repo root, pointing at `GHOST.bat` (`.lnk` files are
+  gitignored — regenerate, never commit).
+- **ZCode multi-instance expansion** — Primary + three branded clones:
+  **Second** (blue), **Third** (yellow), **Fourth** (green).
+  - `launch_zcode_second_instance.ps1 -Instance Second|Third|Fourth` with
+    per-clone homes (`ZCode{Second,Third,Fourth}Home`), roaming dirs
+    (`ZCode-Second` / `ZCode-Third` / `ZCode-Fourth`), and first-run
+    seed-clone + identity scrub; plus double-click wrappers
+    `Launch-ZCode-Second/Third/Fourth.bat`.
+  - `reset_zcode.ps1 -Target Third|Fourth|All` — per-instance resets with
+    independent ID sets per child, per-target backups and scoped tree-kill
+    (survivor instances keep running).
+- `tools/patch_zcode_icon_override.ps1` (+ `.mjs` engine v6) — one-time
+  `app.asar` patch enabling `ZCODE_ICON_DIR`, `ZCODE_AUMID_SUFFIX`,
+  `ZCODE_ACCENT_HEX`, `ZCODE_INSTANCE_NAME` overrides (branded icon, separate
+  taskbar button/pins, accent color, "ZCode <Color>" window title) and
+  disabling the clones' auto-updater; marker file auto-upgrades older patches.
+  Re-run after every ZCode app update (`GHOST.bat` menu [13]).
+- `tools/install_zcode_second_shortcuts.ps1` — per-user Desktop + Start-menu
+  shortcuts for all three clones, each with its own `System.AppUserModel.ID`
+  so pins never collide with the Primary (`-Remove`, `-Instance`,
+  `-RepairPrimaryAumid`); menu [14].
+- `tools/refresh_zcode_second_chats.ps1` — cross-instance chat refresh
+  without an app restart: finds shared-store chats missing from the target's
+  sidebar index and recycles its app-server(s) (auto-respawn reseeds the
+  index), with a multi-signal hot-activity guard and verify-after
+  (`-Target Primary|Second|Third|Fourth|All`; menus [15]/[23]) plus an
+  error-triggered `-Watch` daemon that refreshes every running instance on
+  captcha-stall / quota / rate-limit failures (menu [22]). Supersedes the
+  row-copying `test_live_inject.py` spike (deleted).
+- `tools/zcode-{blue,yellow,green}-branding/` — per-clone icon assets
+  (`icon_windows.png`, `tray_icon.ico`) and the shared generator.
+- `GHOST.bat` menus [13]–[23]: icon patch, clone shortcuts, chat
+  refresh (one-shot + watcher), clone launches (single + all), per-instance
+  ZCode resets, and refresh-all.
+
+### Security
+
+- Docs depersonalized: machine-specific home paths replaced with
+  `%USERPROFILE%` in `docs/ZCODE_CHAT_SYNC_WATCHER_PLAN.md` (newly tracked).
+
 ## [1.0.0] — 2026-09-21
 
 First tagged release; the repository restructured to standard open-source

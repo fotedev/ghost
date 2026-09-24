@@ -7,12 +7,17 @@ GHOST is a flat script toolkit: one shared library per OS, plus one thin
 
 ```
 src/windows/
-├── identity_utils.ps1        # shared library, dot-sourced by every IDE script
-├── reset_<app>.ps1           # one thin manifest per app
-├── change_device_id.ps1      # system-level: fingerprint / registry / profiles
-└── launch_zcode_second_instance.ps1 + .bat
+├── identity_utils.ps1                 # shared library, dot-sourced by every IDE script
+├── reset_<app>.ps1                    # one thin manifest per app
+├── change_device_id.ps1               # system-level: fingerprint / registry / profiles
+├── launch_zcode_second_instance.ps1   # ZCode clone launcher (-Instance Second|Third|Fourth)
+└── Launch-ZCode-Second|Third|Fourth.bat  # double-click wrappers around the launcher
 tools/
-└── watch_zcode_captcha.ps1   # standalone watchdog (no identity writes)
+├── watch_zcode_captcha.ps1            # captcha-stall watchdog (no identity writes)
+├── patch_zcode_icon_override.ps1/.mjs # app.asar icon/accent/AUMID patch (engine v6)
+├── install_zcode_second_shortcuts.ps1 # clone shortcuts (Desktop + Start menu)
+├── refresh_zcode_second_chats.ps1     # cross-instance chat refresh + -Watch watcher
+└── zcode-{blue,yellow,green}-branding/  # per-clone icon assets + generator
 ```
 
 ## Shared library API (`identity_utils.ps1`)
@@ -64,13 +69,31 @@ machine can carry the legacy `%APPDATA%\Windsurf` root and the new
 - verified non-targets (documented, never touched): `%USERPROFILE%\.devin-shared`
   and `%LOCALAPPDATA%\devin` (CLI binaries only).
 
-## Dual-instance isolation (ZCode)
+## Multi-instance isolation (ZCode: Primary + 3 clones)
 
-Two independent ZCode windows are isolated with process-scoped environment
-variables (`ZCODE_DATA_BASE_DIR`, `ZCODE_DESKTOP_USER_DATA_DIR`,
+ZCode runs as four independent instances — Primary (default profile) plus
+three branded clones: **Second** (blue), **Third** (yellow), **Fourth**
+(green). Isolation rides on process-scoped environment variables
+(`ZCODE_DATA_BASE_DIR`, `ZCODE_DESKTOP_USER_DATA_DIR`,
 `ZCODE_DESKTOP_SESSION_DATA_DIR`, `ZCODE_DESKTOP_HOME_DIR`, `HOME`) — the app
-overwrites `--user-data-dir`, so env vars are the only working lever. Resets
-run per-target with independent ID sets; Telegram bots are enforced Primary-only.
+overwrites `--user-data-dir`, so env vars are the only working lever. Each
+clone gets its own home + roaming directory, a first-run seed clone with a
+rotated telemetry identity, and an independent ID set on reset
+(`reset_zcode.ps1 -Target Primary|Secondary|Third|Fourth|Both|All`).
+
+Visual identity comes from `tools/patch_zcode_icon_override.ps1`, a one-time
+`app.asar` patch (engine v6) that honors `ZCODE_ICON_DIR` (branded icon),
+`ZCODE_AUMID_SUFFIX` (separate taskbar button + pins), `ZCODE_ACCENT_HEX` +
+`ZCODE_INSTANCE_NAME` (accent color + "ZCode <Color>" window title). The patch
+also disables the clones' auto-updater so it can never silently revert itself —
+an app update wipes it; re-run after every update. Telegram bots are enforced
+Primary-only via a per-home marker (one token = one polling instance).
+
+Cross-instance chat visibility is a sidebar-index problem, not a data problem:
+all instances share one session store, so `tools/refresh_zcode_second_chats.ps1`
+recycles the target instance's app-server (auto-respawn reseeds the index
+baseline). Root-cause analysis and the error-triggered `-Watch` mode:
+[ZCODE_CHAT_SYNC_WATCHER_PLAN.md](ZCODE_CHAT_SYNC_WATCHER_PLAN.md).
 
 ## Testing
 

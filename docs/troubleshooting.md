@@ -49,9 +49,35 @@ version is current).
 
 ## Telegram bot conflicts (HTTP 409)
 
-One bot token = one polling instance. The second-instance launcher disables
-bots in the Secondary profile automatically. If you re-enable one there, you
-will get 409s and cross-account billing noise — disable it again.
+One bot token = one polling instance. The clone launcher disables bots in each
+clone profile automatically. If you re-enable one in a clone, you will get 409s
+and cross-account billing noise — disable it again.
+
+## A ZCode clone lost its icon / color / title after an app update
+
+The per-clone branding rides on an `app.asar` patch (`ZCODE_ICON_DIR`,
+`ZCODE_AUMID_SUFFIX`, `ZCODE_ACCENT_HEX`, `ZCODE_INSTANCE_NAME`) that a ZCode
+app update silently reverts. Re-apply it once — `GHOST.bat` → [13], or
+`tools\patch_zcode_icon_override.ps1` — and every clone restores its icon,
+accent color, taskbar button and "ZCode <Color>" window title.
+
+## Chats from one ZCode instance don't appear in another instance's sidebar
+
+All instances share one session store, but each sidebar index is seeded at
+app-server spawn with no snapshot backfill — the data is there, the index is
+stale. Refresh without restarting the app: `GHOST.bat` → [15] (Second
+only) or [23] (all instances), or keep the detached watcher running ([22],
+`-Watch -Target All`) to auto-refresh every running instance on quota/captcha
+failures. The hot-activity guard may defer the refresh while a turn streams;
+`-Force` bypasses it.
+
+## A clone launched with the Primary's profile or taskbar icon
+
+A bare `ZCode.exe` launch always gets the Primary's profile, AUMID and taskbar
+button. Launch clones only via their `ZCode Second/Third/Fourth` shortcuts or
+the `Launch-ZCode-*.bat` wrappers. If the Primary's Start-menu pin was taken
+over by a clone's AUMID, repair it with
+`tools\install_zcode_second_shortcuts.ps1 -RepairPrimaryAumid`.
 
 ## System ID changes need a restart
 

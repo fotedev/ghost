@@ -7,14 +7,69 @@ Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/
 ## Repository layout
 
 ```
-README.md  AGENTS.md  how-to-run.bat/txt/sh   # root launchers (scripts live under src/)
+README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (scripts live under src/;
+                                             #   CLI cheat sheet: docs/cli.md)
 src/windows/                        # current .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
 src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters)
-docs/                              # IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes (local-only)
+docs/                              # IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes (local-only);
+                                   #   ZCODE_CHAT_SYNC_WATCHER_PLAN.md (tracked — chat-sync root cause)
 archive/                           # superseded versions (local-only fallbacks — do not run, never committed)
+assets/                            # ghost.ico + ghost-source.png (launcher icon; regenerate via
+                                   #   tools/make_ghost_icon.ps1 — never hand-edit)
 tools/                             # reviewed utilities (block_qoder_domains.ps1,
-                                   #   watch_zcode_captcha.ps1 — captcha-stall watchdog;
-                                   #   Telegram creds via params or .envlocal at repo root)
+                                   #   watch_zcode_captcha.ps1 — captcha-stall watchdog
+                                   #     (Telegram creds via params or .envlocal at repo root);
+                                   #   watch_zcode_taskbar.ps1 — resident taskbar-identity
+                                   #     watcher (menu [25]; every 5s re-stamps
+                                   #     System.AppUserModel.ID on each ZCode main window
+                                   #     incl. Primary when missing/wrong — the shell-side
+                                   #     fix for the recurring taskbar merge; -RunOnce,
+                                   #     -InstallAutostart/-RemoveAutostart startup-folder
+                                   #     shortcut, named-mutex single instance, log at
+                                   #     %LOCALAPPDATA%\watch-zcode-taskbar\taskbar.log);
+                                   #   patch_zcode_icon_override.ps1 (+ .mjs engine v6) — one-time
+                                   #     app.asar patch enabling ZCODE_ICON_DIR / ZCODE_AUMID_SUFFIX /
+                                   #     ZCODE_ACCENT_HEX / ZCODE_INSTANCE_NAME env overrides +
+                                   #     __ZCODE_BLUE__/__ZCODE_ACCENT__/__ZCODE_TITLE__ renderer flags
+                                   #     (per-clone accent color + window title); marker carries
+                                   #     patchVersion so menu [13] auto-upgrades after engine changes;
+                                   #     re-run after app updates;
+                                   #   zcode-blue-branding/ (blue, Secondary), zcode-yellow-branding/
+                                   #     (yellow, Third), zcode-green-branding/ (green, Fourth) —
+                                   #     generated icon assets + shared generator (v3 pipeline: Z
+                                   #     extracted per hue mask, Z rescaled to match the original
+                                   #     icon's Z bbox; --mask blue|yellow|green, --out-dir);
+                                   #   install_zcode_second_shortcuts.ps1 — per-user Desktop +
+                                   #     Start-menu shortcuts for all three clones (AppUserModel.ID =
+                                   #     base + ".2"/".3"/".4" for pin grouping; -Instance to scope;
+                                   #     -Remove to uninstall; menu [14]);
+                                   #   refresh_zcode_second_chats.ps1 — cross-instance chat
+                                   #     refresh (name is historical; -Target Primary|Second|Third|
+                                   #     Fourth|All covers every instance now). One-shot (menu [15]
+                                   #     Second-only, menu [23] -Target All): finds shared-store
+                                   #     chats missing from the
+                                   #     target's tasks-index, recycles its app-server(s) (auto-respawn
+                                   #     re-seeds the sidebar index), verify-after; hot-activity guard
+                                   #     waits out an in-flight turn (multi-signal guard: db commit recency +
+                                   #     uncompleted assistant steps + running tools + app-server CPU sample,
+                                   #     up to ~90s, -Force bypasses). -Watch mode (menu [22], -Target
+                                   #     All): tails the agent JSONL logs for terminal failures (captcha
+                                   #     stall / quota / rate-limit, same signatures as
+                                   #     watch_zcode_captcha.ps1) and refreshes every RUNNING instance
+                                   #     (not-running/not-installed skipped, guard defer + retry, 300s
+                                   #     cooldown); supersedes test_live_inject.py (obsolete spike,
+                                   #     now deleted — its row-copying approach was a dead end));
+                                   #   make_ghost_icon.ps1 — regenerates assets\ghost.ico (16..256,
+                                   #     PNG-in-ICO) from the poster art: row/col background-fraction
+                                   #     profiles detect the app tile in the checkerboard jpg, inset
+                                   #     crop + anti-aliased rounded-corner alpha mask -> 1024 master
+                                   #     saved as assets/ghost-source.png (committed — re-runs use it
+                                   #     as-is and skip detection; pass -Source only on first run);
+                                   #   install_ghost_shortcut.ps1 — GHOST.lnk Desktop + repo-root
+                                   #     shortcuts targeting GHOST.bat with IconLocation
+                                   #     assets\ghost.ico,0 (a .bat cannot carry an Explorer icon;
+                                   #     .lnk files are gitignored — regenerate, never commit;
+                                   #     -Remove/-DesktopOnly/-RepoOnly; menu [24])
 ```
 
 ## Architecture
@@ -55,11 +110,12 @@ reset_qoder.ps1       # Qoder: 31 steps (main + CORS_Profile, expanded
 reset_zcode.ps1       # ZCode: 27 steps + [6b/27] config.json provider-apiKey strip
                                    #          (Unlink-loop fix) + telemetry-state deviceMid, RUM store,
                                    #          setting.json deviceSid, embedded-browser partition;
-                                   #          -Target Primary|Secondary|Both (selective tree-kill,
-                                   #          per-target ID_Backups, dual independent IDs in Both)
-launch_zcode_second_instance.ps1   # ZCode dual-instance launcher (own window via cmd/start;
-                                   #          first run clones+scrubs profile, routes Telegram bots
-                                   #          to Primary via marker; Launch-ZCode-Second.bat wrapper)
+                                   #          -Target Primary|Secondary|Third|Fourth|Both|All (selective
+                                   #          tree-kill, per-target ID_Backups, independent IDs per child)
+launch_zcode_second_instance.ps1   # ZCode multi-instance launcher -Instance Second|Third|Fourth
+                                   #          (own window via cmd/start; first run clones+scrubs profile,
+                                   #          routes Telegram bots to Primary via per-home marker;
+                                   #          Launch-ZCode-Second/Third/Fourth.bat wrappers)
 reset_qoderwork.ps1   # QoderWork: 26 steps (agents.db oauth/app_settings scrub,
                                    #          chats preserved; auth.dat, MachineGuid, MAC, hostname;
                                    #          -SkipMac/-SkipHostname/-DryRun)
@@ -110,26 +166,114 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   `if (...) (...)` block — CMD treats `)` as the block terminator even inside
   double quotes, aborting the whole script silently. Reword to avoid parens
   (e.g. `a separate window - leave it open`) or escape as `^( ^)`.
-  (Bit us in `how-to-run.bat` option [9]: the parent menu vanished instantly.)
+  (Bit us in `GHOST.bat` option [9]: the parent menu vanished instantly.)
 - GUI apps that call `AttachConsole(ATTACH_PARENT_PROCESS)` (verified: ZCode)
   hijack the launching console with log floods. Launch them detached
   (`cmd /c start "" <exe>`, new window via `start` in the .bat) — never inline.
-  (Bit us in `how-to-run.bat` option [10]: the menu drowned in `[pid:*]` logs.)
+  (Bit us in `GHOST.bat` option [10]: the menu drowned in `[pid:*]` logs.)
 
-## Multi-instance conventions (ZCode dual-instance)
+## Multi-instance conventions (ZCode: Primary + 3 clones)
 
+- Layout: Primary (default profile) + clones **Second** (blue), **Third**
+  (yellow), **Fourth** (green). Clone homes: `%USERPROFILE%\ZCodeSecondHome` /
+  `ZCodeThirdHome` / `ZCodeFourthHome`; clone roaming: `%APPDATA%\ZCode-Second`
+  / `ZCode-Third` / `ZCode-Fourth`; AUMID suffixes `2`/`3`/`4`. The Second row
+  is FROZEN (never rename its dirs — an installed profile must keep working).
 - Isolation lever is **env vars, never CLI flags**: the app overwrites
   `--user-data-dir` via `app.setPath`, so `ZCODE_DATA_BASE_DIR` /
   `ZCODE_DESKTOP_USER_DATA_DIR` / `ZCODE_DESKTOP_SESSION_DATA_DIR` /
   `ZCODE_DESKTOP_HOME_DIR` / `HOME` are the only working mechanism.
+- All instances share **ONE CLI session store** at
+  `%USERPROFILE%\.zcode\cli\db\db.sqlite` — the CLI resolves `~` via the real
+  user profile and the `HOME` override never reaches it on Windows (verified
+  2026-09-23). Only `.zcode\v2\tasks-index.sqlite` (sidebar index) is
+  per-instance. The app-server seeds its index baseline at spawn with no
+  snapshot backfill, so cross-instance chat visibility = recycle the target
+  instance's app-server (menu [15]; Second-only today). Never copy session rows
+  between homes — a clone's own `db.sqlite` copy is dead storage nothing reads.
+  See `docs/ZCODE_CHAT_SYNC_WATCHER_PLAN.md`.
 - Classify mains by **bare-exe CommandLine** (quoted or unquoted full path only);
-  `--type` filtering alone misclassifies helpers as mains. Empty CommandLine is a
-  WMI race — keep as candidate, subtree walk still classifies correctly.
+  `--type` filtering alone misclassifies helpers as helpers. Empty CommandLine is
+  a WMI race — keep as candidate, subtree walk still classifies correctly.
+  Subtree marker strings per clone = its roaming dir name (`ZCode-Second`…) or
+  home dir name (`ZCodeSecondHome`…); unmatched mains are Primary.
 - One Telegram bot token = ONE polling instance. Never clone an enabled bot into
-  a second profile (HTTP 409 + random cross-account billing). Launcher enforces
-  Primary-only via marker-guarded disable; a deliberate re-enable is never reverted.
-- Both-mode resets generate **independent ID sets per instance** — never duplicate.
+  a clone profile (HTTP 409 + random cross-account billing). Launcher enforces
+  Primary-only via per-home marker-guarded disable (`.telegram-routed` in each
+  clone home); a deliberate re-enable is never reverted.
+- Both/All-mode resets generate **independent ID sets per child** — never
+  duplicate. `Both` = Secondary+Primary (back-compat); `All` = Third+Fourth+
+  Secondary+Primary (clones first, Primary last with the Qoder steps).
 - Backups, watchdog probes and final validation are scoped **per-target**.
+- Clone visual identity rides on `ZCODE_ICON_DIR` + `ZCODE_AUMID_SUFFIX` +
+  `ZCODE_ACCENT_HEX` + `ZCODE_INSTANCE_NAME` (branded window/tray icon +
+  separate taskbar button + accent recolor + "ZCode <Color>" window title).
+  These only work because `tools/patch_zcode_icon_override.ps1` (engine v6)
+  patched the installed `app.asar` — an app update silently reverts them; re-run
+  the patch (menu [13]) whenever a clone loses its look. Primary never sets any
+  of the four vars. The patched main derives a `--zcode-blue` flag
+  (additionalArguments → contextBridge `__ZCODE_BLUE__`) that switches the
+  in-app recolor on, with the color taken from `__ZCODE_ACCENT__` (fallback
+  `#066BCB`) and the title from `__ZCODE_TITLE__`: recolors the clone's startup
+  splash + sidebar logos, renames its window title to "ZCode Blue"/"ZCode
+  Yellow"/"ZCode Green" (taskbar/Alt-Tab/pins — prevents pin collisions with
+  the Primary's ZCode.lnk: pinning from a window titled "ZCode" makes Windows
+  rewrite ZCode.lnk with the clone's AUMID, which stole the Primary's Start pin
+  and broke taskbar icon resolution), and disables the clone's auto-updater
+  (`ZCODE_ICON_DIR` guard) so it can never wipe the shared patch via
+  quitAndInstall. Launch clones ONLY via their "ZCode Second/Third/Fourth"
+  shortcuts / the launcher — a bare ZCode.exe launch gets the Primary's
+  profile, AUMID and button.
+- Do NOT run ZCode instances elevated (verified 2026-09-24: Primary launched
+  from explorer.exe still ran elevated — its shortcut had "Run as
+  administrator" set; clones inherit elevation when launched from an elevated
+  GHOST menu via [18]). Windows UIPI silently strips drop data from a
+  non-elevated Explorer into a high-IL window: the "Drop to add attachments"
+  overlay still lights (window-level dragover) but `dataTransfer.files`
+  arrives empty and the drop handler no-ops — while the "+" picker works
+  (native dialog inside the process). Fix: clear the shortcut's
+  Compatibility-tab admin flag and launch instances non-elevated; launch-only
+  menu entries ([10]/[16]/[17]/[18]) do not need the menu itself elevated.
+- Taskbar identity is stamped at the WINDOW level by the launcher
+  (launch_zcode_second_instance.ps1 step [4]): after launch it resolves the
+  clone's main window by its v6 title and writes System.AppUserModel.ID =
+  `dev.zcode.app.<suffix>` into the window property store (top shell
+  precedence, regroups live; base kept in sync with
+  install_zcode_second_shortcuts.ps1). Reason (verified 2026-09-24): the
+  app's process-explicit setAppUserModelId left Primary+Second merged in one
+  taskbar button despite a correct env block (ZCODE_AUMID_SUFFIX=2 read back
+  from the live process) and a correct patched expression, while
+  Third/Fourth separated. The launcher targets the window by TITLE, never by
+  the fresh PID alone — the single-instance focus path spawns a transient
+  relauncher process whose brief window otherwise eats the stamp
+  (false-positive read-back on a doomed hwnd); it re-stamps on main-window
+  handle change and final-verifies with an independent read. Launcher must
+  run at the same or higher integrity level as the clone (UIPI).
+- Launcher stamping alone was NOT enough (verified 2026-09-24 later the same
+  day): the merge MOVED to Primary+Yellow — any window relying on the app's
+  process-explicit identity can merge with any other at any time. Final fix =
+  `tools/watch_zcode_taskbar.ps1` (menu [25], resident + autostart): polls all
+  four instances every 5s and re-stamps Primary (`dev.zcode.app`) AND clones
+  whenever a window is missing/wrong — heals new/splash-swapped windows
+  automatically (live-proven: stamped a freshly launched Primary within its
+  first pass). Ambiguous titles (patch missing, all "ZCode") are skipped
+  loudly, never guessed.
+- Watcher classification is by PROCESS MARKERS first, titles only as the
+  WMI-failure fallback (verified 2026-09-24, green-clone default-icon bug): a
+  clone's window is titled plain "ZCode" during the splash phase, so the old
+  title-only Primary row claimed it whenever the clone launched while no
+  other instance ran (with Primary running the same window was merely
+  "ambiguous") — it stamped `dev.zcode.app` on the clone, and when the
+  launcher's title-resolve loop (then 15s) had already expired on the slow
+  cold start, the window held no window-level identity and the taskbar button
+  fell back to the default icon. The watcher now takes ONE Win32_Process
+  snapshot per pass, walks each window's process tree to its root ZCode.exe
+  and matches the clone markers (roaming/home dir names in child
+  `--user-data-dir` cmdlines — same markers as the launcher rule above),
+  stamping the correct identity even mid-splash; a clone v6-title overrides a
+  spurious "Primary" marker read, and unknown pids fall back to the v6-title
+  rules. The launcher's title-resolve/stamp loops were extended to 60s/30s
+  for the same reason.
 
 ## Out of scope
 
