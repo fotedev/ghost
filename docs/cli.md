@@ -77,6 +77,20 @@ in-flight turns (`-Force` bypasses). Watcher mode (`-Watch`, menu [22]) tails
 the CLI JSONL logs for terminal failures (captcha stall / quota / rate-limit)
 and refreshes every RUNNING instance on a 300 s cooldown.
 
+## GHOST repo updater (per-user, no admin needed)
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\update_ghost.ps1"            # check, then ask to update
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\update_ghost.ps1" -CheckOnly # report only, no writes
+```
+
+Fetches `origin` and compares HEAD with the remote default branch, lists the
+new commits, and (without `-CheckOnly`) asks before a `git pull --ff-only`.
+Refuses when local commits or a non-`main` branch block the fast-forward; a
+dirty working tree gets an interactive stash -> pull -> restore offer (a
+failed restore keeps the stash). A failed fetch (offline) is a warning, not a
+failure. Menu [26].
+
 ## Linux
 
 ```bash
