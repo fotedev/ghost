@@ -44,6 +44,7 @@ echo [25] Watch ZCode taskbar identity - auto-fix taskbar merges (separate windo
 echo.
 echo  ---- GHOST launcher ----
 echo [24] Install or repair the GHOST shortcut with ghost icon - Desktop + repo folder
+echo [26] Check for updates / update GHOST from GitHub
 echo.
 echo [0] Exit
 echo.
@@ -87,6 +88,7 @@ if "%choice%"=="22" call :Detached "ZCode error chat refresh" "-NoExit -NoProfil
 if "%choice%"=="23" call :Run "tools\refresh_zcode_second_chats.ps1" -Target All
 if "%choice%"=="25" call :Detached "ZCode taskbar identity" "-NoProfile" "tools\watch_zcode_taskbar.ps1" "" "Taskbar identity watcher launched in a separate window - leave it open." "It re-stamps any ZCode window that loses its taskbar identity within seconds."
 if "%choice%"=="24" call :RunWith "tools\install_ghost_shortcut.ps1" "Check your Desktop for the GHOST shortcut - re-run this after moving this repo folder."
+if "%choice%"=="26" call :Run "tools\update_ghost.ps1"
 if "%choice%"=="0" (
     echo Done.
     timeout /t 1 >nul

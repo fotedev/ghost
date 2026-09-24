@@ -69,7 +69,14 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     shortcuts targeting GHOST.bat with IconLocation
                                    #     assets\ghost.ico,0 (a .bat cannot carry an Explorer icon;
                                    #     .lnk files are gitignored — regenerate, never commit;
-                                   #     -Remove/-DesktopOnly/-RepoOnly; menu [24])
+                                   #     -Remove/-DesktopOnly/-RepoOnly; menu [24]);
+                                   #   update_ghost.ps1 — repo self-updater (menu [26]): git fetch
+                                   #     origin + compare HEAD vs the remote default branch, lists
+                                   #     new commits; without -CheckOnly asks before git pull
+                                   #     --ff-only; refuses on local commits / non-main or detached
+                                   #     HEAD; dirty tree -> interactive stash -u -> pull -> pop
+                                   #     (failed pop keeps the stash); verify-after re-reads HEAD ==
+                                   #     origin + behind==0; offline fetch = warning + clean exit 0
 ```
 
 ## Architecture

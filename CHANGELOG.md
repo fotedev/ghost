@@ -58,6 +58,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `GHOST.bat` menus [13]–[23]: icon patch, clone shortcuts, chat
   refresh (one-shot + watcher), clone launches (single + all), per-instance
   ZCode resets, and refresh-all.
+- `tools/update_ghost.ps1` + `GHOST.bat` menu [26] — repo self-updater:
+  fetches `origin`, compares HEAD with the remote default branch, lists the
+  new commits, and asks before `git pull --ff-only` (`-CheckOnly` = report
+  only). Refuses when local commits or a non-`main`/detached branch block the
+  fast-forward; a dirty working tree gets an interactive stash → pull →
+  restore (a failed restore keeps the stash). Verify-after re-reads HEAD; a
+  failed fetch (offline) is a warning, not a failure.
 
 ### Security
 
