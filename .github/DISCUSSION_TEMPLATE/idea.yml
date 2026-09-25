@@ -1,0 +1,26 @@
+title: Share an idea
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve GHOST! For reproducible bugs, use a [bug report](https://github.com/fotedev/ghost/issues/new?template=bug_report.yml) instead. Security issues go to SECURITY.md, never public discussions.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or gap
+      description: What are you trying to achieve, and what currently gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like GHOST to do? Include alternatives you considered.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: OS, PowerShell version, the target app and instance, or docs you checked.
