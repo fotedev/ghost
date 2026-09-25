@@ -44,8 +44,8 @@ Detailed per-tool walkthroughs (paths touched, preservation lists, flags):
 ## Prerequisites
 
 **Windows**: Windows 10/11 · PowerShell 5.1 or 7 (run as Administrator) ·
-Python 3 on `PATH` (only for the scripts that write SQLite) · close the target
-app first.
+Python 3 on `PATH` (SQLite writes run through the bundled stdlib-only core in
+`src/python/ghost`) · close the target app first.
 
 **Linux**: bash 4+ · python3 (recommended) · `uuidgen` or
 `/proc/sys/kernel/random/uuid` · `openssl` or `xxd` · `sudo` only for
@@ -92,16 +92,20 @@ ghost/
 ├── ghost.sh        # Linux interactive launcher
 ├── src/
 │   ├── windows/    # .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
-│   └── linux/      # .sh resetters + id_reset_common.sh
+│   ├── linux/      # .sh resetters + id_reset_common.sh
+│   └── python/     # stdlib-only Python core (ghost/) + ghost_cli.py bootstrap —
+│                   #   owns the shared SQLite/JSON identity logic
 ├── tools/          # watch_zcode_captcha.ps1 (captcha watchdog),
+│                   #   watch_zcode_taskbar.ps1 (taskbar identity watcher),
 │                   #   patch_zcode_icon_override.ps1 + .mjs (app.asar icon /
 │                   #   accent / AUMID patch — re-run after app updates),
 │                   #   install_zcode_second_shortcuts.ps1 (clone shortcuts),
-│                   #   refresh_zcode_second_chats.ps1 (cross-instance chat
-│                   #   refresh + -Watch error watcher),
+│                   #   install_ghost_shortcut.ps1 (GHOST.lnk), update_ghost.ps1
+│                   #   (repo self-updater), refresh_zcode_second_chats.ps1
+│                   #   (cross-instance chat refresh + -Watch error watcher),
 │                   #   zcode-{blue,yellow,green}-branding/ (icon assets)
-├── tests/          # Pester 5 suite (unit + repo integrity)
-├── docs/           # getting-started / architecture / troubleshooting / faq
+├── tests/          # Pester 5 suite (PowerShell) + stdlib unittest suite (Python core)
+├── docs/           # getting-started / architecture / cli / troubleshooting / faq
 ├── .github/        # CI workflow, issue forms, PR template, CODEOWNERS
 └── archive/        # superseded versions — local-only, never committed
 ```
@@ -128,6 +132,13 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   — shows another instance's chats in a running sidebar without an app
   restart; `-Watch` runs as a daemon that auto-refreshes on quota/captcha
   failures
+- `tools/watch_zcode_taskbar.ps1` — resident watcher that re-stamps every
+  ZCode window's taskbar identity every 5 s (heals merges and fresh windows);
+  `-InstallAutostart` adds a startup-folder shortcut, `-RunOnce` for testing
+- `tools/install_ghost_shortcut.ps1` — regenerates the `GHOST.lnk` shortcuts
+  (Desktop + repo root) that carry the launcher icon; `-Remove` uninstalls
+- `tools/update_ghost.ps1` — repo self-updater: fetch + compare + guarded
+  `git pull --ff-only` (`-CheckOnly` reports without writing)
 - Telegram alerts for `tools/watch_zcode_captcha.ps1` come from
   `-TelegramBotToken`/`-TelegramChatId` params or `TELEGRAM_BOT_TOKEN` /
   `TELEGRAM_CHAT_ID` in `.envlocal` (copy [.env.example](.env.example) to
@@ -143,9 +154,14 @@ Invoke-Pester -CI -Output Detailed
 ```bash
 shellcheck src/linux/*.sh ghost.sh
 for f in src/linux/*.sh ghost.sh; do bash -n "$f"; done
+
+# Python core — stdlib unittest, no pip installs, runs on any OS
+python -m unittest discover -s tests/python -v
 ```
 
-CI runs both jobs on every push/PR (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
+CI runs three jobs on every push/PR: PowerShell lint + Pester
+(`windows-latest`), ShellCheck (`ubuntu-latest`), and the Python core suite
+(see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ## Important notes
 

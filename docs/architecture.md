@@ -128,5 +128,8 @@ baseline). Root-cause analysis and the error-triggered `-Watch` mode:
 Pester `TestDrive:` fixtures (the library is side-effect-free on dot-source).
 `tests/repo-integrity.Tests.ps1` guards against drift: PowerShell parser
 zero-errors, `bash -n`, launcher dispatch targets resolving to real files,
-README/script consistency, and governance-file presence. CI runs both on
-`windows-latest` plus ShellCheck on `ubuntu-latest`.
+README/script consistency, and governance-file presence.
+`tests/python/test_ghost_core.py` mirrors those cases for the Python core and
+adds real-SQLite coverage (stdlib `unittest`, zero dependencies). CI runs the
+analyzer + Pester jobs on `windows-latest`, ShellCheck on `ubuntu-latest`,
+and the Python suite in a dedicated `python-core` job.
