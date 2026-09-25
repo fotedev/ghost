@@ -20,6 +20,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Launcher menus renumbered to continuous local ids**: each `GHOST.bat`
+  screen numbers its own tasks — Resets `[1]`–`[8]`, ZCode `[1]`–`[16]`
+  (5 launch + 5 reset + 6 sync/watchers), Maintenance `[1]`–`[2]` — with
+  per-screen resolvers (`:ZCodeOne` / `:MaintOne`) translating local ids to
+  the unchanged global dispatch payloads. Chains typed inside a submenu use
+  its local ids; `2 1 3 4` from the main menu opens ZCode and runs local
+  `1 3 4` back-to-back (`PENDING_CHAIN` replaces the old `BACK` flow); bare
+  global ids (`13`) still work from the main menu only — inside ZCode the
+  local ids shadow the old global ones (old `[13]` icon patch is now
+  ZCode `[12]`). Docs remapped in `AGENTS.md`, `docs/cli.md`,
+  `docs/getting-started.md`, `docs/ZCODE_CHAT_SYNC_WATCHER_PLAN.md`, and
+  `docs/PLAN-2026-09-24-rebrand.md`.
 - **UTF-8 piping for the Python core**: `ghost` forces its stdout to UTF-8
   and the PowerShell callers set `[Console]::OutputEncoding = UTF8`, so
   non-ASCII output (e.g. Arabic chat titles in `chat-check MISSING` lines)
