@@ -191,7 +191,8 @@ CHANGELOG [Unreleased] / Added.
   (per-clone home + roaming + AUMID; clones share a single instance flow)
 - reset_zcode.ps1: -Target Third|Fourth|All (independent ID sets per
   child; Both retained for back-compat with Secondary+Primary)
-- GHOST.bat: menus [13]–[25] — icon patch, clone shortcuts, chat
+- GHOST.bat: ZCode submenu (now [1]–[16] after the local-numbering
+  refactor) — icon patch, clone shortcuts, chat
   refresh (one-shot + -Watch), clone launches (single + all), per-target
   ZCode resets, refresh-all, taskbar-identity watcher, install-GHOST-icon
 - ghost.sh: menu numbers kept in sync
@@ -421,8 +422,8 @@ clean for the next release.
 > Blue/Yellow/Green" window titles, separate `System.AppUserModel.ID`s
 > (so pins never collide), and per-clone homes + roaming dirs.
 > Driven by `tools/patch_zcode_icon_override.ps1` (re-run after every
-> ZCode app update, menu [13]) and `tools/watch_zcode_taskbar.ps1`
-> (resident AUMID-healer, menu [25]).
+> ZCode app update, ZCode submenu [12]) and `tools/watch_zcode_taskbar.ps1`
+> (resident AUMID-healer, ZCode submenu [16]).
 >
 > **Chat sync & captcha** — `tools/refresh_zcode_second_chats.ps1`
 > surfaces shared-store chats inside a running sidebar by recycling the

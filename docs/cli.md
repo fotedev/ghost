@@ -78,9 +78,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\refresh_zcode_second_
 ```
 
 Shows chats created in another instance inside a running sidebar by recycling
-the target's app-server (auto-respawn reseeds its index; verify-after). Menu
-[15] = Second only, menu [23] = all instances. A hot-activity guard waits out
-in-flight turns (`-Force` bypasses). Watcher mode (`-Watch`, menu [22]) tails
+the target's app-server (auto-respawn reseeds its index; verify-after). ZCode
+[13] = Second only, ZCode [15] = all instances. A hot-activity guard waits out
+in-flight turns (`-Force` bypasses). Watcher mode (`-Watch`, ZCode [14]) tails
 the CLI JSONL logs for terminal failures (captcha stall / quota / rate-limit)
 and refreshes every RUNNING instance on a 300 s cooldown.
 
