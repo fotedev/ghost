@@ -2,7 +2,14 @@
 
 Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 **`./ghost.sh`** (Linux). This page is the direct-command cheat sheet for
-scripts and CI.
+scripts and CI. `GHOST.bat` groups its tasks into three submenus with
+continuous local numbering (IDE resets [1]-[8] / ZCode Multi-Instance & Clones
+[1]-[16] / System & GHOST Maintenance [1]-[2]); chain several tasks in one
+prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
+from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
+[1] [3] [4]) or a bare global id — this page cites menu positions as
+`<submenu> [n]`, e.g. `ZCode [12]` for the icon patch. `[U]` on the main menu
+(and Maintenance [2]) runs the self-updater.
 
 ## Windows resets (PowerShell as Administrator, from the repo root)
 
@@ -50,7 +57,7 @@ it to fresh IDs, and routes Telegram channel bots to Primary (one-time,
 automatic). Branding: Second = blue, Third = yellow, Fourth = green (separate
 taskbar buttons + window titles "ZCode Blue"/"ZCode Yellow"/"ZCode Green").
 All instances share one install, so one update covers all — but re-run the
-icon patch (`tools\patch_zcode_icon_override.ps1`, menu [13]) after every app
+icon patch (`tools\patch_zcode_icon_override.ps1`, ZCode [12]) after every app
 update; it is what makes the `ZCODE_ICON_DIR` / `ZCODE_AUMID_SUFFIX` /
 `ZCODE_ACCENT_HEX` / `ZCODE_INSTANCE_NAME` branding overrides work.
 
@@ -90,6 +97,26 @@ Refuses when local commits or a non-`main` branch block the fast-forward; a
 dirty working tree gets an interactive stash -> pull -> restore offer (a
 failed restore keeps the stash). A failed fetch (offline) is a warning, not a
 failure. Menu [26].
+
+## GHOST Python core (diagnostics; no admin needed)
+
+All SQLite/JSON identity logic lives in a stdlib-only Python package
+(`src/python/ghost`); the PowerShell bridges call it through
+`src\python\ghost_cli.py`. It is also usable directly for quick checks:
+
+```powershell
+python src\python\ghost_cli.py identity                      # fresh 4-field identity set (JSON)
+python src\python\ghost_cli.py chat-check hot "%USERPROFILE%\.zcode\cli\db\db.sqlite"
+python src\python\ghost_cli.py chat-check missing "%USERPROFILE%\.zcode\cli\db\db.sqlite" "%USERPROFILE%\.zcode\v2\tasks-index.sqlite"
+```
+
+`chat-check hot` reports the multi-signal in-flight-turn guard (commit age,
+uncompleted assistant steps, running tools); `chat-check missing` lists
+shared-store chats absent from an instance's sidebar index — the same probes
+`refresh_zcode_second_chats.ps1` runs internally. Further subcommands:
+`sqlite-update`, `delete-secrets`, `clear-cli-telemetry`, `json-patch`,
+`restore-script`, `audit-log` (stdout contracts documented in
+[architecture.md](architecture.md)).
 
 ## Linux
 
