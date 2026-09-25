@@ -4,6 +4,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](#prerequisites)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE.svg)](#prerequisites)
+[![Discussions](https://img.shields.io/github/discussions/fotedev/ghost)](https://github.com/fotedev/ghost/discussions)
 
 Fresh-start toolkit for local AI-IDE identity stores: rotate device identifiers
 for **Cursor**, **Windsurf / Devin Desktop**, **Trae**, **Qoder**, **ZCode**,

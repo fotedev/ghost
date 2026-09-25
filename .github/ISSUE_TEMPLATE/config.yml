@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Questions & ideas
+    url: https://github.com/fotedev/ghost/discussions
+    about: Ask questions, propose features, or share feedback in Discussions
+  - name: Security vulnerabilities
+    url: https://github.com/fotedev/ghost/security/policy
+    about: Please report vulnerabilities privately (see SECURITY.md)
