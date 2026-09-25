@@ -19,7 +19,7 @@ if defined ESC (echo %ESC%[92m[ 3] %ESC%[97mSystem ^& GHOST Maintenance %ESC%[90
 echo.
 call :Opt U "Check for updates / update GHOST" "- from GitHub"
 call :Opt 0 "Exit" ""
-if defined ESC (echo %ESC%[90mTip: in submenus chain tasks like %ESC%[96m1 3 4%ESC%[90m - or type %ESC%[96m2 1 3 4%ESC%[90m here to run ZCode tasks directly%ESC%[0m) else echo Tip: in submenus chain tasks like 1 3 4 - or type 2 1 3 4 here to run ZCode tasks directly
+if defined ESC (echo %ESC%[90mTip: You can run multiple options at once by separating them with spaces ^(e.g. %ESC%[96m1 3 4%ESC%[90m^)%ESC%[0m) else echo Tip: You can run multiple options at once by separating them with spaces ^(e.g. 1 3 4^)
 echo.
 set "choice="
 set /p choice=%PROMPT_TEXT%
