@@ -148,6 +148,13 @@ def build_parser():
 
 
 def main(argv=None):
+    # Force UTF-8 stdout so non-ASCII payloads (chat titles in chat-check
+    # lines) survive pipes regardless of the Windows console code page; the
+    # PowerShell callers set [Console]::OutputEncoding to match.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

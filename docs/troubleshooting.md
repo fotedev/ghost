@@ -1,11 +1,31 @@
 # Troubleshooting
 
-## `[FAILED] Python not found -- secrets deletion SKIPPED`
+## `[FAILED] Python not found ...` / `GHOST Python core not found`
 
-The Windows IDE scripts shell out to Python for SQLite writes
-(`state.vscdb`). Install Python 3 and make sure `python` (or `python3`) is on
-`PATH`, then re-run. The script exits 1 on missing Python so the run is never
-half-applied silently — check the audit log for entries with `ok: false`.
+The Windows IDE scripts run their SQLite writes through the bundled Python
+core (`src/python/ghost`, invoked via `src\python\ghost_cli.py`). Detection
+is a **functional probe**: a candidate (`python`, `python3`, `py`, plus
+per-user install paths) is accepted only when `--version` exits 0 reporting
+"Python 3" — so the Microsoft Store app-execution aliases (which exit 9009
+with a Store ad even with no Python installed), stale Python 2 installs,
+and profile aliases can never false-positive. The `py` launcher and
+per-user installs are probed too, so an interpreter missing from an
+elevated `PATH` is still found.
+
+- **`Python 3 not found ... SKIPPED`** — no working interpreter found.
+  Install one and re-run: `winget install Python.Python.3.12` (or python.org).
+- **`GHOST Python core not found (src\python\ghost_cli.py)`** — the
+  interpreter is fine but the package is missing (broken checkout, or a
+  script copied out of the repo). Re-clone or restore `src/python/`.
+
+Verify the core standalone:
+
+```powershell
+python src\python\ghost_cli.py identity
+```
+
+In every failure case the script exits 1 so the run is never half-applied
+silently — check the audit log for entries with `ok: false`.
 
 ## `[FAILED] processes still running after N attempts. Aborting reset.`
 

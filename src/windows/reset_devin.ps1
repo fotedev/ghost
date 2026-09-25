@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 # Windsurf/Devin Identity Reset v0.3
 # (Windsurf rebranded to Devin Desktop on 2026-06-02 -- same IDE, over-the-air)
 #

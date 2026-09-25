@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 <#
 watch_zcode_taskbar.ps1 - keep every ZCode window's taskbar identity stamped.
 

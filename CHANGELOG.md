@@ -7,8 +7,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Python detection no longer false-positives on the Microsoft Store
+  stubs**: `Get-PythonCommandInfo` (and the chat-refresh tool's detector)
+  now functionally probe candidates (`python` / `python3` / `py` + per-user
+  install paths) with `--version` and require an exit-0 "Python 3" report —
+  the WindowsApps app-execution aliases (exit 9009, no interpreter), stale
+  Python 2, and profile aliases are rejected. The `py` launcher and
+  per-user installs are found even when an elevated `PATH` hides them;
+  not-found messages now point at `winget install Python.Python.3.12`.
+
 ### Changed
 
+- **UTF-8 piping for the Python core**: `ghost` forces its stdout to UTF-8
+  and the PowerShell callers set `[Console]::OutputEncoding = UTF8`, so
+  non-ASCII output (e.g. Arabic chat titles in `chat-check MISSING` lines)
+  survives the pipe on any console code page.
+- **`#Requires -Version 5.1` on every `.ps1`** in `src/windows` + `tools`
+  (enforced by a new repo-integrity test) — standard error on archaeic
+  hosts instead of mid-script syntax failures; PS 7 satisfies `>= 5.1`.
 - **Python core extracted (de-duplicated bridges)**: the four embedded
   Python here-strings that lived inside PowerShell scripts now live in one
   stdlib-only package `src/python/ghost` invoked via

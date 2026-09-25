@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 # Repo-relative anchor for the Python core (src/python/ghost). Captured at
 # dot-source time: $PSScriptRoot here is the directory of THIS file
 # (src/windows), stable no matter which script dot-sources it. The SQLite
@@ -68,17 +69,56 @@ function Get-PathBackupLabel {
 }
 
 function Get-PythonCommandInfo {
-    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-    if ($pythonCommand) {
-        return $pythonCommand
+    # Functional probe, not a bare name lookup: the Microsoft Store "app
+    # execution alias" stubs (python.exe / python3.exe under
+    # %LOCALAPPDATA%\Microsoft\WindowsApps) are found by Get-Command even with
+    # NO Python installed and fail with exit 9009 + a Store ad, and a stale
+    # Python 2 must never pass either. A candidate is accepted only when
+    # `--version` exits 0 and reports "Python 3". Candidates include the py
+    # launcher (C:\Windows\py.exe -- visible to elevated sessions that cannot
+    # see per-user PATHs) and per-user installs that may be missing from an
+    # elevated PATH. Returns the interpreter executable PATH (string) or $null.
+    $candidates = @()
+    foreach ($name in @('python', 'python3', 'py')) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) {
+            $candidates += $cmd.Source
+        }
+    }
+    $perUser = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA "Programs\Python") `
+        -Filter "python.exe" -Recurse -Depth 1 -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty FullName
+    if ($perUser) {
+        $candidates += $perUser
     }
 
-    $python3Command = Get-Command python3 -ErrorAction SilentlyContinue
-    if ($python3Command) {
-        return $python3Command
+    foreach ($exe in ($candidates | Select-Object -Unique)) {
+        try {
+            $versionOutput = & $exe --version 2>&1
+        }
+        catch {
+            continue
+        }
+        if ($LASTEXITCODE -eq 0 -and (($versionOutput -join ' ') -match '^Python\s+3')) {
+            return $exe
+        }
     }
 
     return $null
+}
+
+function Set-GhostConsoleUtf8 {
+    # PS 5.1 decodes native-command stdout with [Console]::OutputEncoding --
+    # force UTF-8 so Python-core output (e.g. Arabic chat titles in
+    # chat-check MISSING lines) survives the pipe on any console code page.
+    # Swallowed on redirected/non-console hosts (ISE, CI redirection) where
+    # the setter can throw; the JSON contracts are ASCII-safe regardless.
+    try {
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    }
+    catch {
+        # Non-console host; JSON stdout contracts are ensure_ascii anyway.
+    }
 }
 
 function New-IdentitySet {
@@ -391,7 +431,8 @@ function Set-SqliteKeys {
         foreach ($key in $Updates.Keys) {
             Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $Updates[$key] -Ok $false
         }
-        Write-Host "Python not found - SQLite update SKIPPED (manual edit required)" -ForegroundColor Yellow
+        Write-Host "Python 3 not found - SQLite update SKIPPED (manual edit required)" -ForegroundColor Yellow
+        Write-Host "Install Python 3 and re-run: winget install Python.Python.3.12 (or python.org)" -ForegroundColor Yellow
         return $false
     }
 
@@ -411,7 +452,8 @@ function Set-SqliteKeys {
     }
 
     try {
-        $commandOutput = & $pythonCommand.Source $ghostCli "sqlite-update" $Path $updatesBase64 $Table
+        Set-GhostConsoleUtf8
+        $commandOutput = & $pythonCommand $ghostCli "sqlite-update" $Path $updatesBase64 $Table
         if ($LASTEXITCODE -ne 0) {
             foreach ($key in $Updates.Keys) {
                 Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $Updates[$key] -Ok $false
