@@ -1,0 +1,19 @@
+title: Ask a question
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before asking, please check the [FAQ](https://github.com/fotedev/ghost/blob/main/docs/faq.md) and [Troubleshooting](https://github.com/fotedev/ghost/blob/main/docs/troubleshooting.md) — your answer may already be there. For reproducible bugs, use a [bug report](https://github.com/fotedev/ghost/issues/new?template=bug_report.yml) instead.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: Be specific — include the script or instance involved and what you already tried.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment (if relevant)
+      description: Windows or Linux, PowerShell version, Python availability, affected app and instance.
