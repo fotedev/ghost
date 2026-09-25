@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 # MiniMax Agent / OpenCode Identity Reset v1.2
 #
 # v1.2 changes vs v1.1 (closes the remaining OpenCode fingerprint surfaces

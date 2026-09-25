@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 # ZCode / Qoder Identity Reset v1.4
 #
 # v1.4 adds multi-instance targeting (Primary / Secondary / Third / Fourth /
@@ -266,7 +267,8 @@ function Clear-SecretsFromSqlite {
     $pythonCommand = Get-PythonCommandInfo
     if (-not $pythonCommand) {
         Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "python-not-found" -Ok $false
-        Write-Host "    [FAILED] Python not found -- secrets deletion SKIPPED: $Path" -ForegroundColor Red
+        Write-Host "    [FAILED] Python 3 not found -- secrets deletion SKIPPED: $Path" -ForegroundColor Red
+        Write-Host "    Install Python 3 and re-run: winget install Python.Python.3.12" -ForegroundColor Yellow
         return $false
     }
 
@@ -278,7 +280,8 @@ function Clear-SecretsFromSqlite {
     }
 
     try {
-        $commandOutput = & $pythonCommand.Source $ghostCli "delete-secrets" $Path
+        Set-GhostConsoleUtf8
+        $commandOutput = & $pythonCommand $ghostCli "delete-secrets" $Path
         if ($LASTEXITCODE -ne 0) {
             Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "failed" -Ok $false
             Write-Host "    [FAILED] secrets deletion command failed: $Path" -ForegroundColor Red
@@ -2327,7 +2330,8 @@ if (Test-Path -LiteralPath $zcodeCliDbPath) {
     if ($pythonCommand) { $ghostCli = Get-GhostPythonCli }
     if ($pythonCommand -and $ghostCli) {
         try {
-            $commandOutput = & $pythonCommand.Source $ghostCli "clear-cli-telemetry" $zcodeCliDbPath
+            Set-GhostConsoleUtf8
+            $commandOutput = & $pythonCommand $ghostCli "clear-cli-telemetry" $zcodeCliDbPath
             if ($LASTEXITCODE -eq 0) {
                 $result = ($commandOutput -join "`n") | ConvertFrom-Json
                 Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After ("deleted " + $result.deleted) -Ok $true
@@ -2353,7 +2357,8 @@ if (Test-Path -LiteralPath $zcodeCliDbPath) {
     }
     else {
         Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "python-not-found" -Ok $false
-        Write-Host "[FAILED] Python not found -- CLI db telemetry NOT cleared" -ForegroundColor Red
+        Write-Host "[FAILED] Python 3 not found -- CLI db telemetry NOT cleared" -ForegroundColor Red
+        Write-Host "Install Python 3 and re-run: winget install Python.Python.3.12" -ForegroundColor Yellow
         $failCount++
     }
 }

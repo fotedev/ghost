@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 # Trae Identity Reset v0.2
 #
 # Hardened rebuild of reset_trae_windows-v0.1.ps1 on the v1.1 template:

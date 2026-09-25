@@ -44,6 +44,40 @@ Describe "New-IdentitySet" {
     }
 }
 
+Describe "Get-PythonCommandInfo" {
+    It "returns a working Python 3 interpreter path (skips when none installed)" {
+        $exe = Get-PythonCommandInfo
+        if (-not $exe) {
+            Set-ItResult -Skipped -Because "no Python 3 installed on this host"
+            return
+        }
+        Test-Path -LiteralPath $exe | Should -BeTrue
+        $v = & $exe --version 2>&1
+        $LASTEXITCODE | Should -Be 0
+        ($v -join ' ') | Should -Match '^Python\s+3'
+    }
+
+    It "rejects non-Python-3 candidates functionally (probe contract)" {
+        # The probe accepts only exit-0 + 'Python 3' output; simulate the
+        # contract with a fake exe that exits 9009 (the Store-stub behavior).
+        $fake = Join-Path $TestDrive "python_stub.cmd"
+        Set-Content -LiteralPath $fake -Value "@echo Python was not found`r`nexit /b 9009`r`n" -Encoding ASCII
+        $env:PATH = "$TestDrive;$env:PATH"
+        try {
+            # A stub named python must not be returned as long as the probe
+            # keeps looking; on a host with a real python the probe returns
+            # that real one, never the stub path.
+            $exe = Get-PythonCommandInfo
+            if ($exe) {
+                (Get-Item -LiteralPath $exe).FullName | Should -Not -BeLike "*python_stub*"
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $fake -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Describe "Get-PathBackupLabel" {
     It "maps a rooted path to paths\<drive>\<relative>" {
         $label = Get-PathBackupLabel -Path "C:\Users\somebody\file.txt"

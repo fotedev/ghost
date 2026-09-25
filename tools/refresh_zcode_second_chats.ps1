@@ -84,14 +84,34 @@ function Stop-WithError([string]$msg) {
 
 if (-not (Test-Path $SharedDb)) { Stop-WithError "shared session store not found: $SharedDb" }
 
-# --- Python detection (sqlite access), per repo convention: Get-Command, never a hardcoded path ---
-$Py = $null
-foreach ($cand in @('python', 'python3')) {
-  $c = Get-Command $cand -ErrorAction SilentlyContinue
-  if ($c) { $Py = $c.Source; break }
+# --- Python detection (sqlite access): functional probe -- a candidate is
+# accepted only when `--version` exits 0 reporting "Python 3", so the
+# Microsoft Store stubs (exit 9009 + Store ad), stale Python 2, and profile
+# aliases never false-positive. Candidates: PATH python/python3/py plus
+# per-user installs that may be missing from an elevated PATH.
+function Resolve-GhostPython {
+  $candidates = @()
+  foreach ($name in @('python', 'python3', 'py')) {
+    $c = Get-Command $name -ErrorAction SilentlyContinue
+    if ($c -and $c.Source) { $candidates += $c.Source }
+  }
+  $perUser = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'Programs\Python') `
+    -Filter 'python.exe' -Recurse -Depth 1 -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty FullName
+  if ($perUser) { $candidates += $perUser }
+  foreach ($exe in ($candidates | Select-Object -Unique)) {
+    try { $v = & $exe --version 2>&1 } catch { continue }
+    if ($LASTEXITCODE -eq 0 -and (($v -join ' ') -match '^Python\s+3')) { return $exe }
+  }
+  return $null
 }
+$Py = Resolve-GhostPython
 
-if (-not $Py) { Stop-WithError 'Python not found on PATH (needed for sqlite access)' }
+# PS 5.1 decodes native stdout with [Console]::OutputEncoding -- force UTF-8
+# so chat titles (any language) survive the chat-check pipe.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+
+if (-not $Py) { Stop-WithError 'Python 3 not found (needed for sqlite access). Install it: winget install Python.Python.3.12' }
 
 # --- shared Python core (src/python/ghost sqlite_keys.chat_check); no per-run temp .py ---
 $GhostCli = Join-Path (Split-Path -Parent $PSScriptRoot) 'src\python\ghost_cli.py'

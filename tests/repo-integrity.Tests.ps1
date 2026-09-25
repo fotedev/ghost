@@ -31,6 +31,25 @@ Describe "PowerShell syntax (Parser zero-errors)" {
             throw ("Syntax errors found:`n" + ($broken -join "`n"))
         }
     }
+
+    It "every .ps1 in src/windows and tools declares #Requires -Version 5.1" {
+        # Version guard against archaeic hosts (PS 2/3); PS 7 satisfies >= 5.1.
+        # Checked in the first 3 lines: new files get it as line 1.
+        $files = @(
+            (Get-ChildItem -Path (Join-Path $PSScriptRoot "..\src\windows") -Filter "*.ps1" -File) +
+            (Get-ChildItem -Path (Join-Path $PSScriptRoot "..\tools") -Filter "*.ps1" -File -ErrorAction SilentlyContinue)
+        )
+        $missing = @()
+        foreach ($file in $files) {
+            $head = (Get-Content -LiteralPath $file.FullName -TotalCount 3) -join "`n"
+            if ($head -notmatch '(?i)#requires\s+-Version\s+5\.1') {
+                $missing += $file.Name
+            }
+        }
+        if ($missing.Count -gt 0) {
+            throw ("Missing #Requires -Version 5.1: " + ($missing -join ", "))
+        }
+    }
 }
 
 Describe "Bash syntax (bash -n)" -Skip:(-not $script:bashAvailable) {

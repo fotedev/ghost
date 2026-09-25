@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 param(
     # v0.1: opt-out switches for the new system-level steps.
     # Default = ON (i.e., do them). Use -SkipMac / -SkipHostname to suppress.

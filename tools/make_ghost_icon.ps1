@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 # make_ghost_icon.ps1 - generate assets\ghost.ico (multi-size) from the GHOST poster art.
 #
 # Pipeline: source image -> auto-detect the app-tile bounds (checkerboard background

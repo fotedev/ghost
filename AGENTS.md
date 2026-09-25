@@ -8,7 +8,15 @@ Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/
 
 ```
 README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (scripts live under src/;
-                                             #   CLI cheat sheet: docs/cli.md)
+                                             #   CLI cheat sheet: docs/cli.md); GHOST.bat =
+                                             #   3 submenus with CONTINUOUS LOCAL numbering
+                                             #   (IDE resets [1]-[8] / ZCode Multi-Instance &
+                                             #   Clones [1]-[16] / System & GHOST Maintenance
+                                             #   [1]-[2]) + ANSI colors + local chained input
+                                             #   per submenu (e.g. "1 3 4"), main-menu sub-paths
+                                             #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
+                                             #   global gid jump from the main menu, and
+                                             #   [U] Check for updates on the main menu
 src/windows/                        # current .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
 src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters)
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
@@ -25,7 +33,7 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #   watch_zcode_captcha.ps1 — captcha-stall watchdog
                                    #     (Telegram creds via params or .envlocal at repo root);
                                    #   watch_zcode_taskbar.ps1 — resident taskbar-identity
-                                   #     watcher (menu [25]; every 5s re-stamps
+                                   #     watcher (ZCode submenu [16]; every 5s re-stamps
                                    #     System.AppUserModel.ID on each ZCode main window
                                    #     incl. Primary when missing/wrong — the shell-side
                                    #     fix for the recurring taskbar merge; -RunOnce,
@@ -37,7 +45,7 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     ZCODE_ACCENT_HEX / ZCODE_INSTANCE_NAME env overrides +
                                    #     __ZCODE_BLUE__/__ZCODE_ACCENT__/__ZCODE_TITLE__ renderer flags
                                    #     (per-clone accent color + window title); marker carries
-                                   #     patchVersion so menu [13] auto-upgrades after engine changes;
+                                   #     patchVersion so ZCode submenu [12] auto-upgrades after engine changes;
                                    #     re-run after app updates;
                                    #   zcode-blue-branding/ (blue, Secondary), zcode-yellow-branding/
                                    #     (yellow, Third), zcode-green-branding/ (green, Fourth) —
@@ -47,17 +55,17 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #   install_zcode_second_shortcuts.ps1 — per-user Desktop +
                                    #     Start-menu shortcuts for all three clones (AppUserModel.ID =
                                    #     base + ".2"/".3"/".4" for pin grouping; -Instance to scope;
-                                   #     -Remove to uninstall; menu [14]);
+                                   #     -Remove to uninstall; ZCode submenu [2]);
                                    #   refresh_zcode_second_chats.ps1 — cross-instance chat
                                    #     refresh (name is historical; -Target Primary|Second|Third|
-                                   #     Fourth|All covers every instance now). One-shot (menu [15]
-                                   #     Second-only, menu [23] -Target All): finds shared-store
+                                   #     Fourth|All covers every instance now). One-shot (ZCode submenu [13]
+                                   #     Second-only, ZCode submenu [15] -Target All): finds shared-store
                                    #     chats missing from the
                                    #     target's tasks-index, recycles its app-server(s) (auto-respawn
                                    #     re-seeds the sidebar index), verify-after; hot-activity guard
                                    #     waits out an in-flight turn (multi-signal guard: db commit recency +
                                    #     uncompleted assistant steps + running tools + app-server CPU sample,
-                                   #     up to ~90s, -Force bypasses). -Watch mode (menu [22], -Target
+                                   #     up to ~90s, -Force bypasses). -Watch mode (ZCode submenu [14], -Target
                                    #     All): tails the agent JSONL logs for terminal failures (captcha
                                    #     stall / quota / rate-limit, same signatures as
                                    #     watch_zcode_captcha.ps1) and refreshes every RUNNING instance
@@ -74,8 +82,9 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     shortcuts targeting GHOST.bat with IconLocation
                                    #     assets\ghost.ico,0 (a .bat cannot carry an Explorer icon;
                                    #     .lnk files are gitignored — regenerate, never commit;
-                                   #     -Remove/-DesktopOnly/-RepoOnly; menu [24]);
-                                   #   update_ghost.ps1 — repo self-updater (menu [26]): git fetch
+                                   #     -Remove/-DesktopOnly/-RepoOnly; Maintenance [1]);
+                                   #   update_ghost.ps1 — repo self-updater (main menu [U] /
+                                   #     Maintenance [2]): git fetch
                                    #     origin + compare HEAD vs the remote default branch, lists
                                    #     new commits; without -CheckOnly asks before git pull
                                    #     --ff-only; refuses on local commits / non-main or detached
@@ -159,7 +168,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 ## Mandatory conventions
 
 - **Never silent-success.** Every write must be followed by a re-read and comparison. If a value doesn't match after write, emit `FAILED` and record in the audit log. This is the single most important anti-pattern to avoid.
-- **Detect Python via `Get-Command`.** Fall back to `python3`. Never hardcode a Python path.
+- **Python detection = functional probe, never a bare `Get-Command`.** `Get-PythonCommandInfo` accepts a candidate (`python` / `python3` / `py` + per-user install paths) only when `--version` exits 0 reporting Python 3 — the Microsoft Store app-execution stubs (exit 9009, no interpreter) and stale Python 2 must never pass. It returns the interpreter executable PATH as a string; callers set `[Console]::OutputEncoding = UTF8` via `Set-GhostConsoleUtf8` before invoking (PS 5.1 decodes native stdout with it). Never hardcode a Python path.
 - **SQLite logic lives in `src/python/ghost` — never re-embed Python in PS.** The four old per-call temp `.py` here-strings were de-duplicated into the stdlib-only package; PS invokes `ghost_cli.py <command>` (base64 payloads in, JSON/line contracts out). If a future change genuinely needs an embedded script, write the temp `.py` to `$env:TEMP` — never next to the database file — and fold the logic into the core instead when possible.
 - **Parameterize SQL.** Never f-string/interpolate values into SQL. Use `?` placeholders.
 - **"File existed" is not "value changed".** A backup existing does not mean the new ID is in place. Always verify.
@@ -202,7 +211,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   2026-09-23). Only `.zcode\v2\tasks-index.sqlite` (sidebar index) is
   per-instance. The app-server seeds its index baseline at spawn with no
   snapshot backfill, so cross-instance chat visibility = recycle the target
-  instance's app-server (menu [15]; Second-only today). Never copy session rows
+  instance's app-server (ZCode submenu [13]; Second-only today). Never copy session rows
   between homes — a clone's own `db.sqlite` copy is dead storage nothing reads.
   See `docs/ZCODE_CHAT_SYNC_WATCHER_PLAN.md`.
 - Classify mains by **bare-exe CommandLine** (quoted or unquoted full path only);
@@ -223,7 +232,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   separate taskbar button + accent recolor + "ZCode <Color>" window title).
   These only work because `tools/patch_zcode_icon_override.ps1` (engine v6)
   patched the installed `app.asar` — an app update silently reverts them; re-run
-  the patch (menu [13]) whenever a clone loses its look. Primary never sets any
+  the patch (ZCode submenu [12]) whenever a clone loses its look. Primary never sets any
   of the four vars. The patched main derives a `--zcode-blue` flag
   (additionalArguments → contextBridge `__ZCODE_BLUE__`) that switches the
   in-app recolor on, with the color taken from `__ZCODE_ACCENT__` (fallback
@@ -265,7 +274,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 - Launcher stamping alone was NOT enough (verified 2026-09-24 later the same
   day): the merge MOVED to Primary+Yellow — any window relying on the app's
   process-explicit identity can merge with any other at any time. Final fix =
-  `tools/watch_zcode_taskbar.ps1` (menu [25], resident + autostart): polls all
+  `tools/watch_zcode_taskbar.ps1` (ZCode submenu [16], resident + autostart): polls all
   four instances every 5s and re-stamps Primary (`dev.zcode.app`) AND clones
   whenever a window is missing/wrong — heals new/splash-swapped windows
   automatically (live-proven: stamped a freshly launched Primary within its

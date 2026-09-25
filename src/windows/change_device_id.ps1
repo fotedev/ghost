@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 # This script designed by 'FOTE'.
 param(
     [ValidateSet('Fingerprint','LegacyReset','RepairProfiles')]

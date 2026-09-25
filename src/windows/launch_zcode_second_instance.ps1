@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 # ZCode Clone Instance Launcher (Second / Third / Fourth)
 # Launches a fully independent clone of ZCode alongside the primary instance.
 # Mechanism (reverse-engineered from resources/app.asar -> out/main/index.js):
