@@ -1679,9 +1679,10 @@ else {
 $zcodeCodingPlanCachePath = Join-Path $zcodeUserProfile "v2\coding-plan-cache.json"
 Write-Host "`n[6/27] Invalidating ZCode coding-plan-cache.json..." -ForegroundColor Cyan
 if (Test-Path -LiteralPath $zcodeCodingPlanCachePath) {
+    $auditStart = $audit.Count
     $cacheActions = Clear-BinaryIdentityStore -Paths @($zcodeCodingPlanCachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
     $actions += @($cacheActions)
-    $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex ($audit.Count - $cacheActions.Count) -Path $zcodeCodingPlanCachePath
+    $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $zcodeCodingPlanCachePath
     if ($status.Success) {
         Write-Host "[OK] coding-plan-cache.json invalidated" -ForegroundColor Green
         $passCount++
@@ -2334,9 +2335,18 @@ if (Test-Path -LiteralPath $zcodeCliDbPath) {
             $commandOutput = & $pythonCommand $ghostCli "clear-cli-telemetry" $zcodeCliDbPath
             if ($LASTEXITCODE -eq 0) {
                 $result = ($commandOutput -join "`n") | ConvertFrom-Json
-                Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After ("deleted " + $result.deleted) -Ok $true
-                Write-Host "[OK] CLI db telemetry cleared: $($result.deleted) keys" -ForegroundColor Green
-                $passCount++
+                if ($result.PSObject.Properties.Name -contains "error") {
+                    # Error-dict contract: sqlite failure reported in-band --
+                    # never silent-success on a locked/unreadable db.
+                    Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After ("error: " + $result.error) -Ok $false
+                    Write-Host "[FAILED] CLI db telemetry clear failed: $($result.error)" -ForegroundColor Red
+                    $failCount++
+                }
+                else {
+                    Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After ("deleted " + $result.deleted) -Ok $true
+                    Write-Host "[OK] CLI db telemetry cleared: $($result.deleted) keys" -ForegroundColor Green
+                    $passCount++
+                }
             }
             else {
                 Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "failed" -Ok $false

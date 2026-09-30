@@ -1,5 +1,25 @@
 #Requires -Version 5.1
-# MiniMax Agent / OpenCode Identity Reset v1.2
+# MiniMax Agent / OpenCode Identity Reset v1.3
+#
+# v1.3 changes vs v1.2 (fixes post-reset MiniMax Code toast
+# "Account information is temporarily unavailable. Check your connection or
+# retry later." that blocked the login page):
+#   - MiniMax mcode-public auth.json + auth-state.json are now DELETED
+#     (backup-first), not wiped to {}. The app's @mavis/oauth-core
+#     schema-validates auth-state.json (state-store.js parseState, verified in
+#     app.asar v3.0.73): "{}" or any partial object throws
+#     TypeError('Invalid OAuth state.') on every startup, which is NOT
+#     classified as interactive-login-required, so the app never reaches the
+#     login page and falls back to the generic account-init-unavailable toast.
+#     A MISSING file is the fresh-install state (read() -> null -> status
+#     'anonymous' -> login page). Never write {}, null or partial JSON there.
+#   - Legacy root .minimax\auth\auth-state.json (pre-namespace layout) is also
+#     deleted when present: migrateLegacyAuthNamespace would re-import it into
+#     the namespace on next launch.
+#   - .minimax\v2\session-handoff\device-id (stable device GUID that survived
+#     every earlier reset) is now rotated format-preserving in step [13b].
+#   - Step [11] local-runtime.auth.json keeps the wipe-to-{} behavior (separate
+#     store from oauth-core; no evidence "{}" breaks it).
 #
 # v1.2 changes vs v1.1 (closes the remaining OpenCode fingerprint surfaces
 # found by a ground-truth filesystem audit -- "100% clean like a new device"):
@@ -54,7 +74,8 @@
 #
 # PRESERVATION GUARANTEES (user content is never wiped):
 #   - .minimax\sessions\, sqlite.db (+shm/wal), memory\, plans\, workspace\, bin\,
-#     mcp\, credentials\mavis\telegram.json, state\, v2\ and every other
+#     mcp\, credentials\mavis\telegram.json, state\, v2\ (except the rotated
+#     v2\session-handoff\device-id, step [13b]) and every other
 #     non-targeted .minimax item are audited as preserved-per-policy.
 #   - OpenCode drafts.sqlite, window-state.json (generic geometry only),
 #     Local Storage, skills\, pnpm\, .config\opencode\, mcp-auth.json
@@ -111,7 +132,7 @@ $mmoIsAdmin = [Security.Principal.WindowsPrincipal]::new(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $mmoIsAdmin) {
-    $mmoLogOut = "$env:TEMP\minimax_opencode_v1.2_result.log"
+    $mmoLogOut = "$env:TEMP\minimax_opencode_v1.3_result.log"
     $mmoScript = $MyInvocation.MyCommand.Path
     $mmoSwitchList = @()
     if ($KeepLogin) { $mmoSwitchList += "-KeepLogin" }
@@ -122,13 +143,13 @@ if (-not $mmoIsAdmin) {
     if (Test-Path -LiteralPath $mmoLogOut) {
         Get-Content -LiteralPath $mmoLogOut
     }
-    if (Test-Path -LiteralPath "$env:TEMP\minimax_opencode_v1.2_done.txt") {
-        Get-Content -LiteralPath "$env:TEMP\minimax_opencode_v1.2_done.txt"
+    if (Test-Path -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt") {
+        Get-Content -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt"
     }
     exit
 }
 
-Write-GhostBanner -Target "MiniMax/OpenCode Identity Reset" -Version "1.2"
+Write-GhostBanner -Target "MiniMax/OpenCode Identity Reset" -Version "1.3"
 
 # === Local helpers (mirroring the zcode v1.1 reference pattern) ================
 
@@ -1057,7 +1078,7 @@ if (-not ($mmRoamingPresent -or $ocRoamingPresent -or $mmHomePresent -or $ocHome
 
 New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
 
-Write-Host "=== MiniMax Agent / OpenCode Identity Reset v1.2 ===" -ForegroundColor Cyan
+Write-Host "=== MiniMax Agent / OpenCode Identity Reset v1.3 ===" -ForegroundColor Cyan
 Write-Host "MiniMax Agent (Electron): $mmRoaming" -ForegroundColor Gray
 Write-Host "MiniMax CLI home        : $mmHome" -ForegroundColor Gray
 Write-Host "OpenCode (Electron)     : $ocRoaming" -ForegroundColor Gray
@@ -1447,23 +1468,46 @@ else {
     $failCount++
 }
 
-# --- [9/22] MiniMax mcode-public auth.json wipe ---
+# --- [9/22] MiniMax mcode-public auth.json DELETE (backup-first) ---
+# v1.3: deleted, not wiped to {}. The OAuth credential store coexists with
+# auth-state.json; an ABSENT file is the fresh-install state no login-time
+# generation computation can mis-parse ({} there is undefined behavior).
 $mmPublicAuthPath = Join-Path $mmMcodePublic "auth.json"
-Write-Host "`n[9/22] Wiping MiniMax mcode-public auth.json (records/tokens)..." -ForegroundColor Cyan
-if (Clear-AllJsonNodes -Path $mmPublicAuthPath -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $mmPublicAuthPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+Write-Host "`n[9/22] Deleting MiniMax mcode-public auth.json (fresh-install parity)..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$mmPublicAuthActions = Clear-BinaryIdentityStore -Paths @($mmPublicAuthPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
+$actions += @($mmPublicAuthActions)
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmMcodePublic
+if ($status.Success) {
+    Write-Host "[OK] mcode-public auth.json absent" -ForegroundColor Green
     $passCount++
 }
 else {
+    Write-Host "[FAILED] mcode-public auth.json delete failed" -ForegroundColor Red
     $failCount++
 }
 
-# --- [10/22] MiniMax mcode-public auth-state.json wipe ---
+# --- [10/22] MiniMax auth-state.json DELETE (absent = fresh install) ---
+# v1.3 root-cause fix: oauth-core schema-validates this file (state-store.js
+# parseState); "{}" or any partial object throws TypeError('Invalid OAuth
+# state.') on EVERY startup, which is not classified as interactive-login-
+# required, so the app shows the generic "Account information is temporarily
+# unavailable" toast instead of the login page. A MISSING file reads as null ->
+# status 'anonymous' -> login page. The legacy root state (pre-namespace
+# layout) is deleted too -- migrateLegacyAuthNamespace would re-import it.
 $mmAuthStatePath = Join-Path $mmMcodePublic "auth-state.json"
-Write-Host "`n[10/22] Wiping MiniMax auth-state.json..." -ForegroundColor Cyan
-if (Clear-AllJsonNodes -Path $mmAuthStatePath -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $mmAuthStatePath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+$mmLegacyAuthStatePath = Join-Path $mmHome "auth\auth-state.json"
+Write-Host "`n[10/22] Deleting MiniMax auth-state.json (namespace + legacy root)..." -ForegroundColor Cyan
+$auditStart = $audit.Count
+$mmAuthStateActions = Clear-BinaryIdentityStore -Paths @($mmAuthStatePath, $mmLegacyAuthStatePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
+$actions += @($mmAuthStateActions)
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmHome
+if ($status.Success) {
+    Write-Host "[OK] auth-state.json absent (namespace + legacy root)" -ForegroundColor Green
     $passCount++
 }
 else {
+    Write-Host "[FAILED] auth-state.json delete failed" -ForegroundColor Red
     $failCount++
 }
 
@@ -1517,6 +1561,40 @@ else {
     $passCount++
 }
 
+# --- [13b/22] MiniMax v2 session-handoff device-id rotation ---
+# v1.3: stable device GUID that survived every reset <= v1.2 (the v2\ tree was
+# preserved wholesale). Rotated format-preserving; the REST of v2\ stays
+# preserved. A GUID is sent to the backend with session handoff, so leaving it
+# across resets defeats the fresh-device goal.
+$mmSessionHandoffDeviceIdPath = Join-Path $mmHome "v2\session-handoff\device-id"
+Write-Host "`n[13b/22] Rotating .minimax\v2\session-handoff\device-id..." -ForegroundColor Cyan
+if (Test-Path -LiteralPath $mmSessionHandoffDeviceIdPath) {
+    $oldHandoffId = $null
+    try {
+        $oldHandoffId = (Get-Content -LiteralPath $mmSessionHandoffDeviceIdPath -Raw).Trim()
+    }
+    catch {
+        $oldHandoffId = $null
+    }
+    if ([string]::IsNullOrWhiteSpace($oldHandoffId)) {
+        $oldHandoffId = $null
+    }
+    $newHandoffId = New-DeviceIdPreservingFormat -CurrentValue $oldHandoffId
+    if (Set-VerifiedMachineIdFile -Path $mmSessionHandoffDeviceIdPath -Value $newHandoffId -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $mmSessionHandoffDeviceIdPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -AuditKey "session-handoff-device-id") {
+        Write-Host "[OK] session-handoff device-id rotated + verified" -ForegroundColor Green
+        $passCount++
+    }
+    else {
+        Write-Host "[FAILED] session-handoff device-id verification failed" -ForegroundColor Red
+        $failCount++
+    }
+}
+else {
+    Write-Host "[SKIP] .minimax\v2\session-handoff\device-id not present" -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $mmSessionHandoffDeviceIdPath -Key "session-handoff-device-id" -Before "missing" -After "skipped" -Ok $true
+    $passCount++
+}
+
 # --- [14/22] MiniMax .updaterId rotation ---
 $mmUpdaterIdPath = Join-Path $mmRoaming ".updaterId"
 Write-Host "`n[14/22] Rotating MiniMax Agent .updaterId..." -ForegroundColor Cyan
@@ -1544,9 +1622,12 @@ $mmStoreFileRelPaths = @(
     "Network\Cookies-journal",
     "DIPS",
     "DIPS-wal",
+    "DIPS-journal",
+    "DIPS-shm",
     "SharedStorage",
     "SharedStorage-wal",
     "SharedStorage-journal",
+    "SharedStorage-shm",
     "Network\Trust Tokens",
     "Network\Trust Tokens-journal",
     "Network\Network Persistent State",
@@ -1567,6 +1648,17 @@ if ($mmRoamingPresent) {
     $mmStoreFiles = @($mmStoreFileRelPaths | ForEach-Object { Join-Path $mmRoaming $_ })
     $mmStoreActions = Clear-BinaryIdentityStore -Paths $mmStoreFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $mmRoaming
     $actions += @($mmStoreActions)
+    # v1.3 prefix sweep (parity with OpenCode [5/22]): catch any other
+    # DIPS*/SharedStorage* sibling Chromium may create at the profile root
+    # (future suffixes, -shm). Only files directly under the profile root are
+    # swept; subdirectories (e.g. Session Storage) are handled by their own steps.
+    foreach ($prefix in @("DIPS*", "SharedStorage*")) {
+        $mmLeftovers = @(Get-ChildItem -LiteralPath $mmRoaming -Filter $prefix -File -Force -ErrorAction SilentlyContinue)
+        foreach ($leftover in $mmLeftovers) {
+            $mmSweepActions = Clear-BinaryIdentityStore -Paths @($leftover.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $mmRoaming
+            $actions += @($mmSweepActions)
+        }
+    }
     foreach ($relative in $mmStoreDirRelPaths) {
         $fullPath = Join-Path $mmRoaming $relative
         if (Test-Path -LiteralPath $fullPath) {
@@ -1612,6 +1704,12 @@ if ($mmRoamingPresent) {
 }
 $mmLocalStatePath = Join-Path $mmRoaming "Local State"
 if (-not (Remove-OsCryptEncryptedKey -Path $mmLocalStatePath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmLocalStatePath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+    $stepFailed = $true
+}
+# v1.3 parity with OpenCode [7/22]: uninstall_metrics.installation_date2 is an
+# install-timestamp fingerprint that survived v1.2; remove the node (Chromium
+# regenerates it). Missing file is tolerated by the helper.
+if (-not (Remove-JsonNodesVerified -Path $mmLocalStatePath -NodeNames @("uninstall_metrics") -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmLocalStatePath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
     $stepFailed = $true
 }
 $mmPreferencesPath = Join-Path $mmRoaming "Preferences"
@@ -1947,6 +2045,15 @@ else {
     Write-Host "[FAILED] DIPS-wal still present" -ForegroundColor Red
     $failCount++
 }
+$mmDipsWalProbe = Join-Path $mmRoaming "DIPS-wal"
+if (-not (Test-Path -LiteralPath $mmDipsWalProbe)) {
+    Write-Host "[OK] MiniMax DIPS-wal absent" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] MiniMax DIPS-wal still present" -ForegroundColor Red
+    $failCount++
+}
 $ocUninstallProbeOk = $true
 if (Test-Path -LiteralPath $ocLocalStatePath) {
     try {
@@ -2031,7 +2138,7 @@ if ($anyChange) {
 else {
     Write-Host "[INFO] No changes were made (all steps skipped) -- removing empty backup dir." -ForegroundColor Yellow
     Remove-Item -LiteralPath $backupRoot -Recurse -Force -ErrorAction SilentlyContinue
-    $auditPath = Join-Path $env:TEMP ("minimax_opencode_v1.2_audit_{0}.json" -f $timestamp)
+    $auditPath = Join-Path $env:TEMP ("minimax_opencode_v1.3_audit_{0}.json" -f $timestamp)
     Write-AuditLog -Audit $audit -Path $auditPath
     $restoreScriptPath = "<none - no changes>"
 }
@@ -2050,15 +2157,17 @@ else {
     Write-Host "NOTE: auth.json was wiped to {}. Re-login after reset: opencode auth login --provider zen (anonymous tier is the most strictly gated)." -ForegroundColor Yellow
 }
 Write-Host "NOTE: minimax-agent-config.json 'tokens' node kept per spec; if re-login is not forced for the desktop app, wipe it too." -ForegroundColor Yellow
+Write-Host "NOTE: MiniMax Code auth files (mcode-public auth.json + auth-state.json) were DELETED, not emptied: the app treats a '{}' auth-state.json as corrupt (Invalid OAuth state) and never reaches the login page. Next launch goes straight to sign-in (fresh-install behavior)." -ForegroundColor Yellow
+Write-Host "NOTE: .minimax\v2\session-handoff\device-id was rotated (v1.3); the rest of v2\ is preserved." -ForegroundColor Yellow
 Write-Host "NOTE: opencode.settings windowIds[] was rotated and the UUID-suffixed per-window files deleted (open tabs/window layout reset to fresh; chat history in opencode.db/drafts.sqlite is untouched)." -ForegroundColor Yellow
 Write-Host "NOTE: Local State uninstall_metrics (install timestamp) was removed and regenerates on next launch; lockfile/opencode/locks and updater tmp residue were deleted." -ForegroundColor Yellow
 Write-Host "NOTE: .mavis junction audited only (never touched). change_device_id.ps1 remains the separate, optional system-level step." -ForegroundColor Yellow
 
-[System.IO.File]::WriteAllText("$env:TEMP\minimax_opencode_v1.2_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText("$env:TEMP\minimax_opencode_v1.3_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
 
 if ($failCount -gt 0) {
-    Write-Host "MiniMax/OpenCode reset v1.2 completed with failures. Review $auditPath." -ForegroundColor Red
+    Write-Host "MiniMax/OpenCode reset v1.3 completed with failures. Review $auditPath." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "MiniMax/OpenCode reset v1.2 completed successfully." -ForegroundColor Green
+Write-Host "MiniMax/OpenCode reset v1.3 completed successfully." -ForegroundColor Green

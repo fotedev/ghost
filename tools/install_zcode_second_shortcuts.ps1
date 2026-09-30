@@ -20,7 +20,11 @@
   Every write is re-read and compared (no silent-success). Unless -SkipAumid is
   given, each shortcut also gets System.AppUserModel.ID = <installed ZCode AUMID>
   + ".<N>" (N = 2/3/4 - the same value the app.asar patch computes for that
-  clone), so a taskbar pin groups with the running clone's window.
+  clone), so a taskbar pin groups with the running clone's window. The same
+  repair path (-RepairPrimaryAumid) also strips a clone suffix hijacked onto
+  the PRIMARY ZCode.lnk AND restores the Primary shortcut's wiped icon back
+  to <ZCode.exe>,0 (a pin rewrite can empty the icon field - verified
+  2026-09-28 - leaving the Primary's own Start entry icon-less).
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\install_zcode_second_shortcuts.ps1
@@ -170,10 +174,54 @@ function Get-LnkAumid {
 }
 
 function Get-PrimaryLnkPaths {
+  # Every per-user copy of the Primary shortcut a pin can rewrite: Desktop is
+  # included (healthy today, covered for the next hijack), plus both Start Menu
+  # locations the installer writes.
   return @(
+    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'ZCode.lnk'),
     (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\ZCode.lnk'),
     (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ZCode.lnk')
   )
+}
+
+function Get-ZCodeExeForIcon {
+  # The lnk's own target wins (a pin-rewritten lnk may drift); fall back to the
+  # install candidates when it is missing.
+  param([string]$TargetPath)
+  if (-not [string]::IsNullOrWhiteSpace($TargetPath) -and (Test-Path -LiteralPath $TargetPath)) { return $TargetPath }
+  $cands = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\ZCode\ZCode.exe'),
+    'C:\Program Files\ZCode\ZCode.exe',
+    'C:\Program Files (x86)\ZCode\ZCode.exe'
+  )
+  foreach ($c in $cands) { if (Test-Path -LiteralPath $c) { return $c } }
+  return $null
+}
+
+function Repair-PrimaryLnkIcon {
+  # A hijacked ZCode.lnk rewritten by Windows pinning can also lose its icon
+  # (verified 2026-09-28: Start-menu ZCode.lnk ended with IconLocation ',0' ->
+  # the shell fell back to the exe default icon for the whole AUMID). Restore
+  # it to <ZCode.exe>,0; verify-after re-read (never silent-success).
+  param([string]$Path)
+  $ws = New-Object -ComObject WScript.Shell
+  $sc = $ws.CreateShortcut($Path)
+  $exe = Get-ZCodeExeForIcon $sc.TargetPath
+  if (-not $exe) {
+    Write-Host "  [skip] icon restore on $Path - ZCode.exe not found." -ForegroundColor Yellow
+    return
+  }
+  $expected = "$exe,0"
+  if ($sc.IconLocation -ieq $expected) { return }
+  try {
+    $sc.IconLocation = $expected
+    $sc.Save()
+    $chk = (New-Object -ComObject WScript.Shell).CreateShortcut($Path)
+    Assert-Value 'IconLocation' $expected $chk.IconLocation
+  } catch {
+    Write-Host "  [FAILED] icon restore on $Path : $($_.Exception.Message)" -ForegroundColor Red
+    $script:Failed = $true
+  }
 }
 
 function Repair-PrimaryAumid {
@@ -182,32 +230,41 @@ function Repair-PrimaryAumid {
   # stamped with the clone's AUMID ("<base>.<N>"). That stole the Primary's
   # Start-menu pin and let the empty-icon ZCode.lnk win taskbar icon resolution
   # for the clone. Strip any trailing ".<N>" clone suffix from the primary
-  # shortcut's AUMID; verify by re-read.
+  # shortcut's AUMID; verify by re-read. The same rewrite also empties the
+  # shortcut's icon field (verified 2026-09-28), so the icon is restored to
+  # <ZCode.exe>,0 as well - an AUMID-only fix leaves the Primary's own Start
+  # entry icon-less.
   Add-AumidType
   $repaired = 0
   $base = $null
   foreach ($c in (Get-PrimaryLnkPaths)) {
     if (-not (Test-Path -LiteralPath $c)) { continue }
     $id = Get-LnkAumid $c
-    if ([string]::IsNullOrWhiteSpace($id)) { continue }
-    if ($base -eq $null) { $base = $id }
-    if ($id -notmatch '\.\d+$') { continue }
-    $clean = $id -replace '\.\d+$', ''
-    try {
-      [ShortcutAumid]::Set($c, $clean)
-      $after = Get-LnkAumid $c
-      if ($after -ieq $clean) {
-        Write-Host "  [ok] repaired AUMID '$id' -> '$clean' in $c" -ForegroundColor Green
-        $repaired++
-        if ($base -eq $id) { $base = $clean }
-      } else {
-        Write-Host "  [FAILED] AUMID still '$after' after repair in $c" -ForegroundColor Red
-        $script:Failed = $true
+    if (-not [string]::IsNullOrWhiteSpace($id)) {
+      if ($base -eq $null) { $base = $id }
+      if ($id -match '\.\d+$') {
+        $clean = $id -replace '\.\d+$', ''
+        try {
+          [ShortcutAumid]::Set($c, $clean)
+          $after = Get-LnkAumid $c
+          if ($after -ieq $clean) {
+            Write-Host "  [ok] repaired AUMID '$id' -> '$clean' in $c" -ForegroundColor Green
+            $repaired++
+            if ($base -eq $id) { $base = $clean }
+            Repair-PrimaryLnkIcon $c
+          } else {
+            Write-Host "  [FAILED] AUMID still '$after' after repair in $c" -ForegroundColor Red
+            $script:Failed = $true
+          }
+        } catch {
+          Write-Host "  [FAILED] AUMID repair on $c : $($_.Exception.Message)" -ForegroundColor Red
+          $script:Failed = $true
+        }
+        continue
       }
-    } catch {
-      Write-Host "  [FAILED] AUMID repair on $c : $($_.Exception.Message)" -ForegroundColor Red
-      $script:Failed = $true
     }
+    # Healthy AUMID (or no AUMID stamped): still heal a wiped icon field.
+    Repair-PrimaryLnkIcon $c
   }
   if ($repaired -eq 0) { Write-Host '  [ok] no clone AUMID collision on the primary shortcut.' -ForegroundColor Green }
   return $base

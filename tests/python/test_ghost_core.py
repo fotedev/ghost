@@ -191,6 +191,17 @@ class ClearCliTelemetryTests(unittest.TestCase):
         result = sqlite_keys.clear_cli_telemetry(db)
         self.assertEqual(result["deleted"], 0)
 
+    def test_corrupt_db_surfaces_error_contract(self):
+        # A non-SQLite file raises "file is not a database" on first execute --
+        # NOT a missing-table case, so it must reach the error dict instead of
+        # being swallowed into a silent {"deleted": 0}.
+        db = os.path.join(self._tmp.name, "garbage.sqlite")
+        with open(db, "wb") as f:
+            f.write(b"this is not a sqlite database at all")
+        result = sqlite_keys.clear_cli_telemetry(db)
+        self.assertEqual(result["deleted"], 0)
+        self.assertIn("error", result)
+
     def test_connect_failure_returns_error_contract(self):
         # A directory as the db path -> sqlite3.Error on connect, which the
         # bridge contract reports as {"deleted": 0, "error": ...} exit 0.

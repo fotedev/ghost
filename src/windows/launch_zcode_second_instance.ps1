@@ -77,8 +77,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\setting.json'))) {
     Write-Host "[seed] First run for ${Instance}: cloning .zcode -> $($cfg.Home)\.zcode (excluding live locks)..."
     if (-not (Test-Path -LiteralPath $PrimaryZCode)) { throw "Primary .zcode not found: $PrimaryZCode" }
     New-Item -ItemType Directory -Path $CloneZCode -Force | Out-Null
-    # robocopy exit codes 0-7 = success; mirror content but skip live SQLite journals/locks
+    # robocopy exit codes 0-7 = success; 8+ = at least one failure (disk full,
+    # path errors). Never proceed with a half-built seed profile.
     robocopy $PrimaryZCode $CloneZCode /E /XD 'crash' 'logs' 'tmp' 'bots-runtime-locks' 'runtime' /XF '*.log' | Out-Null
+    if ($LASTEXITCODE -ge 8) {
+        throw "[seed] robocopy failed with exit code $LASTEXITCODE -- clone profile incomplete; remove '$CloneZCode' and re-run"
+    }
     # Remove any copied SQLite journals so the clone starts from a consistent checkpoint
     Get-ChildItem -Path $CloneZCode -Recurse -Force -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -like '*-shm' -or $_.Name -like '*-wal' } |
@@ -428,6 +432,20 @@ if ($targetProc) {
     }
     if ($finalGot -eq $wantAumid) {
         Write-Host "[taskbar] window identity pinned: $wantAumid (pid $($final.Id))" -ForegroundColor Green
+        # Kick the shell group once after pinning: the taskbar group may have
+        # formed during the splash phase with a stale icon resolution, and a
+        # plain stamp on a pre-grouped window does not rebuild it (verified
+        # 2026-09-26: a green clone kept the Primary's icon until an Explorer
+        # refresh). Brief .kick identity, then the final one, verified by
+        # re-read; the resident watcher re-stamps if the window dies mid-kick.
+        [void][ZcodeWindowAumid]::Stamp($final.MainWindowHandle, "$wantAumid.kick")
+        Start-Sleep -Milliseconds 300
+        $kickGot = [ZcodeWindowAumid]::Stamp($final.MainWindowHandle, $wantAumid)
+        if ($kickGot -eq $wantAumid) {
+            Write-Host "[taskbar] shell group rebuilt: $wantAumid (stale-icon guard)"
+        } else {
+            Write-Host "[taskbar] FAILED - post-kick read-back '$kickGot' != '$wantAumid'. Run the launcher at the same integrity level as the clone." -ForegroundColor Red
+        }
     } else {
         Write-Host "[taskbar] FAILED - instance window holds '$finalGot', wanted '$wantAumid'. Run the launcher at the same integrity level as the clone." -ForegroundColor Red
     }

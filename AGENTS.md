@@ -11,7 +11,7 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (scripts live unde
                                              #   CLI cheat sheet: docs/cli.md); GHOST.bat =
                                              #   3 submenus with CONTINUOUS LOCAL numbering
                                              #   (IDE resets [1]-[8] / ZCode Multi-Instance &
-                                             #   Clones [1]-[16] / System & GHOST Maintenance
+                                             #   Clones [1]-[17] / System & GHOST Maintenance
                                              #   [1]-[2]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
@@ -35,16 +35,30 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #   watch_zcode_taskbar.ps1 — resident taskbar-identity
                                    #     watcher (ZCode submenu [16]; every 5s re-stamps
                                    #     System.AppUserModel.ID on each ZCode main window
-                                   #     incl. Primary when missing/wrong — the shell-side
-                                   #     fix for the recurring taskbar merge; -RunOnce,
-                                   #     -InstallAutostart/-RemoveAutostart startup-folder
-                                   #     shortcut, named-mutex single instance, log at
+                                   #     incl. Primary when missing/wrong; every ~5m self-heals
+                                   #     hijacked Primary shortcuts + restores wiped icons;
+                                   #     -RunOnce, -CheckPrimaryHijack, -InstallAutostart/
+                                   #     -RemoveAutostart, named-mutex + startup process-scan
+                                   #     single instance (scan catches a stale pre-mutex
+                                   #     copy whose mutex name differs), self-titling
+                                   #     console "ZCode Taskbar Watcher (pid N)", log at
                                    #     %LOCALAPPDATA%\watch-zcode-taskbar\taskbar.log);
-                                   #   patch_zcode_icon_override.ps1 (+ .mjs engine v6) — one-time
+                                   #   diagnose_zcode_freeze.ps1 — read-only freeze diagnostic
+                                   #     (ZCode submenu [17]; -Days N): scans each instance's
+                                   #     <home>\.zcode\v2\logs for render-process-gone /
+                                   #     child-process-gone / perf_freeze events (collapses
+                                   #     same-second bursts), reads .zcode\v2\crash\archive dump
+                                   #     annotations (v8-oom-last-os-error 1455 = commit limit),
+                                   #     prints live RAM/commit/pagefile pressure; verified the
+                                   #     2026-09-25 renderer-OOM freeze root cause;
+                                   #   patch_zcode_icon_override.ps1 (+ .mjs engine v7) — one-time
                                    #     app.asar patch enabling ZCODE_ICON_DIR / ZCODE_AUMID_SUFFIX /
                                    #     ZCODE_ACCENT_HEX / ZCODE_INSTANCE_NAME env overrides +
                                    #     __ZCODE_BLUE__/__ZCODE_ACCENT__/__ZCODE_TITLE__ renderer flags
-                                   #     (per-clone accent color + window title); marker carries
+                                   #     (per-clone accent color + window title); v7 also injects
+                                   #     bidi auto-direction into the chat (per-paragraph Arabic RTL /
+                                   #     English LTR via unicode-bidi:plaintext + dir="auto" stamping,
+                                   #     code blocks stay LTR; ZCODE_BIDI_OFF=1 opts out); marker carries
                                    #     patchVersion so ZCode submenu [12] auto-upgrades after engine changes;
                                    #     re-run after app updates;
                                    #   zcode-blue-branding/ (blue, Secondary), zcode-yellow-branding/
@@ -90,7 +104,24 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     --ff-only; refuses on local commits / non-main or detached
                                    #     HEAD; dirty tree -> interactive stash -u -> pull -> pop
                                    #     (failed pop keeps the stash); verify-after re-reads HEAD ==
-                                   #     origin + behind==0; offline fetch = warning + clean exit 0
+                                   #     origin + behind==0; offline fetch = warning + clean exit 0.
+                                   #     Download-ZIP copy (no .git) handling, gated AFTER the
+                                   #     git-on-PATH check: git missing -> direct-download update
+                                   #     (archive from -ZipUrl, add/overwrite only, per-file backup +
+                                   #     SHA256 verify, never deletes, defensive .git/ skip) or
+                                   #     winget/git-scm guidance on a non-GHOST folder; git present
+                                   #     -> in-place conversion to a clone (init + symbolic-ref main +
+                                   #     local core.longpaths/core.autocrlf=false + fetch from
+                                   #     -OriginUrl + reset --mixed; real local edits detected via
+                                   #     --ignore-cr-at-eol re-check, EOL-only noise ignored, overwrite
+                                   #     needs a second prompt) + reset --hard + upstream + verify-after
+                                   #     HEAD==origin; aborted/failed setup removes the temp .git
+                                   #     (Remove-GhostPathRobust: read-only clear + 3 retries);
+                                   #     -CheckOnly reports without writing; -Convert answers the
+                                   #     conversion/download prompt non-interactively (never the
+                                   #     overwrite-edits prompt); GHOST.bat replaced by either path
+                                   #     prints a close-and-relaunch note (cmd reads the .bat
+                                   #     incrementally)
 ```
 
 ## Architecture
@@ -141,12 +172,16 @@ launch_zcode_second_instance.ps1   # ZCode multi-instance launcher -Instance Sec
 reset_qoderwork.ps1   # QoderWork: 26 steps (agents.db oauth/app_settings scrub,
                                    #          chats preserved; auth.dat, MachineGuid, MAC, hostname;
                                    #          -SkipMac/-SkipHostname/-DryRun)
-reset_minimax_opencode.ps1  # MiniMax/OpenCode: 22 steps (auth.json wipe -> {} unless
+reset_minimax_opencode.ps1  # MiniMax/OpenCode: 22 steps (OpenCode auth.json wipe -> {} unless
                                    #          -KeepLogin, version preflight ≥1.17.0, distinct
                                    #          updater IDs, Chromium state per profile; v1.2 adds
                                    #          updater-tmp sweep, DIPS/SharedStorage suffix sweep,
                                    #          lockfile/locks delete, uninstall_metrics removal,
-                                   #          windowIds rotation + per-window file delete; chat preserved)
+                                   #          windowIds rotation + per-window file delete; v1.3 DELETES
+                                   #          mcode-public auth.json/auth-state.json + legacy root state —
+                                   #          "{}" there throws Invalid OAuth state and blocks the login
+                                   #          page — and rotates .minimax\v2\session-handoff\device-id;
+                                   #          chat preserved)
 change_device_id.ps1              # System-level: Fingerprint (self-test) / LegacyReset (registry GUIDs)
                                    #   / RepairProfiles (ProfileList .bak keys). Windows-only.
 ```
@@ -230,7 +265,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 - Clone visual identity rides on `ZCODE_ICON_DIR` + `ZCODE_AUMID_SUFFIX` +
   `ZCODE_ACCENT_HEX` + `ZCODE_INSTANCE_NAME` (branded window/tray icon +
   separate taskbar button + accent recolor + "ZCode <Color>" window title).
-  These only work because `tools/patch_zcode_icon_override.ps1` (engine v6)
+  These only work because `tools/patch_zcode_icon_override.ps1` (engine v7)
   patched the installed `app.asar` — an app update silently reverts them; re-run
   the patch (ZCode submenu [12]) whenever a clone loses its look. Primary never sets any
   of the four vars. The patched main derives a `--zcode-blue` flag
@@ -269,8 +304,12 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   the fresh PID alone — the single-instance focus path spawns a transient
   relauncher process whose brief window otherwise eats the stamp
   (false-positive read-back on a doomed hwnd); it re-stamps on main-window
-  handle change and final-verifies with an independent read. Launcher must
-  run at the same or higher integrity level as the clone (UIPI).
+  handle change and final-verifies with an independent read, then KICKS the
+  shell group once (brief `dev.zcode.app.<n>.kick` identity, then the final
+  one — the shell does not rebuild a pre-grouped window's group on a plain
+  stamp, and a stale group keeps the WRONG icon: verified 2026-09-26, a
+  green clone kept the Primary's icon until an Explorer refresh). Launcher
+  must run at the same or higher integrity level as the clone (UIPI).
 - Launcher stamping alone was NOT enough (verified 2026-09-24 later the same
   day): the merge MOVED to Primary+Yellow — any window relying on the app's
   process-explicit identity can merge with any other at any time. Final fix =
@@ -278,8 +317,10 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   four instances every 5s and re-stamps Primary (`dev.zcode.app`) AND clones
   whenever a window is missing/wrong — heals new/splash-swapped windows
   automatically (live-proven: stamped a freshly launched Primary within its
-  first pass). Ambiguous titles (patch missing, all "ZCode") are skipped
-  loudly, never guessed.
+  first pass). Every stamp is a KICK (`.kick` → final) and first-seen
+  windows get one kick even when their store is already correct — the
+  stale-group/stale-icon guard (verified 2026-09-26). Ambiguous titles
+  (patch missing, all "ZCode") are skipped loudly, never guessed.
 - Watcher classification is by PROCESS MARKERS first, titles only as the
   WMI-failure fallback (verified 2026-09-24, green-clone default-icon bug): a
   clone's window is titled plain "ZCode" during the splash phase, so the old
@@ -296,6 +337,36 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   spurious "Primary" marker read, and unknown pids fall back to the v6-title
   rules. The launcher's title-resolve/stamp loops were extended to 60s/30s
   for the same reason.
+- Start-menu / Desktop `ZCode.lnk` hijack repair & self-heal (verified
+  2026-09-28): pinning a clone window or Windows taskbar pin maintenance can
+  rewrite the Primary's `ZCode.lnk` with a clone AUMID (e.g. `dev.zcode.app.4`)
+  and simultaneously wipe its `IconLocation` (`",0"`). When the affected clone
+  subsequently runs alone, the shell resolves its AUMID to the icon-less
+  Primary shortcut and falls back to the exe's default icon. Fix:
+  `tools/install_zcode_second_shortcuts.ps1 -RepairPrimaryAumid` strips clone
+  suffixes and restores the icon location back to `<ZCode.exe>,0` across
+  Desktop and Start Menu locations. The resident watcher
+  (`tools/watch_zcode_taskbar.ps1`) runs a periodic (~5m, every 60 passes)
+  read-only check and automatically invokes the repair on hijack detection, or
+  on demand via `-CheckPrimaryHijack`. Diagnostic rule: read lnk AUMIDs via
+  `Shell.Application` `ExtendedProperty('System.AppUserModel.ID')` — decoding
+  the whole .lnk as UTF-16 and regexing MISALIGNS on odd byte offsets and
+  reports false `<none>` (cost a false "clone shortcuts lost their AUMID"
+  conclusion on 2026-09-26). A silent watcher log with healthy pass CPU is
+  NORMAL (stores correct) — not a zombie.
+- A "frozen" ZCode window (drags, content dead) is a RENDERER DEATH, not a
+  hang, and the splash-then-close relaunch is a post-crash quit path, not a
+  lock (verified 2026-09-25): Primary and Second renderers died with
+  `render-process-gone reason:"oom"` in the same second (12:54:06), Fourth
+  had died that morning (09:01), and the archived dump annotation
+  `v8-oom-last-os-error: 1455` = ERROR_COMMITMENT_LIMIT — the Windows commit
+  limit (RAM ~16GB + pagefile ~16GB) was exhausted with 4 instances running
+  (msedge/git WER dumps the same minute corroborate; JS heap was only
+  ~478MB, so it is OS commit starvation, not an app leak). After the
+  tray-click quit, launching the instance again is safe and works. Diagnosis:
+  ZCode submenu [17] (`tools/diagnose_zcode_freeze.ps1`). Mitigation: larger
+  pagefile / fewer concurrent instances. Ruled out that day: GPU caches, the
+  icon asar patch, the captcha watchdog (idle since 09-17), db.sqlite locks.
 
 ## Out of scope
 

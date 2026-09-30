@@ -56,6 +56,14 @@ git clone https://github.com/fotedev/ghost.git
 cd ghost
 ```
 
+> **Note on "Download ZIP" copies:** a ZIP extracted from GitHub has no
+> `.git`, so the git-based update flow cannot run there. Running the updater
+> (`[U]` on the main menu, or Maintenance [2]) once from such a folder either
+> converts it in place into a real git clone (after your confirmation, when
+> Git is installed) or — when Git is not installed — updates it by
+> downloading the latest GitHub archive directly (files are only added or
+> replaced, never deleted; every replaced file is backed up first).
+
 ## Quick start
 
 Prefer the interactive menus:
@@ -127,7 +135,7 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   window title); re-run after every ZCode app update (`-Restore` undoes it)
 - `tools/install_zcode_second_shortcuts.ps1` — Desktop + Start-menu shortcuts
   for all three clones with per-clone AppUserModel IDs (`-Remove` uninstalls,
-  `-RepairPrimaryAumid` fixes a collided Primary pin)
+  `-RepairPrimaryAumid` fixes a collided Primary pin + restores its icon)
 - `tools/refresh_zcode_second_chats.ps1 -Target Primary|Second|Third|Fourth|All`
   — shows another instance's chats in a running sidebar without an app
   restart; `-Watch` runs as a daemon that auto-refreshes on quota/captcha

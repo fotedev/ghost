@@ -9,6 +9,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Green-clone-alone showed the Primary's taskbar icon**: the Start-menu
+  `ZCode.lnk` had been hijacked with `dev.zcode.app.4` AND its icon field
+  wiped (`,0`), so the shell resolved the clone's AUMID to an icon-less
+  shortcut and fell back to the exe default icon. `Repair-PrimaryAumid` in
+  `tools/install_zcode_second_shortcuts.ps1` now also restores the Primary
+  shortcut's icon to `<ZCode.exe>,0` (Desktop + both Start-menu copies
+  covered), and the resident `tools/watch_zcode_taskbar.ps1` self-heals a
+  hijack every ~5 min (read-only check, repair only when broken,
+  REPAIR/FAIL logged; `-RunOnce -CheckPrimaryHijack` for a one-shot
+  repair). Verified 2026-09-28: Primary `ZCode.lnk` back to `dev.zcode.app`
+  with a healthy icon; the green window's identity was already correct.
 - **Python detection no longer false-positives on the Microsoft Store
   stubs**: `Get-PythonCommandInfo` (and the chat-refresh tool's detector)
   now functionally probe candidates (`python` / `python3` / `py` + per-user

@@ -290,7 +290,7 @@ print(json.dumps({"deleted": deleted, "survivors": survivors}))
 
     try {
         [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
-        $commandOutput = & $pythonCommand.Source $tempScriptPath $Path
+        $commandOutput = & $pythonCommand $tempScriptPath $Path
         if ($LASTEXITCODE -ne 0) {
             Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "failed" -Ok $false
             Write-Host "    [FAILED] secrets deletion command failed: $Path" -ForegroundColor Red

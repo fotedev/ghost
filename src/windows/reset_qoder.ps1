@@ -539,7 +539,7 @@ print(json.dumps(result))
         # A BOM at the start of the temp file trips CPython's parser before the
         # shebang line is read.
         [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
-        $commandOutput = & $pythonCommand.Source $tempScriptPath $DbPath
+        $commandOutput = & $pythonCommand $tempScriptPath $DbPath
         if ($LASTEXITCODE -ne 0) {
             foreach ($key in ($exactKeys + $likePatterns)) {
                 Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "command-failed" -Ok $false
@@ -1139,22 +1139,23 @@ function Set-SystemHostname {
         return $false
     }
 
-    # Re-read the registry locations to confirm. Two of the four locations
-    # Rename-Computer touches are "active config" (updated immediately):
-    #   - HKLM:\...\ComputerName\ComputerName     <-- ComputerName
-    #   - HKLM:\...\Tcpip\Parameters\Hostname     <-- Hostname
-    # The other two are "next-boot" (only updated by the kernel at boot):
+    # Re-read the registry locations to confirm. Verified (reset_qoderwork.ps1
+    # Set-VerifiedHostname, 2026-07-09, Windows 11): Rename-Computer updates
+    #   - HKLM:\...\ComputerName\ComputerName     <-- the ONLY synchronous key
+    # in place; the other three stay old until the kernel swaps them at boot:
+    #   - HKLM:\...\Tcpip\Parameters\Hostname     <-- next-boot
     #   - HKLM:\...\ComputerName\ActiveComputerName
-    #   - HKLM:\...\Tcpip\Parameters\NV Hostname
-    # Without -Restart, the next-boot pair stays old until you restart. That's
-    # expected, not a failure. Only verify the two live keys.
+    #   - HKLM:\...\Tcpip\Parameters\NV Hostname  (updated by Rename-Computer,
+    #                                              swapped at boot)
+    # Requiring any of the next-boot trio here produced a false-fail on every
+    # run without -Restart.
     $activeComputerName = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName" -Name "ComputerName" -ErrorAction SilentlyContinue).ComputerName
     $activeTcpipHost    = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "Hostname" -ErrorAction SilentlyContinue).Hostname
     $nextBootActive     = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName" -Name "ComputerName" -ErrorAction SilentlyContinue).ComputerName
     $nextBootNv         = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "NV Hostname" -ErrorAction SilentlyContinue)."NV Hostname"
 
-    $liveOk = ($activeComputerName -eq $NewHostname) -and ($activeTcpipHost -eq $NewHostname)
-    $nextBootPending = ($nextBootActive -ne $NewHostname) -or ($nextBootNv -ne $NewHostname)
+    $liveOk = ($activeComputerName -eq $NewHostname)
+    $nextBootPending = ($activeTcpipHost -ne $NewHostname) -or ($nextBootActive -ne $NewHostname) -or ($nextBootNv -ne $NewHostname)
 
     $after = "active=$activeComputerName/$activeTcpipHost; nextBoot=$nextBootActive/$nextBootNv"
     if ($liveOk) {
@@ -1385,7 +1386,7 @@ print(json.dumps({"survivors": survivors}))
         try {
             # No-BOM UTF-8 write for the temp .py (mirrors Clear-QoderSecrets).
             [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
-            $commandOutput = & $pythonCommand.Source $tempScriptPath $dbPath
+            $commandOutput = & $pythonCommand $tempScriptPath $dbPath
             if ($LASTEXITCODE -ne 0) {
                 Add-AuditEntry -Audit $Audit -File $dbPath -Key "device-flow-probe" -Before $null -After "command-failed" -Ok $false
                 $probeOk = $false

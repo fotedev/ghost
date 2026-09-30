@@ -22,10 +22,20 @@
 //   react-badge   (v6) fill reads __ZCODE_ACCENT__ (fallback BLUE_HEX)
 // __ZCODE_BLUE__ stays the binary on/off switch (derived from ZCODE_ICON_DIR);
 // the accent only picks the color. No accent env -> exact v5 blue behavior.
+// Engine v7 patch set (bidi auto-direction):
+//   preload-bidi  (v7) appends a snippet after the __ZCODE_TITLE__ exposure that
+//                      injects a <style id="zcode-bidi-auto-style"> making chat
+//                      text blocks run the Unicode bidi algorithm per paragraph
+//                      (unicode-bidi: plaintext -> Arabic RTL, English LTR, code
+//                      blocks forced back to LTR) and stamps dir="auto" so text
+//                      alignment follows the detected direction. Reads env vars
+//                      directly in the renderer - ZCODE_BIDI_OFF=1 opts out per
+//                      launch; no launcher/main-process changes. Inert on apps
+//                      without the patch.
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-const ENGINE_VERSION = 6;
+const ENGINE_VERSION = 7;
 const extractedDir = process.argv[2];
 if (!extractedDir) {
   console.error(JSON.stringify({ ok: false, error: "usage: patch_zcode_icon_override.mjs <extractedDir>" }));
@@ -39,6 +49,51 @@ const BLUE_URI = BLUE_HEX.replace("#", "%23");
 // main -> renderer forwards for the per-instance accent/title (v6).
 const ACCENT_ARG = ',"--zcode-accent="+(process.env.ZCODE_ACCENT_HEX||"")';
 const TITLE_ARG = ',"--zcode-title="+(process.env.ZCODE_INSTANCE_NAME||"")';
+// Engine v7: exact tail preload-blue writes for the __ZCODE_TITLE__ exposure.
+// preload-bidi appends right after it, so the anchor exists on pristine trees
+// (patches chain within a file) and on v6 trees alike.
+const BIDI_ANCHOR =
+  /exposeInMainWorld\("__ZCODE_TITLE__",\(process\.argv\.find\(a=>a\.startsWith\("--zcode-title="\)\)\|\|""\)\.slice\(14\)\)/g;
+// Snippet appended to the preload bundle (comma-expression continuation of the
+// exposure chain - never a statement). Runs the bidi algorithm per chat text
+// block: CSS plaintext gives per-paragraph/per-line direction; the Mutation-
+// Observer stamps dir="auto" so text-align follows the detected direction too.
+// Code blocks are explicitly forced back to LTR because unicode-bidi inherits
+// into nested pre/code inside lists/blockquotes. Opt out: ZCODE_BIDI_OFF=1.
+const BIDI_APPEND = `,(() => {
+  if (process.env.ZCODE_BIDI_OFF === "1") return;
+  const sel = '[data-row-id] [data-conversation-selectable="true"] p,[data-streamdown="list-item"],[data-streamdown^="heading-"],[data-streamdown="blockquote"],[data-streamdown="table-cell"],[data-streamdown="table-header-cell"],[data-v4-user-input-collapsible-content="true"],[data-testid="v4-composer-input"]';
+  const css = sel + '{unicode-bidi:plaintext;text-align:start}' +
+    ',[data-streamdown^="code-block"],[data-streamdown^="code-block"] *,[data-streamdown^="mermaid"],[data-streamdown^="mermaid"] *,[data-language],[data-language] *,pre,code,kbd,samp{unicode-bidi:isolate;direction:ltr}';
+  const inject = () => {
+    if (document.getElementById("zcode-bidi-auto-style")) return;
+    const el = document.createElement("style");
+    el.id = "zcode-bidi-auto-style";
+    el.textContent = css;
+    (document.head || document.documentElement).appendChild(el);
+  };
+  const stamp = (root) => {
+    if (!root || root.nodeType !== 1) return;
+    const list = root.matches && root.matches(sel) ? [root] : [];
+    if (root.querySelectorAll) for (const el of root.querySelectorAll(sel)) list.push(el);
+    for (const el of list) {
+      if (el.hasAttribute("dir") || (el.closest && el.closest("[data-language]"))) continue;
+      el.setAttribute("dir", "auto");
+    }
+  };
+  let started = false;
+  const start = () => {
+    if (started) return;
+    started = true;
+    inject();
+    stamp(document.body);
+    new MutationObserver((muts) => {
+      for (const m of muts) for (const n of m.addedNodes) stamp(n);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+  else start();
+})()`;
 
 function listSourceFiles(dir) {
   const out = [];
@@ -189,6 +244,21 @@ const PATCHES = [
         '.contextBridge.exposeInMainWorld("__ZCODE_BLUE__",process.argv.includes("--zcode-blue=1"))' +
         "," + m[1] + accent + "," + m[1] + title;
       return { src: src.replace(m[0], addition), count: 1 };
+    },
+  },
+  {
+    name: "preload-bidi",
+    min: 1,
+    apply: (src) => {
+      // Idempotence before the regex (same reason as preload-blue): this patch
+      // appends after the matched call, so the anchor still matches a v7 file.
+      if (src.includes("zcode-bidi-auto-style")) return { src, count: -1 };
+      let count = 0;
+      const out = src.replace(BIDI_ANCHOR, (m) => {
+        count++;
+        return m + BIDI_APPEND;
+      });
+      return { src: out, count };
     },
   },
   {
@@ -385,6 +455,8 @@ function markersForPatch(name) {
       return ["--zcode-blue=", "--zcode-accent=", "--zcode-title="];
     case "preload-blue":
       return ["__ZCODE_BLUE__", "__ZCODE_ACCENT__", "__ZCODE_TITLE__"];
+    case "preload-bidi":
+      return ["zcode-bidi-auto-style"];
     case "splash-html":
       return ["html.zblue", "--zcode-accent", "__ZCODE_TITLE__"];
     case "sidebar-logo":

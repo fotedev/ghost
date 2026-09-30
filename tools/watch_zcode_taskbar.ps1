@@ -12,6 +12,20 @@ re-stamps it whenever it is missing or wrong. It covers ALL instances
 including Primary (which no launcher owns) and heals windows that get
 recreated (splash swap, close/reopen) within one polling interval.
 
+Every stamp is a KICK (brief .kick-suffixed identity, then the final one):
+the shell does not always rebuild an existing group when a stamp lands on a
+window it already grouped, leaving a stale icon behind (verified 2026-09-26:
+a freshly launched green clone kept the Primary's icon until an Explorer
+refresh). First-seen windows get one kick even when their store is already
+correct - the group may predate this watcher session.
+
+The recurring Start-menu ZCode.lnk hijack (a Windows pin from a splash-phase
+clone window rewrites the Primary shortcut with a clone AUMID - and can also
+empty its icon field, verified 2026-09-28) is self-healed too: a read-only
+AUMID check on every 60th pass triggers the existing shortcut repair tool
+(AUMID suffix stripping plus icon restore) only when a hijack is present,
+then logs REPAIR or FAIL after re-checking.
+
 Classification is by PROCESS MARKERS first: one Win32_Process snapshot per
 pass, each window's process tree walked to its root ZCode.exe and the clone
 markers (roaming/home dir names embedded in child --user-data-dir command
@@ -30,12 +44,19 @@ rather than guessed.
 Usage:
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\watch_zcode_taskbar.ps1            # resident watcher
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\watch_zcode_taskbar.ps1 -RunOnce   # single pass, exit
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\watch_zcode_taskbar.ps1 -RunOnce -CheckPrimaryHijack  # single pass, also repair a Primary-shortcut hijack
   ... -InstallAutostart   # hidden shortcut in the Startup folder (survives reboots)
   ... -RemoveAutostart    # remove that shortcut
 
 Notes:
-  - The resident loop is guarded by a named mutex; a second copy exits at once
-    (check the log / Task Manager for the running one). -RunOnce always runs.
+  - The resident loop is guarded by a named mutex AND a startup process scan:
+    a second copy exits at once. The scan also catches a stale copy of an
+    older script version whose mutex name differs (2026-09-26: two watcher
+    consoles ran at once - one was a pre-mutex-era copy behind an old window
+    title no current launcher produces). -RunOnce always runs.
+  - The console titles itself "ZCode Taskbar Watcher (pid N)" on start, so an
+    unknown console can be identified at a glance regardless of how it was
+    launched (menu, startup shortcut, manual).
   - The writer needs the same or higher integrity level as the ZCode windows
     (UIPI): a non-elevated watcher cannot stamp an elevated window and logs
     FAILED with the reason.
@@ -44,6 +65,7 @@ Notes:
 #>
 param(
     [switch]$RunOnce,
+    [switch]$CheckPrimaryHijack,
     [int]$IntervalSeconds = 5,
     [string]$LogFile = (Join-Path $env:LOCALAPPDATA 'watch-zcode-taskbar\taskbar.log'),
     [switch]$InstallAutostart,
@@ -132,22 +154,45 @@ function Write-WatchLog {
     else { Write-Host $line }
 }
 
-function Set-WindowIdentity {
-    param($Win, $Inst)
-    $cur = [ZcodeWindowAumid]::Read($Win.MainWindowHandle)
-    if ($cur -eq $Inst.Aumid) { return }
-    $got = [ZcodeWindowAumid]::Stamp($Win.MainWindowHandle, $Inst.Aumid)
-    Write-WatchLog ('{0}: pid {1} hwnd 0x{2:X} title "{3}" identity was "{4}" -> stamped "{5}"' -f $Inst.Name, $Win.Id, [Int64]$Win.MainWindowHandle, $Win.MainWindowTitle, $cur, $got) 'STAMP'
+# The shell does not reliably re-evaluate an existing taskbar group when a
+# stamp lands on a window it already grouped: verified 2026-09-26 twice - a
+# Primary+Second group held ~1h with both stores correct, and a freshly
+# launched green clone kept the Primary's icon until an Explorer refresh.
+# A KICK forces the rebuild: a brief .kick-suffixed identity, then the final
+# one (the 300ms gap lets the shell observe the change). Final stamp is
+# verified by re-read; if the kicker dies mid-toggle the next pass re-stamps.
+function Invoke-IdentityKick {
+    param($Win, $Inst, [string]$Cur)
+    $hwnd = $Win.MainWindowHandle
+    [void][ZcodeWindowAumid]::Stamp($hwnd, "$($Inst.Aumid).kick")
+    Start-Sleep -Milliseconds 300
+    $got = [ZcodeWindowAumid]::Stamp($hwnd, $Inst.Aumid)
+    Write-WatchLog ('{0}: pid {1} hwnd 0x{2:X} title "{3}" identity "{4}" -> kicked via "{5}.kick" -> stamped "{6}"' -f $Inst.Name, $Win.Id, [Int64]$hwnd, $Win.MainWindowTitle, $Cur, $Inst.Aumid, $got) 'STAMP'
     if ($got -ne $Inst.Aumid) {
         Write-WatchLog ('{0}: FAILED - read-back "{1}" != "{2}". If this watcher runs at a lower integrity level than the ZCode window (UIPI), run it from the same level or higher.' -f $Inst.Name, $got, $Inst.Aumid) 'FAIL'
     }
 }
 
+function Set-WindowIdentity {
+    param($Win, $Inst, [switch]$FirstSeen)
+    $cur = [ZcodeWindowAumid]::Read($Win.MainWindowHandle)
+    if ($cur -eq $Inst.Aumid -and -not $FirstSeen) { return }
+    # Missing/wrong identity is kicked too: the group formed while identity
+    # was empty, so a plain final stamp would not rebuild it.
+    Invoke-IdentityKick -Win $Win -Inst $Inst -Cur $cur
+}
+
+# Windows this session has already processed: a first-seen window gets one
+# identity kick even when its store is already correct (covers a stale group
+# the launcher pinned before this watcher started; -RunOnce heals live
+# windows the same way).
+$SeenHwnds = @{}
+
 # One WMI snapshot per pass, keyed by pid, with parent->children links so the
 # subtree walks below never re-query.
 function Get-ZcodeProcessMap {
     $map = @{}
-    $procs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)
+    $procs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
     foreach ($p in $procs) {
         $map[[int]$p.ProcessId] = @{ Parent = [int]$p.ParentProcessId; Cmdline = [string]$p.CommandLine; Children = @() }
     }
@@ -209,6 +254,8 @@ function Invoke-IdentityPass {
     foreach ($w in $wins) {
         $inst = Get-WindowInstance -ProcMap $procMap -ProcessId $w.Id
         if ($inst) {
+            $firstSeen = -not $SeenHwnds.ContainsKey([Int64]$w.MainWindowHandle)
+            $SeenHwnds[[Int64]$w.MainWindowHandle] = $true
             # WMI race guard: a just-spawned clone tree can classify as Primary
             # before its children exist, but a window already carrying a clone's
             # v6 title can never be Primary - the title wins there.
@@ -221,13 +268,13 @@ function Invoke-IdentityPass {
                     }
                 }
             }
-            $classified += ,@($w, $inst)
+            $classified += ,@($w, $inst, $firstSeen)
         } else {
             $unknownWins += $w
         }
     }
     foreach ($pair in $classified) {
-        Set-WindowIdentity -Win $pair[0] -Inst $pair[1]
+        Set-WindowIdentity -Win $pair[0] -Inst $pair[1] -FirstSeen:$pair[2]
     }
     # WMI unavailable for these pids: v6-title fallback (ambiguous -> skip
     # loudly, never guessed).
@@ -238,7 +285,77 @@ function Invoke-IdentityPass {
             Write-WatchLog ("{0}: {1} windows titled '{2}' - ambiguous (app.asar patch missing?), stamping skipped" -f $inst.Name, $hits.Count, $inst.Title) 'WARN'
             continue
         }
-        Set-WindowIdentity -Win $hits[0] -Inst $inst
+        $firstSeen = -not $SeenHwnds.ContainsKey([Int64]$hits[0].MainWindowHandle)
+        $SeenHwnds[[Int64]$hits[0].MainWindowHandle] = $true
+        Set-WindowIdentity -Win $hits[0] -Inst $inst -FirstSeen:$firstSeen
+    }
+}
+
+$script:HijackCheckPass = 0
+
+# Read-only check for the recurring Primary-shortcut hijack: every per-user
+# ZCode.lnk whose AUMID ends in ".<N>" hands the clone's icon resolution to a
+# foreign shortcut (verified 2026-09-28: green-alone showed the Primary icon
+# while its window identity was already correct).
+function Get-PrimaryLnkHijack {
+    $paths = @(
+        (Join-Path ([Environment]::GetFolderPath('Desktop')) 'ZCode.lnk'),
+        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\ZCode.lnk'),
+        (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ZCode.lnk')
+    )
+    $shell = $null
+    try { $shell = New-Object -ComObject Shell.Application } catch { return @() }
+    $hijacked = @()
+    foreach ($p in $paths) {
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        $ns = $shell.Namespace((Split-Path -Parent $p))
+        if (-not $ns) { continue }
+        $item = $ns.ParseName((Split-Path -Leaf $p))
+        if (-not $item) { continue }
+        $id = [string]$item.ExtendedProperty('System.AppUserModel.ID')
+        if ($id -match '\.\d+$') {
+            $hijacked += [pscustomobject]@{ Path = $p; Aumid = $id }
+        }
+    }
+    return $hijacked
+}
+
+# Repair check throttled by pass count (60 passes ~5 minutes at the default
+# 5s interval). Writes happen only after a read finds a hijack; the canonical
+# shortcut tool performs and verify-afters the repair (AUMID plus icon).
+function Invoke-PrimaryHijackGuard {
+    param([int]$EveryPasses = 60, [switch]$Repair)
+    $script:HijackCheckPass++
+    if ($EveryPasses -gt 1 -and (($script:HijackCheckPass % $EveryPasses) -ne 0)) { return }
+    $hits = @(Get-PrimaryLnkHijack)
+    if ($hits.Count -eq 0) { return }
+    foreach ($hit in $hits) {
+        Write-WatchLog ('Primary shortcut hijack detected: {0} carries "{1}"' -f $hit.Path, $hit.Aumid) 'WARN'
+    }
+    if (-not $Repair) {
+        Write-WatchLog 'hijack check only (no -Repair): run -RunOnce -CheckPrimaryHijack or keep the resident watcher running to self-heal it' 'WARN'
+        return
+    }
+    try {
+        $repair = Join-Path $PSScriptRoot 'install_zcode_second_shortcuts.ps1'
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File $repair -RepairPrimaryAumid 2>&1 | Out-String
+        if (-not [string]::IsNullOrWhiteSpace($out)) {
+            $repairDir = Split-Path -Parent $LogFile
+            if (-not (Test-Path -LiteralPath $repairDir)) { New-Item -ItemType Directory -Path $repairDir -Force | Out-Null }
+            Add-Content -LiteralPath $LogFile -Value ($out.Trim()) -Encoding UTF8
+        }
+    } catch {
+        Write-WatchLog ('hijack repair launch FAILED: {0}' -f $_.Exception.Message) 'FAIL'
+        return
+    }
+    $still = @(Get-PrimaryLnkHijack)
+    if ($still.Count -eq 0) {
+        Write-WatchLog 'Primary shortcut hijack repaired (AUMID plus icon). Re-check the taskbar buttons; an Explorer/icon refresh may still be required once.' 'REPAIR'
+    } else {
+        foreach ($hit in $still) {
+            Write-WatchLog ('hijack repair FAILED - {0} still carries "{1}"' -f $hit.Path, $hit.Aumid) 'FAIL'
+        }
     }
 }
 
@@ -275,14 +392,44 @@ if ($InstallAutostart -or $RemoveAutostart) {
 # ---- Resident / one-shot loop ----
 if ($RunOnce) {
     Invoke-IdentityPass
+    Invoke-PrimaryHijackGuard -EveryPasses 1 -Repair:$CheckPrimaryHijack
     Write-WatchLog 'single pass complete (-RunOnce)'
+    exit 0
+}
+
+# Resident console title: makes the window self-identifying no matter how it
+# was launched - the stale second copy on 2026-09-26 hid behind an old
+# launcher title that no current script or shortcut produces.
+try { $Host.UI.RawUI.WindowTitle = 'ZCode Taskbar Watcher (pid {0})' -f $PID } catch { }
+
+# Process scan on top of the mutex: the mutex only serializes copies of THIS
+# script version - a stale older copy (different or absent mutex name) would
+# co-run silently forever. Matched by script file name so relative and
+# absolute -File paths both hit; own pid excluded.
+function Get-OtherWatcherPids {
+    $leaf = (Split-Path -Leaf $PSCommandPath).ToLowerInvariant()
+    $found = @()
+    $procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
+    foreach ($p in $procs) {
+        if ([int]$p.ProcessId -eq $PID) { continue }
+        if ($p.CommandLine -and $p.CommandLine.ToLowerInvariant().Contains($leaf)) { $found += [int]$p.ProcessId }
+    }
+    return $found
+}
+
+$others = Get-OtherWatcherPids
+if ($others.Count -gt 0) {
+    Write-WatchLog ('watcher already running (pid {0}) - exiting. Close that console or stop the pid first.' -f ($others -join ', ')) 'WARN'
     exit 0
 }
 
 $created = $false
 $mutex = New-Object System.Threading.Mutex($true, 'ZcodeTaskbarIdentityWatcher', [ref]$created)
 if (-not $created) {
-    Write-WatchLog 'watcher already running (mutex held) - exiting. Check the log or Task Manager.' 'WARN'
+    $holder = Get-OtherWatcherPids
+    $who = ''
+    if ($holder.Count -gt 0) { $who = ' by pid ' + ($holder -join ', ') }
+    Write-WatchLog ('watcher already running (mutex held{0}) - exiting. Check the log or Task Manager.' -f $who) 'WARN'
     $mutex.Close()
     exit 0
 }
@@ -290,6 +437,7 @@ Write-WatchLog ('watcher started (pid {0}, interval {1}s, script {2})' -f $PID, 
 try {
     while ($true) {
         Invoke-IdentityPass
+        Invoke-PrimaryHijackGuard -Repair
         Start-Sleep -Seconds $IntervalSeconds
     }
 } finally {

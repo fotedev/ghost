@@ -41,7 +41,12 @@ $ErrorActionPreference = "Stop"
 # __ZCODE_ACCENT__/__ZCODE_TITLE__, splash/sidebar/badge read the accent
 # (fallback #066BCB), window title becomes "ZCode <name>". Upgrades v5 trees
 # in place; no accent env -> exact v5 blue behavior.
-$script:EngineVersion = 6
+# v7: bidi auto-direction - preload injects a <style id="zcode-bidi-auto-style">
+# making chat text blocks auto-detect direction per paragraph (Arabic RTL /
+# English LTR; code blocks stay LTR) and stamps dir="auto" for alignment.
+# Renderer reads ZCODE_BIDI_OFF=1 to opt out; no launcher changes. Upgrades
+# v6 trees in place.
+$script:EngineVersion = 7
 
 function Resolve-InstallDir {
   param([string]$Override)
@@ -362,4 +367,5 @@ Write-Host "  ZCODE_ICON_DIR      -> dir containing icon_windows.png + tray_icon
 Write-Host "  ZCODE_AUMID_SUFFIX  -> taskbar button suffix (2/3/4 per instance)"
 Write-Host "  ZCODE_ACCENT_HEX    -> in-app accent color (splash/sidebar/badge)"
 Write-Host "  ZCODE_INSTANCE_NAME -> window title suffix (Blue/Yellow/Green)"
+Write-Host "Bidi auto-direction (v7) is ON for every instance; set ZCODE_BIDI_OFF=1 to disable."
 Write-Host "Primary instance sets none of these -> unchanged behavior."
