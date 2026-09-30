@@ -220,6 +220,18 @@ function Save-WatchState {
     if (-not (Test-Path -LiteralPath $StateDir)) {
         New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
     }
+    # Prune auto-continue stamps older than the hourly-cap window (the only
+    # consumer, Test-ContinueAllowed, looks back one hour) so state.json cannot
+    # grow unboundedly on long watches.
+    $pruneCut = (Get-Date).ToUniversalTime().AddHours(-1)
+    $kept = @()
+    foreach ($c in @($State.continues)) {
+        try {
+            if ([datetime]([string]$c).Split("|")[1] -ge $pruneCut) { $kept += $c }
+        }
+        catch { }
+    }
+    $State.continues = $kept
     Write-NoBomText -Path $StatePath -Content ($State | ConvertTo-Json -Depth 6)
 }
 
@@ -457,7 +469,10 @@ function Test-ContinueAllowed {
         [Parameter(Mandatory = $true)][datetime]$Now
     )
     if ($NoAutoContinue) { return $false }
-    $cut = $Now.AddHours(-1)
+    # Stamps are stored UTC ("...Z"); $Now arrives local (Get-Date). Normalize
+    # the cutoff to UTC or the tick comparison skews by the timezone offset
+    # and the hourly cap fires on the wrong window.
+    $cut = $Now.ToUniversalTime().AddHours(-1)
     $recent = 0
     foreach ($c in @($State.continues)) {
         try {

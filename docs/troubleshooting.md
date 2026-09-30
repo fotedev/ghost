@@ -67,6 +67,29 @@ The server gates on `User-Agent: opencode/<version>` for clients ≥ 1.17.0.
 Update the OpenCode CLI (or run with `-SkipVersionCheck` if you know the
 version is current).
 
+## MiniMax Code: "Account information is temporarily unavailable" after reset
+
+The toast is MiniMax Code's generic fallback for "startup account-init failed"
+— not a ban message. With reset versions ≤ v1.2 it fired on every launch
+because the reset emptied
+`.minimax\auth\prod\en\mcode-public\auth-state.json` to `{}`. The app's
+`@mavis/oauth-core` schema-validates that file (`state-store.js parseState`,
+verified in app.asar v3.0.73): `{}` or any partial object throws
+`TypeError('Invalid OAuth state.')` on every startup, which is NOT classified
+as needing a login, so the app never reaches the login page and every
+authenticated request logs `Invalid OAuth state.`.
+
+v1.3 deletes the file instead — a MISSING file is the fresh-install state
+(`read()` → null → status `anonymous` → login page). If you still carry the
+broken state, close MiniMax Code and delete:
+
+- `%USERPROFILE%\.minimax\auth\prod\en\mcode-public\auth-state.json`
+- `%USERPROFILE%\.minimax\auth\prod\en\mcode-public\auth.json`
+- `%USERPROFILE%\.minimax\auth\auth-state.json` (legacy root, if present)
+
+Then launch MiniMax Code: it goes straight to the sign-in page. Never
+re-create these files by hand as `{}`.
+
 ## Telegram bot conflicts (HTTP 409)
 
 One bot token = one polling instance. The clone launcher disables bots in each
@@ -81,6 +104,34 @@ app update silently reverts. Re-apply it once — `GHOST.bat` → [13], or
 `tools\patch_zcode_icon_override.ps1` — and every clone restores its icon,
 accent color, taskbar button and "ZCode <Color>" window title.
 
+## A ZCode window drags but its content is dead / relaunch shows the splash then closes
+
+This is a renderer DEATH, not a hang (verified 2026-09-25). The main process
+keeps the frame alive — so the window still moves — while the renderer
+process is gone; the app documents this exact "empty shell" state in its own
+source. The instance's log (`<home>\.zcode\v2\logs\YYYY-MM-DD.log`) records
+`render-process-gone reason:"oom"`. That day Primary and Second died in the
+same second and Fourth that morning; the archived dump carries
+`v8-oom-last-os-error: 1455` (`ERROR_COMMITMENT_LIMIT`) — the Windows commit
+limit (RAM + pagefile) was exhausted, with msedge and git crashing the same
+minute. Running all four instances amplifies it. This is OS memory
+exhaustion, not an app leak, a GPU problem, or a GHOST-side fault.
+
+What to do:
+
+- Run the diagnostic: `GHOST.bat` → ZCode [17]
+  (`tools\diagnose_zcode_freeze.ps1`) — prints the per-instance crash
+  timeline, dump annotations and live commit pressure.
+- After the splash-then-close, just launch the instance again. The quit path
+  that closes it right after the splash is the app's post-crash shutdown
+  (its log: "all windows closed after preparation, exiting app"), not
+  corruption.
+- Long-term fix: enlarge the pagefile (System Properties → Advanced →
+  Performance Settings → Advanced → Virtual memory; a fixed size around
+  1.5-2x RAM, or system-managed) and/or run fewer instances concurrently.
+- Not the cause (checked 2026-09-25): GPU caches, the icon asar patch, the
+  captcha watchdog (idle since 09-17) and db.sqlite locking.
+
 ## Chats from one ZCode instance don't appear in another instance's sidebar
 
 All instances share one session store, but each sidebar index is seeded at
@@ -91,6 +142,36 @@ only) or [23] (all instances), or keep the detached watcher running ([22],
 failures. The hot-activity guard may defer the refresh while a turn streams;
 `-Force` bypasses it.
 
+## ZCode windows stay merged in one taskbar button even though identities are stamped
+
+The watcher ([16]) stamps every window's `System.AppUserModel.ID`, but a
+taskbar group that was formed while identities were still missing can PERSIST
+after the stamps land — the shell does not always re-evaluate an existing
+group, and a stale group can even keep the WRONG ICON (verified 2026-09-26:
+both windows read `dev.zcode.app` / `dev.zcode.app.2` from their property
+stores yet stayed grouped for ~1h; a freshly launched green clone kept the
+Primary's icon until an Explorer refresh).
+
+Both stampers therefore KICK the group instead of stamping outright
+(automated 2026-09-26): the watcher kicks on every re-stamp and once for
+every first-seen window, and the launcher kicks right after pinning — a
+brief `.kick`-suffixed identity, then the correct final one, which forces
+the shell to rebuild the group and re-resolve the icon (no Explorer refresh
+needed). The manual kick below is only a fallback for a stuck window when
+no watcher is running:
+
+```powershell
+# hwnd from tools\watch_zcode_taskbar.ps1 logs or Get-Process MainWindowHandle
+$final = 'dev.zcode.app'   # Primary; clones use dev.zcode.app.<2|3|4>
+[ZcodeWindowAumid]::Stamp($hwnd, "$final.kick") ; [ZcodeWindowAumid]::Stamp($hwnd, $final)
+```
+
+If the watcher is running it re-stamps the final value within one interval
+even if the kick script dies mid-toggle, so this is safe. A silent watcher
+log does NOT mean the watcher is dead — check the mutex first (a second
+instance logs "watcher already running"). A watcher process started BEFORE
+a script edit keeps the old code — close its window and relaunch [16].
+
 ## A clone launched with the Primary's profile or taskbar icon
 
 A bare `ZCode.exe` launch always gets the Primary's profile, AUMID and taskbar
@@ -98,6 +179,15 @@ button. Launch clones only via their `ZCode Second/Third/Fourth` shortcuts or
 the `Launch-ZCode-*.bat` wrappers. If the Primary's Start-menu pin was taken
 over by a clone's AUMID, repair it with
 `tools\install_zcode_second_shortcuts.ps1 -RepairPrimaryAumid`.
+
+A pin rewrite can also empty that shortcut icon field (verified 2026-09-28:
+the hijacked Start-menu ZCode.lnk carried dev.zcode.app.4 with an empty icon,
+so a green clone running alone showed the Primary icon even though its window
+identity was correct). -RepairPrimaryAumid now restores the Primary shortcut
+icon to <ZCode.exe>,0 too. The resident watcher ([16]) self-heals a hijack
+every ~5 min (REPAIR/FAIL logged to taskbar.log); -RunOnce -CheckPrimaryHijack
+repairs once without starting the resident loop. Restart the resident watcher
+after any watcher-script edit: an old copy keeps the old code.
 
 ## System ID changes need a restart
 

@@ -23,6 +23,7 @@ if defined ESC (echo %ESC%[90mTip: You can run multiple options at once by separ
 echo.
 set "choice="
 set /p choice=%PROMPT_TEXT%
+if not defined choice goto MAIN
 if "%choice%"=="0" (
     echo Done.
     timeout /t 1 >nul
@@ -72,14 +73,15 @@ call :Opt 8 "Reset MiniMax/OpenCode" ""
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
-set "chain=%PENDING_CHAIN%"
+if not defined PENDING_CHAIN goto RESETS_PROMPT
+call :RunChain %PENDING_CHAIN%
 set "PENDING_CHAIN="
-call :RunChain %chain%
+:RESETS_PROMPT
 set "choice="
 set /p choice=%PROMPT_TEXT%
+if not defined choice goto RESETS_PROMPT
 if "%choice%"=="0" goto MAIN
-set "chain=%choice:,= %"
-call :RunChain %chain%
+call :RunChain %choice:,= %
 goto RESETS
 
 :ZCODE
@@ -102,22 +104,24 @@ call :Opt 10 "Reset ALL FOUR instances" "(independent IDs)"
 echo.
 if defined ESC (echo %ESC%[90m  -- Sync ^& Watchers --%ESC%[0m) else echo   -- Sync ^& Watchers --
 call :Opt 11 "Captcha watchdog" "(unattended, separate window)"
-call :Opt 12 "Re-apply icon patch - v6, all clone colors" "(after app update)"
+call :Opt 12 "Re-apply app patch - v7, icons + bidi auto" "(after app update)"
 call :Opt 13 "Refresh Second chats" "- show Primary chats without app restart"
 call :Opt 14 "Watch errors" "- auto-refresh chats on quota or captcha failure"
 call :Opt 15 "Refresh chats - ALL instances" "- re-index every running sidebar"
 call :Opt 16 "Taskbar identity watcher" "- auto-fix taskbar merges (separate window)"
+call :Opt 17 "Freeze diagnostic" "- dead windows, renderer OOM, commit pressure"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
-set "chain=%PENDING_CHAIN%"
+if not defined PENDING_CHAIN goto ZCODE_PROMPT
+for %%t in (%PENDING_CHAIN%) do call :ZCodeOne %%t
 set "PENDING_CHAIN="
-for %%t in (%chain%) do call :ZCodeOne %%t
+:ZCODE_PROMPT
 set "choice="
 set /p choice=%PROMPT_TEXT%
+if not defined choice goto ZCODE_PROMPT
 if "%choice%"=="0" goto MAIN
-set "chain=%choice:,= %"
-for %%t in (%chain%) do call :ZCodeOne %%t
+for %%t in (%choice:,= %) do call :ZCodeOne %%t
 goto ZCODE
 
 :MAINT
@@ -129,14 +133,15 @@ call :Opt 2 "Check for updates / update GHOST" "- from GitHub"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
-set "chain=%PENDING_CHAIN%"
+if not defined PENDING_CHAIN goto MAINT_PROMPT
+for %%t in (%PENDING_CHAIN%) do call :MaintOne %%t
 set "PENDING_CHAIN="
-for %%t in (%chain%) do call :MaintOne %%t
+:MAINT_PROMPT
 set "choice="
 set /p choice=%PROMPT_TEXT%
+if not defined choice goto MAINT_PROMPT
 if "%choice%"=="0" goto MAIN
-set "chain=%choice:,= %"
-for %%t in (%chain%) do call :MaintOne %%t
+for %%t in (%choice:,= %) do call :MaintOne %%t
 goto MAINT
 
 :UnknownTask
@@ -164,6 +169,7 @@ if "%~1"=="13" set "RESOLVED=15"
 if "%~1"=="14" set "RESOLVED=22"
 if "%~1"=="15" set "RESOLVED=23"
 if "%~1"=="16" set "RESOLVED=25"
+if "%~1"=="17" set "RESOLVED=27"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -180,7 +186,7 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-26). Unknown ids print an error. Returns to caller.
+rem Runs one task by global id (1-27). Unknown ids print an error. Returns to caller.
 if "%~1"=="1"  (call :Run "src\windows\change_device_id.ps1" & exit /b)
 if "%~1"=="2"  (call :Run "src\windows\reset_cursor.ps1" & exit /b)
 if "%~1"=="3"  (call :Run "src\windows\reset_devin.ps1" & exit /b)
@@ -217,6 +223,7 @@ if "%~1"=="23" (call :Run "tools\refresh_zcode_second_chats.ps1" -Target All & e
 if "%~1"=="24" (call :RunWith "tools\install_ghost_shortcut.ps1" "Check your Desktop for the GHOST shortcut - re-run this after moving this repo folder." & exit /b)
 if "%~1"=="25" (call :Detached "ZCode taskbar identity" "-NoProfile" "tools\watch_zcode_taskbar.ps1" "" "Taskbar identity watcher launched in a separate window - leave it open." "It re-stamps any ZCode window that loses its taskbar identity within seconds." & exit /b)
 if "%~1"=="26" (call :Run "tools\update_ghost.ps1" & exit /b)
+if "%~1"=="27" (call :Run "tools\diagnose_zcode_freeze.ps1" & exit /b)
 call :UnknownTask "%~1"
 exit /b
 

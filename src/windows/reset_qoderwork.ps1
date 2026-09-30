@@ -508,7 +508,7 @@ print(json.dumps(result))
             return $true
         }
 
-        $commandOutput = & $pythonCommand.Source $tempScriptPath $DbPath
+        $commandOutput = & $pythonCommand $tempScriptPath $DbPath
         if ($LASTEXITCODE -ne 0) {
             foreach ($key in ($exactTables + $appSettingsResetKeys)) {
                 Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "command-failed" -Ok $false
@@ -1235,7 +1235,7 @@ $passCount++
 # --- [14/26] Partitions\main\Shared Dictionary\ ---
 Write-Host "`n[14/26] Deleting Partitions\main\Shared Dictionary\..." -ForegroundColor Cyan
 $sharedDictPath = Join-Path $profileRoot "Shared Dictionary"
-$binaryActions = Clear-BinaryIdentityStore -Paths @($sharedDictPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
+$binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($sharedDictPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] Shared Dictionary" -ForegroundColor Green
 $passCount++
@@ -1250,7 +1250,7 @@ $cachePaths = @(
     (Join-Path $profileRoot "DawnWebGPUCache"),
     (Join-Path $profileRoot "blob_storage")
 )
-$binaryActions = Clear-BinaryIdentityStore -Paths $cachePaths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
+$binaryActions = Invoke-ClearBinaryIdentityStore -Paths $cachePaths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] cache trees" -ForegroundColor Green
 $passCount++
@@ -1258,7 +1258,7 @@ $passCount++
 # --- [16/26] Roaming\QoderWork\SharedStorage\ (Electron SharedStorage 4KB file) ---
 Write-Host "`n[16/26] Deleting Roaming\QoderWork\SharedStorage\..." -ForegroundColor Cyan
 $sharedStoragePath = Join-Path $root "SharedStorage"
-$binaryActions = Clear-BinaryIdentityStore -Paths @($sharedStoragePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
+$binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($sharedStoragePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] SharedStorage" -ForegroundColor Green
 $passCount++
@@ -1266,7 +1266,7 @@ $passCount++
 # --- [17/26] data\dns-cache\ deletion (Qoder endpoint IP cache) ---
 Write-Host "`n[17/26] Deleting data\dns-cache\ (Qoder endpoint IP cache)..." -ForegroundColor Cyan
 $dnsCachePath = Join-Path $root "data\dns-cache"
-$binaryActions = Clear-BinaryIdentityStore -Paths @($dnsCachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
+$binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($dnsCachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
 Write-Host "    [OK] data\dns-cache" -ForegroundColor Green
 $passCount++
@@ -1328,7 +1328,7 @@ if ($existingAuthFiles.Count -eq 0) {
     $passCount++
 } else {
     Write-Host "`n[22/26] Deleting auth.dat/auth-v2.dat (encrypted auth tokens)..." -ForegroundColor Cyan
-    $authActions = Clear-BinaryIdentityStore -Paths $existingAuthFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
+    $authActions = Invoke-ClearBinaryIdentityStore -Paths $existingAuthFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
     if (-not $DryRun) { $actions += @($authActions) }
     Write-Host "    [OK] auth binaries" -ForegroundColor Green
     $passCount++

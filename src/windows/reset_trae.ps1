@@ -459,7 +459,7 @@ print(json.dumps({"deleted": deleted, "skipped_tables": skipped_tables}))
     try {
         [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
         foreach ($dbFile in $dbFiles) {
-            $commandOutput = & $pythonCommand.Source $tempScriptPath $dbFile.FullName
+            $commandOutput = & $pythonCommand $tempScriptPath $dbFile.FullName
             if ($LASTEXITCODE -ne 0) {
                 Add-AuditEntry -Audit $Audit -File $dbFile.FullName -Key "ai-agent-scrub" -Before "present" -After "failed" -Ok $false
                 Write-Host "    [FAILED] ai-agent scrub command failed: $($dbFile.FullName)" -ForegroundColor Red

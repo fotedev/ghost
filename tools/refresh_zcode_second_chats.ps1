@@ -117,6 +117,15 @@ if (-not $Py) { Stop-WithError 'Python 3 not found (needed for sqlite access). I
 $GhostCli = Join-Path (Split-Path -Parent $PSScriptRoot) 'src\python\ghost_cli.py'
 if (-not (Test-Path $GhostCli)) { Stop-WithError "GHOST Python core not found: $GhostCli" }
 
+# Runs chat-check with stderr merged into stdout WITHOUT the PS 5.1
+# NativeCommandError trap: under $ErrorActionPreference='Stop' any stderr line
+# from the child becomes a terminating error that bypasses exactly the failure
+# paths below. The inner scriptblock relaxes EAP for the redirect only.
+function Invoke-ChatCheck {
+  param([Parameter(Mandatory = $true)][string[]]$CheckArgs)
+  @(& { $ErrorActionPreference = 'Continue'; & $Py $GhostCli @CheckArgs 2>&1 })
+}
+
 # --- per-instance helpers -----------------------------------------------------
 function Get-TasksIndexPath([hashtable]$def) {
   $base = $env:USERPROFILE
@@ -170,7 +179,7 @@ function Get-InstanceState([hashtable]$def) {
   $desc = @(Get-DescendantProcesses ($mains | ForEach-Object { [int]$_.Id }))
   $st.Servers = @($desc | Where-Object { $_.CommandLine -like '*app-server*' })
   if ($st.Servers.Count -eq 0) { $st.Status = 'no-appserver'; return $st }
-  $out = @(& $Py $GhostCli 'chat-check' 'missing' $SharedDb $st.TasksIndex 2>&1)
+  $out = Invoke-ChatCheck @('chat-check', 'missing', $SharedDb, $st.TasksIndex)
   $countLine = $out | Where-Object { $_ -like 'COUNT:*' } | Select-Object -First 1
   if (($LASTEXITCODE -ne 0) -or (-not $countLine)) {
     $st.Status = 'error'
@@ -214,8 +223,13 @@ function Wait-ForIdleGuard([array]$Servers) {
       if ($pr -and ($pr.CPU - $cpuBefore[$pidKey]) -gt 0.25) { $cpuBusy = $true }
     }
     # signals A-C from the shared store
-    $hot = @(& $Py $GhostCli 'chat-check' 'hot' $SharedDb 2>&1)
+    $hot = Invoke-ChatCheck @('chat-check', 'hot', $SharedDb)
     $reasons = New-Object System.Collections.Generic.List[string]
+    if ($LASTEXITCODE -ne 0) {
+      # Probe itself failed (locked db, schema drift): activity state unknown --
+      # treat as hot so the guard waits it out instead of recycling mid-turn.
+      $reasons.Add("chat-check hot probe failed (exit $LASTEXITCODE)") | Out-Null
+    }
     foreach ($line in $hot) {
       if ($line -like 'AGE_MS:*') {
         $ageMs = [int64]$line.Substring(7)
@@ -363,7 +377,7 @@ function Invoke-RefreshPass {
     $c2 = ''
     for ($i = 0; $i -lt 22; $i++) {
       Start-Sleep -Seconds 2
-      $out2 = @(& $Py $GhostCli 'chat-check' 'missing' $SharedDb $w.TasksIndex 2>&1)
+      $out2 = Invoke-ChatCheck @('chat-check', 'missing', $SharedDb, $w.TasksIndex)
       $c2 = $out2 | Where-Object { $_ -like 'COUNT:*' } | Select-Object -First 1
       if ($c2 -eq 'COUNT:0') { $synced = $true; break }
     }

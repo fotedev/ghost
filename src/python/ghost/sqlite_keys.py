@@ -134,12 +134,13 @@ def delete_secrets(db_path):
 def clear_cli_telemetry(db_path):
     """DELETE telemetry-like keys from the ZCode CLI db.sqlite ItemTable.
 
-    Contract carried over verbatim from the reset_zcode.ps1 bridge: a
-    connection failure is NOT an error exit -- it prints
-    {"deleted": 0, "error": "..."} and exits 0 so the caller keeps its own
-    audit wording. A missing ItemTable table is tolerated per-pattern
-    (OperationalError -> continue). Returns {"deleted": N} or
-    {"deleted": 0, "error": str}."""
+    Contract carried over verbatim from the reset_zcode.ps1 bridge: sqlite
+    failures are NOT error exits -- they print {"deleted": 0, "error": "..."}
+    and exit 0 so the caller keeps its own audit wording (reset_zcode marks
+    the step FAILED when "error" is present). A missing ItemTable table is
+    tolerated per-pattern; every other sqlite error (locked db, corruption)
+    surfaces via the error dict instead of being silently swallowed.
+    Returns {"deleted": N} or {"deleted": 0, "error": str}."""
     deleted = 0
     patterns = CLI_TELEMETRY_PATTERNS
 
@@ -154,13 +155,17 @@ def clear_cli_telemetry(db_path):
             try:
                 cursor.execute(
                     "SELECT key FROM ItemTable WHERE key LIKE ?", (pattern,))
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as exc:
+                if "no such table" not in str(exc):
+                    raise
                 continue
             for row in cursor.fetchall():
                 cursor.execute(
                     "DELETE FROM ItemTable WHERE key = ?", (row[0],))
                 deleted += 1
         conn.commit()
+    except sqlite3.Error as exc:
+        return {"deleted": 0, "error": str(exc)}
     finally:
         conn.close()
 
