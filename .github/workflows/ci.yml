@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Called by release.yml so a tag can never publish an untested tree.
+  workflow_call:
 
 permissions:
   contents: read
@@ -44,6 +46,24 @@ jobs:
           $config.TestResult.OutputPath = "$env:TEMP\test-results.xml"
           Invoke-Pester -Configuration $config
           if ($config.Run.Exit) { exit $LASTEXITCODE }
+
+      - name: Node engines - asar patcher syntax + ENGINE_VERSION marker
+        shell: pwsh
+        run: |
+          foreach ($f in @('tools/patch_zcode_icon_override.mjs', 'tools/patch_autoclaw_ports.mjs')) {
+            node --check $f
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $src = Get-Content -LiteralPath $f -Raw
+            if ($src -notmatch '(?m)^const ENGINE_VERSION = (\d+);$') {
+              Write-Error "ENGINE_VERSION marker missing in $f"
+              exit 1
+            }
+            Write-Host "$f ENGINE_VERSION=$($Matches[1])"
+          }
+
+      - name: GHOST.bat menu harness
+        shell: pwsh
+        run: ./.bat-harness-test.ps1
 
   linux:
     name: Shell lint
