@@ -7,8 +7,66 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **ZCode per-clone Telegram bots (UI-assisted, EC-D03)** — `tools/set_zcode_bot.ps1`
+  (`-VerifyOnly` audit / `-Target <name> -Fix` backup-first sync): fingerprints
+  the encrypted `credentials.json -> bot:<id>:credential` (`enc:v1:`, sha8
+  only, never values) + bot id across BOTH `bot-config.json` and
+  `bot-config.v3.json` in all 4 homes (the 2026-10-16 Fourth `v2=False /
+  v3=True` split looked disabled while polling — both files are now always
+  checked); fails loudly on any duplicate-while-enabled (HTTP 409 risk).
+  `src/windows/launch_zcode_second_instance.ps1 [2c]` upgraded from
+  always-disable to sha8-compare (duplicate -> disable both files; unique ->
+  preserve + `.telegram-routed` v2 marker, never reverted). Flow: operator
+  creates 3 BotFather bots, pastes each token once in that clone's ZCode UI
+  (app mints fresh `bot-<guid>` + `enc:v1:`), tooling guards/syncs. Quota
+  decision 2026-10-16: Option C — Fourth keeps its big quota isolated.
+  Docs: [docs/ZCODE_TELEGRAM_BOTS.md](docs/ZCODE_TELEGRAM_BOTS.md); tests:
+  `tests/set_zcode_bot.Tests.ps1` (4 passing).
+
+- **AutoClaw multi-instance clones (Primary + inst1–inst4)** — full suite per
+  [docs/AUTOCLAW_CLONES_SPEC.md](docs/AUTOCLAW_CLONES_SPEC.md):
+  `tools/patch_autoclaw_ports.ps1` (+ `.mjs` engine v1) widens the installed
+  app's hardcoded 4-slot MCP port array to 8 (backup + marker + `-Restore`,
+  verified byte-identical via SHA-256 round-trip; re-run after every AutoClaw
+  update); `src/windows/launch_autoclaw_clone.ps1` (-Instance inst1..inst4,
+  `-Status`) launches clones with env-var isolation (`USERPROFILE`/`HOME`,
+  `AUTOCLAW_GATEWAY_PORT` with actual-port read-back + drift recording) and a
+  credential-free seed (tokens stripped, `token-cache.json` excluded, gateway
+  state never copied — one manual login per clone) plus verify-after-launch
+  health/port/pairing checks; `src/windows/reset_autoclaw.ps1` (-Target
+  Primary|inst1..4|All, `-DryRun`) rotates both device identities (auth
+  `deviceId` + ed25519 keypair via node:crypto) and deletes the live operator
+  credential; `tools/install_autoclaw_clone_shortcuts.ps1` installs per-clone
+  AUMID shortcuts with `-RepairPrimaryAumid`; `src/windows/Launch-AutoClaw-Clone.bat`
+  double-click wrapper. GHOST.bat gains a fourth submenu (AutoClaw
+  Multi-Instance & Clones [1]–[12], gids 29–40) and IDE Resets [9].
+- **App cloning playbook docs** — [docs/APP_CLONING_PLAYBOOK.md](docs/APP_CLONING_PLAYBOOK.md)
+  (the generic clone-any-app process: identity suite with a
+  never-silently-degrade rule, developer-inputs contract, icon policy with
+  improvise+report as the default for missing icons, phases 0–10
+  checklists, and a fixed final-report format),
+  [docs/APP_CLONING_EDGE_CASES.md](docs/APP_CLONING_EDGE_CASES.md) (the
+  normative EC-xx catalog distilled from the ZCode 2026-09 and AutoClaw
+  2026-10 suites), and [docs/APP_CLONING_INTAKE_TEMPLATE.md](docs/APP_CLONING_INTAKE_TEMPLATE.md)
+  (the per-request fill-in form). AGENTS.md gains the "App cloning playbook"
+  section; `docs/README.md` indexes all three plus the previously missing
+  AUTOCLAW spec row.
+
 ### Fixed
 
+- **IDE Resets [9] dispatched the wrong task**: the Resets submenu had no
+  local→gid resolver, so typed ids reached `:DispatchOne` raw — local [9]
+  "Reset AutoClaw" therefore ran global gid 9 (the ZCode captcha watchdog,
+  already reachable as ZCode [11]) instead of gid 28
+  (`reset_autoclaw.ps1 -Target Primary`). A `:ResetsOne` resolver now maps
+  1–8 identity + 9→28, and both Resets dispatch sites route through it
+  (the prompt loop and the main-menu chained input `1 9`); bare global ids
+  from the main menu keep using `:RunChain`. Verified 2026-10-16: a
+  harness extracted the shipped `:ResetsOne` verbatim and passed all five
+  cases (1→gid 1, 8→gid 8, **9→gid 28**, unknown→error, chained `9 2`→
+  gid 28 then gid 2); CRLF intact (434/0); Pester repo-integrity green.
 - **Green-clone-alone showed the Primary's taskbar icon**: the Start-menu
   `ZCode.lnk` had been hijacked with `dev.zcode.app.4` AND its icon field
   wiped (`,0`), so the shell resolved the clone's AUMID to an icon-less
@@ -32,8 +90,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Launcher menus renumbered to continuous local ids**: each `GHOST.bat`
-  screen numbers its own tasks — Resets `[1]`–`[8]`, ZCode `[1]`–`[16]`
-  (5 launch + 5 reset + 6 sync/watchers), Maintenance `[1]`–`[2]` — with
+  screen numbers its own tasks — Resets `[1]`–`[8]`, ZCode `[1]`–`[17]`
+  (5 launch + 5 reset + 7 sync/watchers), Maintenance `[1]`–`[2]` — with
   per-screen resolvers (`:ZCodeOne` / `:MaintOne`) translating local ids to
   the unchanged global dispatch payloads. Chains typed inside a submenu use
   its local ids; `2 1 3 4` from the main menu opens ZCode and runs local

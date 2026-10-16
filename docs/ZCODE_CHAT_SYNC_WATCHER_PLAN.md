@@ -106,7 +106,7 @@ Monotonic signature; any new/edited chat in EITHER instance bumps it.
 ### Action (on signature change, debounced)
 
 1. Identify the **Secondary** main process: bare-exe `ZCode.exe` whose
-   `MainWindowTitle` is `ZCode Blue` (the icon patch, engine v6, guarantees
+   `MainWindowTitle` is `ZCode Blue` (the icon patch, engine v7, guarantees
    this title; Primary's is `ZCode`).
 2. Enumerate its descendant processes (`zcode.cjs app-server` children) via
    parent-PID tree walk.
