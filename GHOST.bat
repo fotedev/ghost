@@ -13,9 +13,10 @@ cls
 call :Banner
 call :Hdr " ---- GHOST main menu ----"
 echo.
-call :Opt 1 "IDE Resets" "- device ID + 7 IDE suites"
+call :Opt 1 "IDE Resets" "- device ID + 8 IDE suites"
 if defined ESC (echo %ESC%[92m[ 2] %ESC%[97mZCode Multi-Instance ^& Clones %ESC%[90m- launchers, resets, sync%ESC%[0m) else echo [ 2] ZCode Multi-Instance ^& Clones - launchers, resets, sync
 if defined ESC (echo %ESC%[92m[ 3] %ESC%[97mSystem ^& GHOST Maintenance %ESC%[90m- shortcuts, watchers, updates%ESC%[0m) else echo [ 3] System ^& GHOST Maintenance - shortcuts, watchers, updates
+if defined ESC (echo %ESC%[92m[ 4] %ESC%[97mAutoClaw Multi-Instance ^& Clones %ESC%[90m- launchers, resets, port patch%ESC%[0m) else echo [ 4] AutoClaw Multi-Instance ^& Clones - launchers, resets, port patch
 echo.
 call :Opt U "Check for updates / update GHOST" "- from GitHub"
 call :Opt 0 "Exit" ""
@@ -36,9 +37,6 @@ for /f "tokens=1,*" %%a in ("%chain%") do (
     set "first=%%a"
     set "rest=%%b"
 )
-if "%first%"=="1" if "%rest%"=="" goto RESETS
-if "%first%"=="2" if "%rest%"=="" goto ZCODE
-if "%first%"=="3" if "%rest%"=="" goto MAINT
 if "%first%"=="1" (
     set "PENDING_CHAIN=%rest%"
     goto RESETS
@@ -50,6 +48,10 @@ if "%first%"=="2" (
 if "%first%"=="3" (
     set "PENDING_CHAIN=%rest%"
     goto MAINT
+)
+if "%first%"=="4" (
+    set "PENDING_CHAIN=%rest%"
+    goto AUTOCLAW
 )
 if /i "%first%"=="U" if "%rest%"=="" (
     call :Run "tools\update_ghost.ps1"
@@ -70,18 +72,19 @@ call :Opt 5 "Reset Qoder" ""
 call :Opt 6 "Reset QoderWork" ""
 call :Opt 7 "Reset ZCode Primary instance" ""
 call :Opt 8 "Reset MiniMax/OpenCode" ""
+call :Opt 9 "Reset AutoClaw" ""
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto RESETS_PROMPT
-call :RunChain %PENDING_CHAIN%
+for %%t in (%PENDING_CHAIN%) do call :ResetsOne %%t
 set "PENDING_CHAIN="
 :RESETS_PROMPT
 set "choice="
 set /p choice=%PROMPT_TEXT%
 if not defined choice goto RESETS_PROMPT
 if "%choice%"=="0" goto MAIN
-call :RunChain %choice:,= %
+for %%t in (%choice:,= %) do call :ResetsOne %%t
 goto RESETS
 
 :ZCODE
@@ -144,10 +147,63 @@ if "%choice%"=="0" goto MAIN
 for %%t in (%choice:,= %) do call :MaintOne %%t
 goto MAINT
 
+:AUTOCLAW
+cls
+if defined ESC (echo %ESC%[96mGHOST / AutoClaw Multi-Instance ^& Clones%ESC%[0m) else echo GHOST / AutoClaw Multi-Instance ^& Clones
+echo.
+call :Div "Launch Clones"
+call :Opt 1 "Launch inst1" "- first clone (own profile, identity, ports)"
+call :Opt 2 "Install clone shortcuts" "- all 4 - Desktop + Start menu"
+call :Opt 3 "Launch inst2" ""
+call :Opt 4 "Launch inst3" ""
+call :Opt 5 "Launch ALL clones" "- inst1..inst4, one after another"
+echo.
+call :Div "Reset Clones"
+call :Opt 6 "Reset inst1" "(auto closes AutoClaw)"
+call :Opt 7 "Reset inst2" ""
+call :Opt 8 "Reset inst3" ""
+call :Opt 9 "Reset inst4" ""
+call :Opt 10 "Reset ALL instances" "- clones + Primary, independent IDs"
+echo.
+if defined ESC (echo %ESC%[90m  -- Maintenance --%ESC%[0m) else echo   -- Maintenance --
+call :Opt 11 "Apply MCP port patch - 8 slots" "(after app update; AutoClaw must be closed)"
+call :Opt 12 "Clone status" "- processes, actual ports, health"
+echo.
+call :Opt 0 "Back to Main Menu" ""
+echo.
+if not defined PENDING_CHAIN goto AUTOCLAW_PROMPT
+for %%t in (%PENDING_CHAIN%) do call :AutoClawOne %%t
+set "PENDING_CHAIN="
+:AUTOCLAW_PROMPT
+set "choice="
+set /p choice=%PROMPT_TEXT%
+if not defined choice goto AUTOCLAW_PROMPT
+if "%choice%"=="0" goto MAIN
+for %%t in (%choice:,= %) do call :AutoClawOne %%t
+goto AUTOCLAW
+
 :UnknownTask
 rem Red "not found" message for a bad task id (shared by all resolvers).
 if defined ESC echo %ESC%[91mUnknown task "%~1" - check the menu and try again.%ESC%[0m
 if not defined ESC echo Unknown task "%~1" - check the menu and try again.
+exit /b
+
+:ResetsOne
+rem Resolves an IDE Resets submenu-local id to its global task id and runs it.
+rem Local ids 1-8 equal the global ids; [9] maps to gid 28 - gid 9 is the ZCode captcha watchdog.
+set "RESOLVED="
+if "%~1"=="1" set "RESOLVED=1"
+if "%~1"=="2" set "RESOLVED=2"
+if "%~1"=="3" set "RESOLVED=3"
+if "%~1"=="4" set "RESOLVED=4"
+if "%~1"=="5" set "RESOLVED=5"
+if "%~1"=="6" set "RESOLVED=6"
+if "%~1"=="7" set "RESOLVED=7"
+if "%~1"=="8" set "RESOLVED=8"
+if "%~1"=="9" set "RESOLVED=28"
+if not defined RESOLVED call :UnknownTask "%~1"
+if not defined RESOLVED exit /b
+call :DispatchOne %RESOLVED%
 exit /b
 
 :ZCodeOne
@@ -185,8 +241,28 @@ if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
+:AutoClawOne
+rem Resolves an AutoClaw submenu-local id to its global task id and runs it.
+set "RESOLVED="
+if "%~1"=="1"  set "RESOLVED=29"
+if "%~1"=="2"  set "RESOLVED=30"
+if "%~1"=="3"  set "RESOLVED=31"
+if "%~1"=="4"  set "RESOLVED=32"
+if "%~1"=="5"  set "RESOLVED=33"
+if "%~1"=="6"  set "RESOLVED=34"
+if "%~1"=="7"  set "RESOLVED=35"
+if "%~1"=="8"  set "RESOLVED=36"
+if "%~1"=="9"  set "RESOLVED=37"
+if "%~1"=="10" set "RESOLVED=38"
+if "%~1"=="11" set "RESOLVED=39"
+if "%~1"=="12" set "RESOLVED=40"
+if not defined RESOLVED call :UnknownTask "%~1"
+if not defined RESOLVED exit /b
+call :DispatchOne %RESOLVED%
+exit /b
+
 :DispatchOne
-rem Runs one task by global id (1-27). Unknown ids print an error. Returns to caller.
+rem Runs one task by global id (1-40). Unknown ids print an error. Returns to caller.
 if "%~1"=="1"  (call :Run "src\windows\change_device_id.ps1" & exit /b)
 if "%~1"=="2"  (call :Run "src\windows\reset_cursor.ps1" & exit /b)
 if "%~1"=="3"  (call :Run "src\windows\reset_devin.ps1" & exit /b)
@@ -224,6 +300,32 @@ if "%~1"=="24" (call :RunWith "tools\install_ghost_shortcut.ps1" "Check your Des
 if "%~1"=="25" (call :Detached "ZCode taskbar identity" "-NoProfile" "tools\watch_zcode_taskbar.ps1" "" "Taskbar identity watcher launched in a separate window - leave it open." "It re-stamps any ZCode window that loses its taskbar identity within seconds." & exit /b)
 if "%~1"=="26" (call :Run "tools\update_ghost.ps1" & exit /b)
 if "%~1"=="27" (call :Run "tools\diagnose_zcode_freeze.ps1" & exit /b)
+if "%~1"=="28" (call :Run "src\windows\reset_autoclaw.ps1" -Target Primary & exit /b)
+if "%~1"=="29" (call :Detached "AutoClaw inst1" "-NoProfile" "src\windows\launch_autoclaw_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="30" (call :RunWith "tools\install_autoclaw_clone_shortcuts.ps1" "Look for the new AutoClaw inst1 - inst4 shortcuts on your Desktop and in the Start menu." & exit /b)
+if "%~1"=="31" (call :Detached "AutoClaw inst2" "-NoProfile" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="32" (call :Detached "AutoClaw inst3" "-NoProfile" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst3" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="33" (
+    call :StartClone "AutoClaw inst1" "src\windows\launch_autoclaw_clone.ps1"
+    timeout /t 3 /nobreak >nul
+    call :StartClone "AutoClaw inst2" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst2"
+    timeout /t 3 /nobreak >nul
+    call :StartClone "AutoClaw inst3" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst3"
+    timeout /t 3 /nobreak >nul
+    call :StartClone "AutoClaw inst4" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst4"
+    echo Four launcher windows opened - each closes automatically when done.
+    echo First runs clone the Primary profile, so expect a short delay per clone.
+    echo Launch them one at a time the first time to log in once per clone.
+    pause
+    exit /b
+)
+if "%~1"=="34" (call :Run "src\windows\reset_autoclaw.ps1" -Target inst1 & exit /b)
+if "%~1"=="35" (call :Run "src\windows\reset_autoclaw.ps1" -Target inst2 & exit /b)
+if "%~1"=="36" (call :Run "src\windows\reset_autoclaw.ps1" -Target inst3 & exit /b)
+if "%~1"=="37" (call :Run "src\windows\reset_autoclaw.ps1" -Target inst4 & exit /b)
+if "%~1"=="38" (call :Run "src\windows\reset_autoclaw.ps1" -Target All & exit /b)
+if "%~1"=="39" (call :RunWith "tools\patch_autoclaw_ports.ps1" "Patch finished - if it reported AutoClaw.exe running, close ALL AutoClaw windows and run this option again." & exit /b)
+if "%~1"=="40" (call :Run "src\windows\launch_autoclaw_clone.ps1" -Status & exit /b)
 call :UnknownTask "%~1"
 exit /b
 
