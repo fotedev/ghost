@@ -1,0 +1,96 @@
+name: Release
+
+# Publishes a GitHub Release with a ZIP asset when a vX.Y.Z tag is pushed.
+# The ZIP is a plain `git archive` (tracked files only) so its content matches
+# exactly what update_ghost.ps1's download-ZIP path fetches and verifies.
+# Prerequisites (enforced, never silent): the tag must have a matching
+# "## [X.Y.Z]" section in CHANGELOG.md - its content becomes the release notes.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # The full CI suite runs first: a tag never publishes an untested tree.
+  tests:
+    name: CI gates (called)
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Build ZIP + publish GitHub Release
+    needs: tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard - tag must match a CHANGELOG section
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            Write-Error "Unexpected tag format '$tag' - expected vX.Y.Z"
+            exit 1
+          }
+          $ver = $tag.Substring(1)
+          $section = Select-String -Path CHANGELOG.md -Pattern ('^## \[' + [regex]::Escape($ver) + '\]')
+          if (-not $section) {
+            Write-Error "CHANGELOG.md has no '## [$ver]' section - write the release notes before tagging $tag"
+            exit 1
+          }
+          Write-Host "Tag $tag -> CHANGELOG line $($section.LineNumber): $($section.Line)"
+
+      - name: Build ZIP (git archive = tracked files, mirrors update_ghost.ps1's ZIP copy)
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $zip = "ghost-$tag.zip"
+          git archive --format=zip --prefix="ghost-$tag/" --output="$zip" HEAD
+          $item = Get-Item -LiteralPath $zip
+          if ($item.Length -lt 100KB) {
+            Write-Error "ZIP suspiciously small: $($item.Length) bytes"
+            exit 1
+          }
+          Write-Host "Built $zip ($([math]::Round($item.Length / 1MB, 2)) MB)"
+
+      - name: Extract release notes from the CHANGELOG section
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $ver = $tag.Substring(1)
+          $lines = Get-Content -LiteralPath CHANGELOG.md
+          $start = -1
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match ('^## \[' + [regex]::Escape($ver) + '\]')) { $start = $i; break }
+          }
+          if ($start -lt 0) { Write-Error "Section '## [$ver]' vanished between guard and extract"; exit 1 }
+          $end = $lines.Count
+          for ($j = $start + 1; $j -lt $lines.Count; $j++) {
+            if ($lines[$j] -match '^## \[') { $end = $j; break }
+          }
+          $notes = $lines[$start..($end - 1)] -join "`r`n"
+          Set-Content -LiteralPath release-notes.md -Value $notes -Encoding utf8
+          Write-Host "Extracted $($end - $start) note lines for [$ver]"
+
+      - name: Create the GitHub Release with the ZIP asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release create "$tag" "ghost-$tag.zip" --title "GHOST $tag" --notes-file release-notes.md --verify-tag
+
+      - name: Verify-after - the asset is on the release (never silent-success)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $assets = @(gh release view "$tag" --json assets --jq '.assets[].name')
+          if ($assets -notcontains "ghost-$tag.zip") {
+            Write-Error "ZIP asset missing from release $tag (assets: $($assets -join ', '))"
+            exit 1
+          }
+          Write-Host "Verified: release $tag carries ghost-$tag.zip"

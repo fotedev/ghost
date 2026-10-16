@@ -13,4 +13,4 @@ Contract notes (must stay 1:1 with the PowerShell bridges it replaces):
   string interpolation; values always go through `?` placeholders.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
