@@ -132,17 +132,17 @@ $mmoIsAdmin = [Security.Principal.WindowsPrincipal]::new(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $mmoIsAdmin) {
-    $mmoLogOut = "$env:TEMP\minimax_opencode_v1.3_result.log"
     $mmoScript = $MyInvocation.MyCommand.Path
     $mmoSwitchList = @()
     if ($KeepLogin) { $mmoSwitchList += "-KeepLogin" }
     if ($SkipVersionCheck) { $mmoSwitchList += "-SkipVersionCheck" }
     $mmoSwitchString = if ($mmoSwitchList.Count -gt 0) { " " + ($mmoSwitchList -join " ") } else { "" }
-    $mmoArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$mmoScript`"$mmoSwitchString *> `"$mmoLogOut`""
+    # -File passes only declared switches; a redirect operator after -File is
+    # just swallowed as an undeclared argument. The *_done.txt marker file
+    # (not a log) is the persisted result channel - the elevated console shows
+    # the full live output while the run progresses.
+    $mmoArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$mmoScript`"$mmoSwitchString"
     Start-Process powershell -Verb RunAs -ArgumentList $mmoArgs -WindowStyle Normal -Wait
-    if (Test-Path -LiteralPath $mmoLogOut) {
-        Get-Content -LiteralPath $mmoLogOut
-    }
     if (Test-Path -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt") {
         Get-Content -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt"
     }
@@ -905,7 +905,10 @@ function Test-WatchdogRecreation {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
         $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
-        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok $true
+        if ($afterValue -eq "re-delete-failed") {
+            Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+        }
+        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
 }
 
@@ -1388,7 +1391,6 @@ if (-not (Set-DeviceIdSalt -Path $ocPreferencesPath -NewSalt $newSalt -BackupRoo
 $ocSettingsPath = Join-Path $ocRoaming "opencode.settings"
 $windowIdResult = Reset-OpenCodeWindowIds -Path $ocSettingsPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocSettingsPath) -Audit ([ref]$audit) -Actions ([ref]$actions)
 $ocOldWindowIds = @($windowIdResult.OldIds)
-$ocNewWindowIds = @($windowIdResult.NewIds)
 if (-not $windowIdResult.Ok) {
     $stepFailed = $true
 }
@@ -1899,7 +1901,10 @@ foreach ($wdFilter in @("opencode.updater.tmp-*", "opencode.global.dat.tmp-*", "
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $($rc.FullName)" -ForegroundColor Yellow
         Remove-Item -LiteralPath $rc.FullName -Force -ErrorAction SilentlyContinue
         $afterValue = if (Test-Path -LiteralPath $rc.FullName) { "re-delete-failed" } else { "re-deleted" }
-        Add-AuditEntry -Audit ([ref]$audit) -File $rc.FullName -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok $true
+        if ($afterValue -eq "re-delete-failed") {
+            Write-Host "    [FAILED] could not re-delete (file locked?): $($rc.FullName)" -ForegroundColor Red
+        }
+        Add-AuditEntry ([ref]$audit) -File $rc.FullName -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
 }
 $passCount++

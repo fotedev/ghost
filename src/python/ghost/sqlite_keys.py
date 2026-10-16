@@ -140,7 +140,9 @@ def clear_cli_telemetry(db_path):
     the step FAILED when "error" is present). A missing ItemTable table is
     tolerated per-pattern; every other sqlite error (locked db, corruption)
     surfaces via the error dict instead of being silently swallowed.
-    Returns {"deleted": N} or {"deleted": 0, "error": str}."""
+    Returns {"deleted": N, "remaining": 0} on success, or an "error" dict
+    when sqlite fails (pre-mutation failures keep deleted=0) or the
+    verify-after re-open still finds matching keys."""
     deleted = 0
     patterns = CLI_TELEMETRY_PATTERNS
 
@@ -169,7 +171,36 @@ def clear_cli_telemetry(db_path):
     finally:
         conn.close()
 
-    return {"deleted": deleted}
+    # Verify-after (module invariant): re-open read-only and count what still
+    # matches. "remaining" is additive; anything left is surfaced through the
+    # error dict so reset_zcode marks the step FAILED instead of trusting a
+    # delete that did not stick.
+    try:
+        verify_conn = _ro_connect(db_path)
+        try:
+            verify_cursor = verify_conn.cursor()
+            remaining = 0
+            for pattern in patterns:
+                try:
+                    verify_cursor.execute(
+                        "SELECT COUNT(*) FROM ItemTable WHERE key LIKE ?",
+                        (pattern,))
+                except sqlite3.OperationalError as exc:
+                    if "no such table" not in str(exc):
+                        raise
+                    continue
+                remaining += verify_cursor.fetchone()[0]
+        finally:
+            verify_conn.close()
+    except sqlite3.Error as exc:
+        return {"deleted": deleted, "remaining": 0,
+                "error": "verify-after failed: " + str(exc)}
+
+    if remaining:
+        return {"deleted": deleted, "remaining": remaining,
+                "error": "{0} telemetry key(s) still match after commit".format(
+                    remaining)}
+    return {"deleted": deleted, "remaining": 0}
 
 
 def chat_check(mode, shared_db, tasks_index=None):

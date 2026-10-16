@@ -227,7 +227,8 @@ function Save-WatchState {
     $kept = @()
     foreach ($c in @($State.continues)) {
         try {
-            if ([datetime]([string]$c).Split("|")[1] -ge $pruneCut) { $kept += $c }
+            $stampUtc = [DateTimeOffset]::Parse((([string]$c).Split("|"))[1], [System.Globalization.CultureInfo]::InvariantCulture).UtcDateTime
+            if ($stampUtc -ge $pruneCut) { $kept += $c }
         }
         catch { }
     }
@@ -469,15 +470,17 @@ function Test-ContinueAllowed {
         [Parameter(Mandatory = $true)][datetime]$Now
     )
     if ($NoAutoContinue) { return $false }
-    # Stamps are stored UTC ("...Z"); $Now arrives local (Get-Date). Normalize
-    # the cutoff to UTC or the tick comparison skews by the timezone offset
-    # and the hourly cap fires on the wrong window.
+    # Stamps are stored UTC ("...Z"); $Now arrives local (Get-Date). Parse the
+    # stamps as UTC explicitly - a bare [datetime] cast turns a Z-suffixed
+    # string into LOCAL time, skewing the tick comparison against the UTC
+    # cutoff by the timezone offset (the cap under-counts west of UTC).
     $cut = $Now.ToUniversalTime().AddHours(-1)
     $recent = 0
     foreach ($c in @($State.continues)) {
         try {
             $parts = ([string]$c).Split("|")
-            if (($parts[0] -ceq $Session) -and ([datetime]$parts[1] -ge $cut)) {
+            $stampUtc = [DateTimeOffset]::Parse($parts[1], [System.Globalization.CultureInfo]::InvariantCulture).UtcDateTime
+            if (($parts[0] -ceq $Session) -and ($stampUtc -ge $cut)) {
                 $recent++
             }
         }
@@ -552,6 +555,12 @@ function Invoke-SessionContinue {
             continue
         }
         $argList = @("`"$cli`"", "--resume", $p.session, "--prompt", $ResumeMessage, "--surface", "desktop")
+        # PS 5.1 joins a string[] -ArgumentList with spaces WITHOUT quoting, so
+        # the resume prompt (which contains spaces) must be pre-quoted or it
+        # splits into separate argv tokens. $cli is already quoted above.
+        $argList = @($argList | ForEach-Object {
+            if ($_ -match '\s' -and $_ -notmatch '^".*"$') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+        })
         $stamp = $Now.ToString("yyyyMMdd_HHmmss")
         $outLog = Join-Path $StateDir ("resume_" + $stamp + ".out.log")
         $errLog = Join-Path $StateDir ("resume_" + $stamp + ".err.log")

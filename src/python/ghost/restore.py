@@ -86,6 +86,8 @@ def new_restore_script(backup_root, app, actions):
     # with a quote, so this is structurally safe, but assert anyway.
     assert "\n'@" not in manifest_json
 
-    with open(restore_path, "w", encoding="utf-8", newline="\r\n") as f:
+    # UTF-8 WITH BOM: PowerShell 5.1 decodes BOM-less files as ANSI, so a
+    # BOM-less restore script mangles non-ASCII profile paths in rollback.
+    with open(restore_path, "w", encoding="utf-8-sig", newline="\r\n") as f:
         f.write(script)
     return restore_path

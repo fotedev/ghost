@@ -71,11 +71,6 @@ generate_hex() {
     openssl rand -hex "$bytes" 2>/dev/null || head -c "$bytes" /dev/urandom | xxd -p -c "$bytes"
 }
 
-# ── Hashing ─────────────────────────────────────────────────────────────
-sha256_hex() {
-    printf '%s' "$1" | sha256sum | awk '{print $1}'
-}
-
 # ── Helpers ─────────────────────────────────────────────────────────────
 timestamp() {
     date +%Y%m%d_%H%M%S

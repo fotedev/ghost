@@ -41,13 +41,13 @@ $cursorIsAdmin = [Security.Principal.WindowsPrincipal]::new(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $cursorIsAdmin) {
-    $cursorLogOut = "$env:TEMP\cursor_v0.2_result.log"
     $cursorScript = $MyInvocation.MyCommand.Path
-    $cursorArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$cursorScript`" *> `"$cursorLogOut`""
+    # -File passes only declared switches; a redirect operator after -File is
+    # just swallowed as an undeclared argument. The *_done.txt marker file
+    # (not a log) is the persisted result channel - the elevated console shows
+    # the full live output while the run progresses.
+    $cursorArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$cursorScript`""
     Start-Process powershell -Verb RunAs -ArgumentList $cursorArgs -WindowStyle Normal -Wait
-    if (Test-Path -LiteralPath $cursorLogOut) {
-        Get-Content -LiteralPath $cursorLogOut
-    }
     if (Test-Path -LiteralPath "$env:TEMP\cursor_v0.2_done.txt") {
         Get-Content -LiteralPath "$env:TEMP\cursor_v0.2_done.txt"
     }
@@ -615,7 +615,10 @@ function Test-WatchdogRecreation {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
         $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
-        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok $true
+        if ($afterValue -eq "re-delete-failed") {
+            Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+        }
+        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
 }
 

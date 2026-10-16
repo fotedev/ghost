@@ -75,8 +75,17 @@ function Invoke-Git {
   param([string[]]$GitArguments)
   $outFile = Join-Path $env:TEMP ('ghost-upd-out-' + [Guid]::NewGuid().ToString('N') + '.txt')
   $errFile = Join-Path $env:TEMP ('ghost-upd-err-' + [Guid]::NewGuid().ToString('N') + '.txt')
+  # Windows PowerShell 5.1 joins a string[] -ArgumentList with spaces WITHOUT
+  # quoting, so any argument containing whitespace (e.g. a stash message)
+  # splits into separate tokens and git reads the tail as pathspecs. Pass one
+  # pre-quoted command line instead - a single string argument is used verbatim.
+  $cmdLine = @()
+  foreach ($arg in $GitArguments) {
+    if ($arg -match '\s') { $cmdLine += ('"' + ($arg -replace '"', '\"') + '"') }
+    else { $cmdLine += $arg }
+  }
   try {
-    $proc = Start-Process -FilePath 'git' -ArgumentList $GitArguments -WorkingDirectory $RepoRoot `
+    $proc = Start-Process -FilePath 'git' -ArgumentList ($cmdLine -join ' ') -WorkingDirectory $RepoRoot `
       -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
     $out = @()
     $err = @()

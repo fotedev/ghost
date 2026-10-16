@@ -179,6 +179,7 @@ class ClearCliTelemetryTests(unittest.TestCase):
     def test_deletes_telemetry_like_keys_only(self):
         result = sqlite_keys.clear_cli_telemetry(self._make_db())
         self.assertEqual(result["deleted"], 3)
+        self.assertEqual(result["remaining"], 0)
         self.assertNotIn("error", result)
         conn = sqlite3.connect(os.path.join(self._tmp.name, "db.sqlite"))
         remaining = [r[0] for r in conn.execute("SELECT key FROM ItemTable")]
@@ -387,7 +388,11 @@ class AuditAndRestoreTests(unittest.TestCase):
         path = restore.new_restore_script(backup_root, "ZCode", actions)
         self.assertTrue(path.endswith(
             os.path.join(backup_root, "restore_ZCode_20260101_000000.ps1")))
-        with open(path, "r", encoding="utf-8") as f:
+        # PS 5.1 reads BOM-less files as ANSI, so the restore script must
+        # carry a UTF-8 BOM for non-ASCII profile paths to survive.
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(3), b"\xef\xbb\xbf")
+        with open(path, "r", encoding="utf-8-sig") as f:
             body = f.read()
         self.assertIn("function Restore-Entry", body)
         self.assertIn("$manifestJson = @'", body)
