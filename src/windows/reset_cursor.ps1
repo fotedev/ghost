@@ -448,11 +448,14 @@ else {
 #     inline temp-.py heredoc replaced by the shared subcommand) ---
 Write-Host "`n[4/15] Clearing global state.vscdb auth secrets..." -ForegroundColor Cyan
 $null = Backup-ViaCore -Source $sqlitePath -BackupRoot $backupRoot -Label $sqliteLabel -Actions ([ref]$actions)
-$secretsReport = Invoke-GhostCore @("delete-secrets", $sqlitePath)
-$secretsOk = $false
-if ($null -ne $secretsReport -and $null -ne $secretsReport.survivors) {
-    $secretsOk = ($secretsReport.survivors -eq 0)
-    $deletedCount = @($secretsReport.deleted).Count
+    $secretsReport = Invoke-GhostCore @("delete-secrets", $sqlitePath)
+    $secretsOk = $false
+    if ($null -ne $secretsReport -and $null -ne $secretsReport.survivors) {
+        # survivors is a LIST (one COUNT per pattern/key): PS array -eq 0
+        # FILTERS elements instead of answering "all zero" - test explicitly.
+        $nonZeroSurvivors = @($secretsReport.survivors | Where-Object { $_ -ne 0 })
+        $secretsOk = ($nonZeroSurvivors.Count -eq 0)
+        $deletedCount = @($secretsReport.deleted).Count
     if ($secretsOk) {
         Add-AuditEntry -Audit ([ref]$audit) -File $sqlitePath -Key "secrets-delete" -Before "present" -After ("deleted " + $deletedCount) -Ok $true
         Write-Host "    [OK] secrets deleted: $deletedCount keys from $sqlitePath" -ForegroundColor Green
