@@ -58,6 +58,47 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **GHOST.bat menu input executed hostile self-input** (2026-10-17): the
+  unquoted `%chain%` / `%choice%` expansions ran `1 & calc` verbatim and
+  parens broke the parse. A new `:ValidateChoice` allowlists digits, spaces,
+  commas and U/u inside an isolated delayed-expansion probe, and all five
+  prompt sites reject before the "0" check, tokenization, for-in dispatch or
+  `:RunChain` call. Harness 12/12 incl. hostile amp/parens/submenu scenarios.
+- **Captcha watchdog could run twice and leaked its log-tail state**
+  (2026-10-17): a second resident copy (menu [11] again) double-fired
+  restarts/Telegram escalations on the shared state file — the watcher now
+  carries the taskbar watcher's guard (startup process scan + named mutex,
+  `-RunOnce` always runs). `Read-NewLogLines` was rewritten byte-level: it
+  consumes only up to the last complete newline (a trailing partial line or
+  partial multi-byte char is re-read complete next pass) and advances the
+  offset by bytes actually consumed instead of a file length probed after
+  `ReadToEnd` (the old race skipped whatever the agent appended in between).
+- **update_ghost misidentified a Download-ZIP copy sitting inside another
+  repository as a clone** (2026-10-17): `rev-parse --is-inside-work-tree`
+  answers "true" against the PARENT repo, so the updater fetched/pulled/reset
+  in the wrong place ("no origin remote" as the visible symptom). The clone
+  track now additionally requires `--show-toplevel` to equal the GHOST folder
+  itself; a parent-tree hit warns explicitly and routes into the ZIP-copy
+  conversion flow.
+- **Chat refresh classified a splash-phase clone as the Primary**
+  (2026-10-17): `refresh_zcode_second_chats.ps1` matched mains by window
+  title only, and a clone launching (splash title plain "ZCode") was claimed
+  as a Primary main with its app-servers recycled as Primary's. Classification
+  is now process-marker-first (the verified 2026-09-24/26 taskbar rule):
+  WMI subtree walk to the root main, clone roaming/home markers, clone v6
+  color title overrides a spurious Primary read; unresolved windows are
+  skipped, never guessed. Live smoke against running instances passed.
+- **Shortcut installers broke under PowerShell 7** (2026-10-17): both
+  installers set the `.lnk` TargetPath to `$PSHOME\powershell.exe`, which
+  does not exist in pwsh's own directory — shortcuts created by a pwsh-run
+  installer targeted a nonexistent exe. They now pin the OS-shipped
+  `System32\WindowsPowerShell\v1.0\powershell.exe` and fail fast if absent.
+- **block_qoder_domains corrupted non-ASCII hosts comments** (2026-10-17,
+  local-only tool): the hosts round-trip read BOM-less bytes as UTF-8 and
+  wrote with ASCII encoding, flattening every non-ASCII character to a
+  permanent `?`. Read/write now both use the system ANSI codepage (BOM
+  auto-detect still wins), matching how the Windows resolver reads hosts —
+  single-byte-codepage content survives byte-exactly.
 - **IDE Resets [9] dispatched the wrong task**: the Resets submenu had no
   local→gid resolver, so typed ids reached `:DispatchOne` raw — local [9]
   "Reset AutoClaw" therefore ran global gid 9 (the ZCode captcha watchdog,
