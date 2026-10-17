@@ -11,6 +11,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Clone-suite generator** (`tools/new_clone_suite.ps1`, 2026-10-17) —
+  turns the app-cloning playbook's Phases 3-10 mechanics into scaffolding:
+  from an intake JSON (or interactive defaults) it emits the reset manifest,
+  clone launcher, `.bat` wrapper, AUMID-shortcuts installer (+ branding
+  wiring + `-RepairPrimaryAumid`) and a spec stub with a ground-truth table,
+  then wires a new GHOST.bat submenu (backup + anchor edit + verify-after,
+  next submenu id / DispatchOne gids allocated by parsing the current file).
+  Every emitted `.ps1` is parse-checked before the tool claims success;
+  Phases 0-2 (discovery/isolation design) stay with the agent as marked
+  `<TODO: Phase 1 discovery>` slots. Acceptance: a generated demo suite
+  passed the harness and repo-integrity, then was removed.
+
 - **ZCode per-clone Telegram bots (UI-assisted, EC-D03)** — `tools/set_zcode_bot.ps1`
   (`-VerifyOnly` audit / `-Target <name> -Fix` backup-first sync): fingerprints
   the encrypted `credentials.json -> bot:<id>:credential` (`enc:v1:`, sha8

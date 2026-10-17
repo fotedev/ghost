@@ -19,7 +19,10 @@ New-Item -ItemType Directory -Path $work | Out-Null
 # --- build the test copy -------------------------------------------------------
 $src = [System.IO.File]::ReadAllText("$repo\GHOST.bat")
 $count = ([regex]::Matches($src, [regex]::Escape('set /p choice=%PROMPT_TEXT%'))).Count
-if ($count -ne 5) { throw "expected 5 set /p sites in GHOST.bat (main + 4 submenus), found $count" }
+# Floor 5 = main + the four hand-written submenus; generated clone suites
+# (tools\new_clone_suite.ps1) add one prompt per new submenu and the global
+# rewrite below covers every occurrence, so the check guards the floor only.
+if ($count -lt 5) { throw "expected at least 5 set /p sites in GHOST.bat (main + 4 submenus), found $count" }
 $copy = $src.Replace('set /p choice=%PROMPT_TEXT%', 'call :TestNextInput choice')
 $sub = @'
 
