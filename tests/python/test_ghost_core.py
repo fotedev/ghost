@@ -722,8 +722,9 @@ class FilesweepTests(unittest.TestCase):
         self.assertEqual(r["failed"], 0)
         self.assertEqual(r["remaining"], 0)
         self.assertTrue(r["backed_up_to"])
-        for _root, _dirs, names in os.walk(self.tree):
-            self.assertEqual(names, [])
+        # The PS original removes the emptied dirs and the tree root itself -
+        # no trace of the tree may survive the sweep.
+        self.assertFalse(os.path.exists(self.tree))
 
     def test_sweep_tree_missing_is_skip_ok(self):
         r = filesweep.sweep_tree(

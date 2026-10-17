@@ -149,8 +149,9 @@ def remove_identity_store(path, action, backup_root, backup_label=None,
 
 def sweep_tree(path, backup_root, backup_label, attempts=_SWEEP_ATTEMPTS):
     """Clear-TreeFilesIndividually twin: back up the whole tree (best-effort),
-    then delete every file inside it one by one with a per-file retry curve.
-    Directories are left in place (the PS original removes files only).
+    then delete every file inside it one by one with a per-file retry curve,
+    then remove the emptied directories bottom-up and the tree root itself —
+    the PS original leaves NO tree behind.
     """
     report = {"ok": False, "skipped": False, "path": path, "before": "missing",
               "after": "skipped", "deleted": 0, "failed": 0, "remaining": 0,
@@ -186,6 +187,18 @@ def sweep_tree(path, backup_root, backup_label, attempts=_SWEEP_ATTEMPTS):
             report["failed_paths"].append(file_path)
         else:
             report["deleted"] += 1
+
+    # The PS original then removes the emptied directories (deepest first)
+    # and the tree root itself - the tree must not survive the sweep.
+    dirs = []
+    for root, _dirs, _names in os.walk(path):
+        dirs.append(root)
+    dirs.sort(key=len, reverse=True)
+    for directory in dirs:
+        with contextlib.suppress(OSError):
+            os.rmdir(directory)
+    with contextlib.suppress(OSError):
+        os.rmdir(path)
 
     remaining = 0
     for root, _dirs, names in os.walk(path):
