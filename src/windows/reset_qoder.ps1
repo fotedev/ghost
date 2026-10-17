@@ -2,10 +2,10 @@
 param(
     # v0.4 keeps the v0.3 opt-out switches for the system-level steps.
     # Default = ON (i.e., do them). Use -SkipMac / -SkipHostname to suppress.
-    # Note: NO [CmdletBinding()] -- the v0.2 launch pattern uses
-    # `cmd /c powershell -File <script> *> <log>`, and [CmdletBinding()] makes
-    # the `*` in `*>` bind as a positional argument (the script rejects it).
-    # Plain param() is fine here; switches work without CmdletBinding.
+    # Note: NO [CmdletBinding()] -- plain param() is deliberate: the
+    # self-elevation block invokes this script with -File plus only these
+    # declared switches (the *_done.txt marker file, not a log, is the
+    # persisted result channel). Switches work without CmdletBinding.
     [switch]$SkipMac,
     [switch]$SkipHostname
 )
@@ -20,19 +20,17 @@ $qoderIsAdmin = [Security.Principal.WindowsPrincipal]::new(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $qoderIsAdmin) {
-    $qoderLogOut = "$env:TEMP\qoder_v0.4_result.log"
     $qoderScript = $MyInvocation.MyCommand.Path
     $qoderSwitchList = @()
     if ($SkipMac)      { $qoderSwitchList += "-SkipMac" }
     if ($SkipHostname) { $qoderSwitchList += "-SkipHostname" }
     $qoderSwitchString = if ($qoderSwitchList.Count -gt 0) { " " + ($qoderSwitchList -join " ") } else { "" }
     # Single-string argument list, same proven pattern as v0.2 -- avoids any
-    # array-join quoting surprises with paths that contain spaces.
-    $qoderArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$qoderScript`"$qoderSwitchString *> `"$qoderLogOut`""
+    # array-join quoting surprises with paths that contain spaces. -File passes
+    # only declared switches; a redirect operator here would be swallowed as an
+    # undeclared argument (the *_done.txt marker file is the persisted result).
+    $qoderArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$qoderScript`"$qoderSwitchString"
     Start-Process powershell -Verb RunAs -ArgumentList $qoderArgs -WindowStyle Normal -Wait
-    if (Test-Path $qoderLogOut) {
-        Get-Content $qoderLogOut
-    }
     if (Test-Path "$env:TEMP\qoder_v0.4_done.txt") {
         Get-Content "$env:TEMP\qoder_v0.4_done.txt"
     }
@@ -603,7 +601,11 @@ function Test-QoderWatchdogRecreation {
     foreach ($path in $recreated) {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
-        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After "re-deleted" -Ok $true
+        $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
+        if ($afterValue -eq "re-delete-failed") {
+            Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+        }
+        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
 }
 
@@ -1708,47 +1710,91 @@ if ($stepFailed) { $failCount++ } else { $passCount++ }
 
 # --- [12/31] Session Storage + Local Storage (per profile) ---
 Write-Host "`n[12/31] Deleting Session Storage + Local Storage (per profile)..." -ForegroundColor Cyan
+$stepFailed = $false
 foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "Session Storage"), (Join-Path $pr "Local Storage"))
+    $step12AuditStart = $audit.Count
     $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
-    Write-Host "    [$label] [OK] Session/Local Storage" -ForegroundColor Green
+    $anyFail = $false
+    foreach ($p in $paths) {
+        if (-not (Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step12AuditStart -Path $p).Success) { $anyFail = $true; break }
+    }
+    if ($anyFail) {
+        Write-Host "    [$label] [PARTIAL] Session/Local Storage" -ForegroundColor Yellow
+        $stepFailed = $true
+    } else {
+        Write-Host "    [$label] [OK] Session/Local Storage" -ForegroundColor Green
+    }
 }
-$passCount++
+if ($stepFailed) { $failCount++ } else { $passCount++ }
 
 # --- [13/31] Cache + Code Cache + GPUCache (per profile) ---
 Write-Host "`n[13/31] Deleting Cache + Code Cache + GPUCache (per profile)..." -ForegroundColor Cyan
+$stepFailed = $false
 foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "Cache"), (Join-Path $pr "Code Cache"), (Join-Path $pr "GPUCache"))
+    $step13AuditStart = $audit.Count
     $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
-    Write-Host "    [$label] [OK] Cache stores" -ForegroundColor Green
+    $anyFail = $false
+    foreach ($p in $paths) {
+        if (-not (Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step13AuditStart -Path $p).Success) { $anyFail = $true; break }
+    }
+    if ($anyFail) {
+        Write-Host "    [$label] [PARTIAL] Cache stores" -ForegroundColor Yellow
+        $stepFailed = $true
+    } else {
+        Write-Host "    [$label] [OK] Cache stores" -ForegroundColor Green
+    }
 }
-$passCount++
+if ($stepFailed) { $failCount++ } else { $passCount++ }
 
 # --- [14/31] Service Worker + blob_storage (per profile) ---
 Write-Host "`n[14/31] Deleting Service Worker + blob_storage (per profile)..." -ForegroundColor Cyan
+$stepFailed = $false
 foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "Service Worker"), (Join-Path $pr "blob_storage"))
+    $step14AuditStart = $audit.Count
     $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
-    Write-Host "    [$label] [OK] Service Worker/blob_storage" -ForegroundColor Green
+    $anyFail = $false
+    foreach ($p in $paths) {
+        if (-not (Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step14AuditStart -Path $p).Success) { $anyFail = $true; break }
+    }
+    if ($anyFail) {
+        Write-Host "    [$label] [PARTIAL] Service Worker/blob_storage" -ForegroundColor Yellow
+        $stepFailed = $true
+    } else {
+        Write-Host "    [$label] [OK] Service Worker/blob_storage" -ForegroundColor Green
+    }
 }
-$passCount++
+if ($stepFailed) { $failCount++ } else { $passCount++ }
 
 # --- [15/31] Crashpad + CrashFeedback (per profile) ---
 Write-Host "`n[15/31] Deleting Crashpad + CrashFeedback (per profile)..." -ForegroundColor Cyan
+$stepFailed = $false
 foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "Crashpad"), (Join-Path $pr "CrashFeedback"))
+    $step15AuditStart = $audit.Count
     $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
-    Write-Host "    [$label] [OK] Crashpad/CrashFeedback" -ForegroundColor Green
+    $anyFail = $false
+    foreach ($p in $paths) {
+        if (-not (Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step15AuditStart -Path $p).Success) { $anyFail = $true; break }
+    }
+    if ($anyFail) {
+        Write-Host "    [$label] [PARTIAL] Crashpad/CrashFeedback" -ForegroundColor Yellow
+        $stepFailed = $true
+    } else {
+        Write-Host "    [$label] [OK] Crashpad/CrashFeedback" -ForegroundColor Green
+    }
 }
-$passCount++
+if ($stepFailed) { $failCount++ } else { $passCount++ }
 
 # --- [16/31] Preferences device_id_salt (per profile) ---
 Write-Host "`n[16/31] Updating Preferences device_id_salt (per profile)..." -ForegroundColor Cyan
@@ -1803,14 +1849,21 @@ if ($workspaceFailed) { $failCount++ } else { $passCount++ }
 # main.log embeds the update-check URL with machineId=...&umid=<token> verbatim.
 # v0.1 never deleted logs/; this step removes the full session history.
 Write-Host "`n[18/31] Deleting logs/ (per profile)..." -ForegroundColor Cyan
+$stepFailed = $false
 foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $path = Join-Path $pr "logs"
+    $step18AuditStart = $audit.Count
     $binaryActions = Clear-BinaryIdentityStore -Paths @($path) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
-    Write-Host "    [$label] [OK] logs" -ForegroundColor Green
+    if (-not (Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step18AuditStart -Path $path).Success) {
+        Write-Host "    [$label] [PARTIAL] logs" -ForegroundColor Yellow
+        $stepFailed = $true
+    } else {
+        Write-Host "    [$label] [OK] logs" -ForegroundColor Green
+    }
 }
-$passCount++
+if ($stepFailed) { $failCount++ } else { $passCount++ }
 
 # --- [19/31] argv.json crash-reporter-id (user-level) ---
 Write-Host "`n[19/31] Updating argv.json crash-reporter-id (user-level)..." -ForegroundColor Cyan
@@ -2149,7 +2202,7 @@ if (-not (Test-Path -LiteralPath $restoreScriptPath) -or ((Get-Item -LiteralPath
 
 # Surface any per-file failures captured in the audit (e.g. logs/ tree where
 # some files were still locked by an extension host after the retry budget).
-# These don't abort the script but they DO matter for the unban goal -- if logs
+# These don't abort the script but they DO matter for the identity-reset goal -- if logs
 # leaked, the token+machineId URL is still on disk.
 $auditFailures = @($audit | Where-Object { -not $_.ok })
 if ($auditFailures.Count -gt 0) {

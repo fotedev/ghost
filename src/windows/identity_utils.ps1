@@ -196,68 +196,6 @@ function Assert-Administrator {
     }
 }
 
-function Stop-AppProcesses {
-    param(
-        [Parameter(Mandatory = $true)][string[]]$Names,
-        [int]$WaitSeconds = 3
-    )
-
-    $helperMap = @{
-        Cursor   = @("Cursor")
-        Windsurf = @("Windsurf", "Devin", "codeium")
-        Trae     = @("Trae", "Trae Broker")
-    }
-
-    $expandedNames = @()
-    foreach ($name in $Names) {
-        if ($helperMap.ContainsKey($name)) {
-            $expandedNames += $helperMap[$name]
-        }
-        else {
-            $expandedNames += $name
-        }
-    }
-    $expandedNames = $expandedNames | Select-Object -Unique
-
-    for ($attempt = 1; $attempt -le 5; $attempt++) {
-        foreach ($processName in $expandedNames) {
-            $running = Get-Process -Name $processName -ErrorAction SilentlyContinue
-            if ($running) {
-                $running | Stop-Process -Force -ErrorAction SilentlyContinue
-            }
-        }
-
-        Start-Sleep -Seconds $WaitSeconds
-
-        $remaining = @()
-        foreach ($processName in $expandedNames) {
-            if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
-                $remaining += $processName
-            }
-        }
-
-        if ($remaining.Count -eq 0) {
-            $appLabel = ($Names | Select-Object -First 1)
-            Write-Host "[OK] all $appLabel processes terminated" -ForegroundColor Green
-            return $true
-        }
-    }
-
-    $failedNames = @()
-    foreach ($processName in $expandedNames) {
-        if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
-            $failedNames += $processName
-        }
-    }
-
-    if ($failedNames.Count -gt 0) {
-        Write-Host "[FAILED] could not terminate: $($failedNames -join ', ')" -ForegroundColor Red
-        exit 1
-    }
-
-    return $true
-}
-
 function Backup-FileToTimestampDir {
     param(
         [Parameter(Mandatory = $true)][string]$Source,

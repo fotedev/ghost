@@ -2,22 +2,26 @@
 
 ## Project overview
 
-Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/Devin Desktop**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent/OpenCode** — for privacy hygiene, multi-account testing, and dev-environment resets. Windows PowerShell (primary) and Linux Bash scripts.
+Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/Devin Desktop**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent/OpenCode**, **AutoClaw** — for privacy hygiene, multi-account testing, and dev-environment resets. Windows PowerShell (primary) and Linux Bash scripts.
 
 ## Repository layout
 
 ```
 README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (scripts live under src/;
                                              #   CLI cheat sheet: docs/cli.md); GHOST.bat =
-                                             #   3 submenus with CONTINUOUS LOCAL numbering
-                                             #   (IDE resets [1]-[8] / ZCode Multi-Instance &
+                                             #   4 submenus with CONTINUOUS LOCAL numbering
+                                             #   (IDE resets [1]-[9] / ZCode Multi-Instance &
                                              #   Clones [1]-[17] / System & GHOST Maintenance
-                                             #   [1]-[2]) + ANSI colors + local chained input
+                                             #   [1]-[2] / AutoClaw Multi-Instance & Clones
+                                             #   [1]-[12]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
                                              #   global gid jump from the main menu, and
                                              #   [U] Check for updates on the main menu
 src/windows/                        # current .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
+                                    #   + launch_autoclaw_clone.ps1 (AutoClaw clone launcher,
+                                    #     -Instance inst1..inst4 + -Status) + Launch-AutoClaw-Clone.bat
+                                    #   + reset_autoclaw.ps1 (-Target Primary|inst1..4|All)
 src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters)
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
@@ -25,7 +29,9 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   refresh_zcode_second_chats chat-check) invoke it by absolute
                                #   path; tested by tests/python/test_ghost_core.py (unittest)
 docs/                              # IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes (local-only);
-                                   #   ZCODE_CHAT_SYNC_WATCHER_PLAN.md (tracked — chat-sync root cause)
+                                   #   ZCODE_CHAT_SYNC_WATCHER_PLAN.md (tracked — chat-sync root cause);
+                                   #   PYTHON_HYBRID_ROADMAP.md (tracked — Phase 2 cancellation decision +
+                                   #   Phase 3 thin-manifest pilot design + acceptance criteria)
 archive/                           # superseded versions (local-only fallbacks — do not run, never committed)
 assets/                            # ghost.ico + ghost-source.png (launcher icon; regenerate via
                                    #   tools/make_ghost_icon.ps1 — never hand-edit)
@@ -122,6 +128,40 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     overwrite-edits prompt); GHOST.bat replaced by either path
                                    #     prints a close-and-relaunch note (cmd reads the .bat
                                    #     incrementally)
+                                   #   patch_autoclaw_ports.ps1 (+ .mjs engine v10) — one-time app.asar
+                                   #     patch widening AutoClaw's hardcoded MCP candidate-port array
+                                   #     [19681..19684] -> [19681..19688] + home-override (the state-dir
+#     isolation marker .autoclaw-home; see the ELEVATION bullet below)
+                                   #     multi-instance ceiling; inst4 has no port without it);
+                                   #     backup + marker (autoclaw-ports-patch.marker.json) + -Restore
+                                   #     (verified byte-identical) + node --check gate; AutoClaw must be
+                                   #     closed; an app update reverts it (all instances run with
+                                   #     system.autoUpdate=false as the guard); AutoClaw submenu [11];
+                                   #   install_autoclaw_clone_shortcuts.ps1 — per-user Desktop +
+                                   #     Start-menu shortcuts for inst1..inst4 (AppUserModel.ID =
+                                   #     com.zhipuai.autoclaw.inst1..4; base read from the Primary .lnk
+                                   #     or the verified app constant; -Instance to scope; -Remove;
+                                   #     -RepairPrimaryAumid strips a hijacked .instN suffix + restores
+                                   #     <exe>,0 icon; .lnk AUMIDs read ONLY via Shell.Application
+                                   #     ExtendedProperty); per-clone IconLocation =
+                                   #     tools\autoclaw-<color>-branding\tray_icon.ico,0 (blue/yellow/
+                                   #     green/red ← inst1..4; missing dir warns + falls back to the
+                                   #     exe icon); AutoClaw submenu [2]
+                                   #   new_clone_suite.ps1 — clone-suite scaffolding generator (playbook
+                                   #     phases 3-10 mechanics): intake JSON → reset/launcher/.bat/
+                                   #     shortcuts/SPEC skeletons + GHOST.bat submenu anchor-edit with
+                                   #     verify-after; parse-checks every emitted .ps1; Phases 0-2 stay
+                                   #     with the agent as <TODO: Phase 1 discovery> slots
+                                   #   make_clone_icon.ps1 — GENERIC clone-icon generator (any app,
+                                   #     PS 5.1 + System.Drawing only): corner-sampled background →
+                                   #     tile detection (LongestLowRun profiles, -BgTolerance, or
+                                   #     -ManualCrop x,y,size) → inset crop → 1024 master +
+                                   #     rounded-corner alpha mask → tray_icon.ico (16..256
+                                   #     PNG-in-ICO) + icon_windows.png + source.<ext> provenance;
+                                   #     -HueRotate derives extra colors (autoclaw-red-branding =
+                                   #     blue master +150°); re-runs reuse the transparent-corner
+                                   #     master; verify-after + TEMP previews; built for the
+                                   #     opencode/cline future clones — do not delete
 ```
 
 ## Architecture
@@ -130,7 +170,6 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
 src/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scripts
   New-IdentitySet                  #   -> { devDeviceId, machineId, macMachineId, sqmId }
   Assert-Administrator             #   -> exit 1 if not elevated
-  Stop-AppProcesses                #   -> kill loop (auto-expands Windsurf->Devin+codeium, Trae->Broker)
   Backup-FileToTimestampDir        #   -> copy to <app>\ID_Backups\<ts>\<label>
   Set-JsonIdentity                 #   -> JSON patch + verify-after re-read
   Set-SqliteKeys                   #   -> Python-backed UPSERT + verify-after (invokes src/python/ghost_cli.py sqlite-update)
@@ -143,6 +182,13 @@ src/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scripts
 reset_cursor.ps1     # Cursor: 15 steps (machineid, storage.json, state.vscdb,
                                    #          auth-secrets scrub, device_id_salt, os_crypt rotation,
                                    #          Cookies/NPS/sentry/DIPS/Trust Tokens/Crashpad/logs, workspace DBs)
+                                   #          v0.3 THIN MANIFEST (Phase 3 pilot — docs/PYTHON_HYBRID_ROADMAP.md):
+                                   #          every store mutation runs via ghost_cli.py core subcommands
+                                   #          (Invoke-GhostCore = the single PS→Python point); step order,
+                                   #          audit keys, restore actions + summary identical to v0.2
+                                   #          (archived at archive/reset_cursor_windows-v0.2.ps1, local-only);
+                                   #          step 4's legacy temp-.py heredoc replaced by the shared
+                                   #          delete-secrets subcommand; Python now required for ALL steps
 reset_devin.ps1       # Windsurf/Devin Desktop (rebranded 2026-06): 17 steps
                                    #            x N auto-detected %APPDATA% roots (Devin, Windsurf):
                                    #            argv.json crash-reporter-id (.windsurf + .devin),
@@ -184,6 +230,28 @@ reset_minimax_opencode.ps1  # MiniMax/OpenCode: 22 steps (OpenCode auth.json wip
                                    #          chat preserved)
 change_device_id.ps1              # System-level: Fingerprint (self-test) / LegacyReset (registry GUIDs)
                                    #   / RepairProfiles (ProfileList .bak keys). Windows-only.
+reset_autoclaw.ps1                # AutoClaw: 7 steps (auth.json deviceId rotate,
+                                   #          identity\device.json ed25519 keypair regen via node:crypto
+                                   #          (system node or the app-bundled node.exe), settings.json
+                                   #          gateway.port+url + system.autoUpdate=false (asar-patch
+                                   #          guard), .updaterId rotate, openclaw.json mode/checkOnStart,
+                                   #          devices\paired.json delete — live operator credential,
+                                   #          gateway regenerates; final re-verify; -Target
+                                   #          Primary|inst1|inst2|inst3|inst4|All + -DryRun;
+                                   #          All = clones first, Primary last)
+launch_autoclaw_clone.ps1         # AutoClaw multi-instance launcher -Instance inst1|inst2|inst3|inst4
+                                   #          + -Status: env levers USERPROFILE/HOME/TEMP/TMP/TMPDIR +
+                                   #          AUTOCLAW_GATEWAY_PORT (drift +9 read back, recorded to
+                                   #          instance-record.json) + --user-data-dir (this app HONOURS it,
+                                   #          lock keys off the profile dir); first run seeds the Primary
+                                   #          profile EXCLUDING credential stores (token-cache.json,
+                                   #          *.backup, auth.json tokens stripped — userInfo kept, ONE
+                                   #          manual login per clone) + rotates device identity + ed25519
+                                   #          keypair; marker-guarded one-time primary-token reconciliation;
+                                   #          verify-after-launch: subtree stable 5s, MCP/gateway /health on
+                                   #          DISCOVERED ports (never the requested one), paired.json holds
+                                   #          only the clone's own key, Primary openclaw.json hash unchanged.
+                                   #          Launch sequentially, never elevated.
 ```
 (All .ps1 above live in src/windows/; .sh scripts in src/linux/;
 superseded versions (Qoder v0.1-v0.3, ZCode v1.0-v1.3, MiniMax v1.0-v1.1,
@@ -197,7 +265,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 1. All covered IDEs derive **shared** telemetry IDs (`telemetry.machineId`, `.sqmId`, `.devDeviceId`, `.macMachineId`) from the same Windows registry source at first launch. Resetting one but not the others leaves a cross-IDE correlation trail.
 2. SQLite must use **Python** (`Get-Command python` / `python3`). .NET SQLite assemblies are NOT registered on this box. `Set-SqliteKeys` in `identity_utils.ps1` handles Python detection + graceful skip.
 3. Registry GUID changes (`HKLM:\...\Cryptography\MachineGuid` etc.) do **NOT** affect the fingerprint self-test — the algorithm reads WMI hardware/OS signals (CPU, BIOS, motherboard, RAM, timezone), not those registry keys.
-4. The max reliably-changeable fingerprint-signal weight is **0.19** (CPU name 0.12 + tz 0.03 + culture 0.02 + ui.language 0.02), which is below the **0.306** delta needed to flip `sameIdentity` to false. Therefore IDE storage rewrites are the **primary** unbanning mechanism, not the fingerprint self-test.
+4. The max reliably-changeable fingerprint-signal weight is **0.19** (CPU name 0.12 + tz 0.03 + culture 0.02 + ui.language 0.02), which is below the **0.306** delta needed to flip `sameIdentity` to false. Therefore IDE storage rewrites are the **primary** identity-reset mechanism, not the fingerprint self-test.
 5. `IMPLEMENTATION_GUIDE.md` is the verified ground truth. Do not trust comments in old scripts — several describe behavior verified NOT to work.
 
 ## Mandatory conventions
@@ -368,6 +436,171 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   pagefile / fewer concurrent instances. Ruled out that day: GPU caches, the
   icon asar patch, the captcha watchdog (idle since 09-17), db.sqlite locks.
 
+## Multi-instance conventions (AutoClaw: Primary + 4 clone slots)
+
+- Layout (FROZEN, never rename): `%USERPROFILE%\AutoClawCloneHome\instN\`
+  with `home\` (USERPROFILE/HOME → gateway state `.openclaw-autoclaw`),
+  `profile\` (--user-data-dir), `tmp\` (TEMP/TMP/TMPDIR). The Primary
+  (`%APPDATA%\AutoClaw` + `~\.openclaw-autoclaw`) is never touched by any
+  clone script beyond reading it for the seed. Spec:
+  `docs/AUTOCLAW_CLONES_SPEC.md` (all §5 ground truth read from the
+  installed app, provenance §13).
+- Isolation levers: env vars FIRST (`USERPROFILE`/`HOME` move the whole
+  gateway state tree; `AUTOCLAW_GATEWAY_PORT` per instance), and
+  `--user-data-dir` as a SECOND layer — this app HONOURS it (unlike ZCode);
+  the single-instance lock keys off the profile dir, so re-launching a
+  running clone just focuses it.
+- The MCP HTTP server binds a hardcoded 4-slot port array
+  (`PRODUCTIVITY_MCP_CANDIDATE_PORTS = [19681..19684]`) in the Electron main
+  process — 4 is the stock ceiling and two instances silently SPLIT across
+  slots (wrong-instance routing, not an error). `tools/patch_autoclaw_ports.ps1`
+  widens it to 8; inst4 has NO MCP port without that patch. An AutoClaw
+  update reverts it — therefore EVERY instance's settings.json carries
+  `system.autoUpdate: false` (set by reset + seed-scrub) and the patch is
+  re-applied after any manual update (AutoClaw submenu [11]).
+- The gateway port silently shifts up to +9 when the preferred port is busy
+  (`PORT_PROBE_RANGE`) — never record the REQUESTED port as the actual one:
+  the launcher discovers the clone's real listening ports by scanning
+  19681..19688 / requested..requested+9 against the clone's own process
+  subtree and writes them to `instance-record.json` (`-Status` reads it).
+- One credential = one instance (ZCode Telegram rule generalized): AutoClaw
+  keeps TWO device identities — `auth.json.deviceId` (backend id) and
+  `identity\device.json` (ed25519 keypair; the pubkey is what the backend
+  pins for pairing) — plus `devices\paired.json`, a LIVE operator token with
+  admin scope. The seed copies the Primary profile EXCLUDING every
+  credential store (`token-cache.json` holds live token/refreshToken too —
+  it is excluded, not scrubbed), strips `auth.json` tokens keeping
+  `userInfo` (clone opens on the account, ONE manual login per clone),
+  rotates the identities, and NEVER seeds the gateway state tree (fresh per
+  clone; its gateway regenerates `paired.json`). Verify-after-launch
+  asserts the clone's `paired.json` holds only its own device key.
+- Classify clone processes by PROCESS MARKERS (the `--user-data-dir` /
+  home-dir strings in the command line), never by window title (ZCode
+  splash-phase lesson applies verbatim); helpers/gateway children hang off
+  the marker-matched main via a parent walk.
+- Launch clones SEQUENTIALLY, never in parallel, and never elevated (UIPI;
+  the ZCode drag-drop rule applies). The launcher itself needs NO admin.
+- The FIRST-RUN seed requires the Primary CLOSED — a live Chromium profile
+  cannot be robocopied (leveldb LOCK files + open DBs; verified 2026-10-15:
+  robocopy exit 9 with the Primary running). The launcher waits up to 180s
+  then aborts; later launches never need this. Seed completion is
+  marker-guarded (`.autoclaw-seeded` written only after scrub verified):
+  needsSeed keyed on `auth.json` alone let an aborted robocopy's PARTIAL
+  profile pass as seeded — the app launched on inconsistent stores and died
+  within seconds (live-verified). A partial profile is cleared + re-seeded
+  automatically on the next run.
+- Running windows all declare the BASE AUMID `com.zhipuai.autoclaw` (set
+  unconditionally in the app) — v1 known limitation: shared taskbar button;
+  the SHORTCUTS still carry per-clone AUMIDs (`com.zhipuai.autoclaw.inst1..4`)
+  for pin grouping and per-clone ICONS
+  (`tools\autoclaw-<color>-branding\tray_icon.ico` — blue/yellow/green for
+  inst1..3 from developer-supplied renders 2026-10-17, red for inst4 as a
+  +150° hue-rotate of the blue master via `tools\make_clone_icon.ps1`;
+  `bad-green` rejected by the developer). A pinned clone can hijack the
+  Primary's `AutoClaw.lnk` AUMID + wipe its icon — same as ZCode: repair with
+  `install_autoclaw_clone_shortcuts.ps1 -RepairPrimaryAumid` (the Primary
+  keeps the stock exe icon; only clone .lnk icons are custom).
+- Electron fuses verified patchable (no asar-integrity validation, no
+  integrity.json) — the ZCode asar-patch mechanism works on AutoClaw as-is.
+  AutoClaw also bundles `resources\node\node.exe` — the keygen fallback when
+  system node is missing (ed25519 via node:crypto; PS 5.1 cannot generate
+  ed25519; PEM shapes verified: SPKI 113, PKCS8 119 chars).
+- **ELEVATION (verified live 2026-10-16, changes everything above):**
+  AutoClaw.exe's manifest declares `requestedExecutionLevel
+  level="requireAdministrator"` — EVERY launch self-elevates (UAC silent for
+  admin accounts with ConsentPromptBehaviorAdmin=0), and the elevated process
+  gets a FRESH ENVIRONMENT: the launcher's env levers (USERPROFILE/HOME/
+  AUTOCLAW_GATEWAY_PORT) never survive. `--user-data-dir` (an argument)
+  survives ONLY when the launching cmd itself is elevated first — a
+  non-elevated `start` hits the ERROR_ELEVATION_REQUIRED ShellExecute
+  fallback, which launches the elevated process with a bare command line
+  (verified via PEB reads: every AutoClaw.exe ran with NO arguments).
+  Therefore: (a) the launcher elevates its own `cmd /c start` via
+  `-Verb RunAs` so the args ride a plain CreateProcess; (b) the gateway-port
+  lever is the clone's settings.json `gateway.port` (file-based, survives
+  elevation), not the env var; (c) the state dir is isolated by
+  `tools/patch_autoclaw_ports.ps1` engine v10 (`home-override`): the patched
+  app reads `<userData>\.autoclaw-home` (written by the launcher each launch,
+  trim-tolerant — the app's argv carries a trailing space after the quoted
+  path) and redirects the whole `~/.openclaw-autoclaw` tree; the resolver is
+  `app.getPath("home")`-based (Chromium known-folder, env-immune), NOT
+  `os.homedir()` — the spec's section 5.3 env-var claim was verified against
+  plain node only and does NOT hold for the app. The scan is
+  argv-driven (reads --user-data-dir from process.argv — getPath("userData")
+  is NOT yet applied at resolver time) and caches into
+  `globalThis.__autoclawHomeOverride`.
+- **WMI (Win32_Process) is unusable for AutoClaw classification**: it omits
+  AutoClaw.exe processes ENTIRELY (healthy mains invisible minutes after
+  start) and CommandLine is permanently empty for the ones it shows (the app
+  effectively scrubs its PEB command line — PEB reads confirm args were
+  passed while WMI/PEB show none). Classification uses Get-Process
+  (toolhelp32) pid-diff + the profile lockfile exclusive-open probe
+  (`Test-ProfileLockHeld`); port ownership falls back to an unattributed
+  advisory scan. `taskkill /F` may report "Access is denied" for same-user
+  processes misleadingly — use .NET `Process.Kill()`.
+- Every patched app start appends one diagnostic record to
+  `%TEMP%\ac-argv-debug.txt` (argv + resolved override + error) — the field
+  tool for diagnosing clone isolation; remove from
+  `tools/patch_autoclaw_ports.mjs` `ARGV_SCAN_CACHED`/`homeOverrideIife` if
+  it ever needs to go silent.
+- Full live-verified clone cycle 2026-10-16: inst1 launched beside the
+  Primary with `gateway :18799 /health OK {"ok":true,"status":"live"}`,
+  `paired.json` holding only the clone's device key, Primary openclaw.json
+  hash unchanged, and the whole `.openclaw-autoclaw` tree materializing in
+  the clone home. One manual login remains per clone.
+- **First-run seed gate = the PRIMARY's profile lockfile, never "any
+  AutoClaw.exe process"** (live bug 2026-10-17): the gate used
+  `Get-Process -Name AutoClaw`, so inst1 RUNNING blocked inst2/3/4's first
+  launch for the full 180s wait and then aborted — user-visible as a cmd
+  window that flashes and closes with nothing opening. Clones are named
+  AutoClaw.exe too and never lock the Primary's files; the correct gate is
+  `Test-ProfileLockHeld` on `%APPDATA%\AutoClaw` (clean Primary exit leaves
+  no lockfile; a running instance holds it exclusively — semantics
+  verified on a live clone the same day). Running-clone detection also
+  needs the lockfile probe: WMI cannot see the clone, so the marker-based
+  subtree match alone misses it.
+- **Sign-in gate on the gateway (asar-verified 2026-10-17):** the embedded
+  gateway auto-starts only via `shouldLaunchGatewayAtColdStart =
+  isCloudMode || hasAcceptedRiskAgreement()` → `triggerGatewayLaunch()`,
+  whose start is parked on the renderer's `APP_MAIN_UI_READY`
+  (`markGatewayMainUiReady`); the handler re-checks via
+  `ensureEmbeddedGatewayLaunchedAfterRiskAgreement`. An instance sitting on
+  the SIGN-IN screen never sends it — NO gateway/MCP ports until the ONE
+  manual login completes and the main UI mounts (inst2 live case: seeded +
+  isolated + running, gateway absent while `auth.json` had no token; after
+  the user's inst1 login 02:13 its gateway bound 18799). The launcher
+  treats a missing gateway as WARN when the profile has no token (login
+  pending) and FAIL only when a token IS present.
+- **Browser-extension native host spawns bare Primary instances**
+  (live-verified 2026-10-17): `%APPDATA%\AutoClaw\chrome-ext\0.1.6\com.autoclaw.native_host_stub.json`
+  points at `C:\Program Files\AutoClaw\AutoClaw.exe` with NO arguments —
+  whenever the AutoClaw extension reconnects in Chrome/Edge it spawns a
+  bare AutoClaw.exe that opens the PRIMARY profile and rewrites its
+  `openclaw.json` (bare pid 12612 spawned 43s into inst2's launch; this is
+  also the source of the "openclaw.json modified externally" dialogs). The
+  launcher therefore attributes Primary-hash changes via the Primary
+  lockfile before/after (held during the window → WARN out-of-band, not a
+  clone breach); a clone's FIRST launch needs every Primary-profile window
+  closed — including that stray spawn.
+
+## App cloning playbook (any new app)
+
+When asked to clone ANY app into multi-instance ("clone <app>"), follow
+`docs/APP_CLONING_PLAYBOOK.md` — phases 0–10, the identity suite
+(MANDATORY vs DEGRADABLE features + the never-silently-degrade rule), the
+automation contract (what the agent does unasked vs the Developer's only
+touchpoints), and the fixed final-report format. Fill
+`docs/APP_CLONING_INTAKE_TEMPLATE.md` first (developer values or documented
+defaults — every default is reported). `docs/APP_CLONING_EDGE_CASES.md` is
+normative: its EC-xx handling rules apply to every suite. Icon policy
+(2026-10-15): developer-supplied icons are wired as-is; missing icons
+default to IMPROVISE (generate tinted placeholder variants from the stock
+icon) + report, with stock-default + report as the allowed fallback — both
+branches are ALWAYS reported, never silent (playbook §5). Colors are
+developer-specified per clone (defaults: the ZCode blue/yellow/green
+palette). Current suites: ZCode (gold standard, full identity) and AutoClaw
+(v1, shared-taskbar limitation documented in its spec §7.3c).
+
 ## Out of scope
 
 - Linux `.sh` scripts (separate effort)
@@ -380,6 +613,6 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 
 - **Do NOT auto-commit.** Leave changes in the working tree for review. The user handles versioning.
 - **Windows-first.** This is a Windows PowerShell project. Linux scripts exist but are out of scope for changes.
-- **Run IDE scripts as Administrator** with the target app **closed first**. Each script calls `Assert-Administrator` and `Stop-AppProcesses` early.
+- **Run IDE scripts as Administrator** with the target app **closed first**. Each script calls `Assert-Administrator` early, then runs its own aggressive process-kill loop (`Stop-<App>ProcessesAggressive`).
 - **Follow the Cursor pattern.** `src/windows/reset_cursor.ps1` is the canonical reference implementation (v0.1 had the BOM + rename-leaves-old-fingerprint bugs). New IDE scripts should mirror its structure, local helpers, and error handling.
 - **Parse-check before declaring done.** Use `[System.Management.Automation.Language.Parser]::ParseFile` to verify syntax of every `.ps1` change.

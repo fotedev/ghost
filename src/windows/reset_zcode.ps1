@@ -93,15 +93,15 @@ $zcodeIsAdmin = [Security.Principal.WindowsPrincipal]::new(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $zcodeIsAdmin) {
-    $zcodeLogOut = "$env:TEMP\zcode_v1.4_result.log"
     $zcodeScript = $MyInvocation.MyCommand.Path
     $zcodeFwd = " -Target $Target"
     if ($SkipQoder) { $zcodeFwd += " -SkipQoder" }
-    $zcodeArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$zcodeScript`"$zcodeFwd *> `"$zcodeLogOut`""
+    # -File passes only declared switches; a redirect operator after -File is
+    # just swallowed as an undeclared argument. The *_done.txt marker file
+    # (not a log) is the persisted result channel - the elevated console shows
+    # the full live output while the run progresses.
+    $zcodeArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$zcodeScript`"$zcodeFwd"
     Start-Process powershell -Verb RunAs -ArgumentList $zcodeArgs -WindowStyle Normal -Wait
-    if (Test-Path -LiteralPath $zcodeLogOut) {
-        Get-Content -LiteralPath $zcodeLogOut
-    }
     if (Test-Path -LiteralPath "$env:TEMP\zcode_v1.3_done.txt") {
         Get-Content -LiteralPath "$env:TEMP\zcode_v1.3_done.txt"
     }
@@ -1115,7 +1115,10 @@ function Test-WatchdogRecreation {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
         $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
-        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok $true
+        if ($afterValue -eq "re-delete-failed") {
+            Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+        }
+        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
 }
 
@@ -2453,6 +2456,8 @@ Write-Host "Restore script: $restoreScriptPath" -ForegroundColor Gray
 Write-Host "NOTE: workspace .backup sidecars were preserved per policy (they still embed the old device ID)." -ForegroundColor Yellow
 Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects ALL ZCode instances + Qoder." -ForegroundColor Yellow
 
+# Marker filename keeps the historical "v1.3" label (docs + user habits read
+# it); the script itself is v1.4.
 [System.IO.File]::WriteAllText("$env:TEMP\zcode_v1.3_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
 
 if ($failCount -gt 0) {

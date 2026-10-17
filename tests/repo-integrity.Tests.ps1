@@ -124,7 +124,21 @@ Describe "README consistency" {
 
     It "has no stale scripts/ paths in tracked text files (CHANGELOG exempt: rename history)" {
         $repoRoot = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
-        $hits = & git -C $repoRoot grep -l -E "scripts[/\\\\](windows|linux)" -- "*.md" "*.bat" "*.sh" "*.txt" "*.yml" ":!CHANGELOG.md" 2>$null
+        if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath (Join-Path $repoRoot ".git"))) {
+            # Real checkout: grep only tracked files.
+            $hits = & git -C $repoRoot grep -l -E "scripts[/\\\\](windows|linux)" -- "*.md" "*.bat" "*.sh" "*.txt" "*.yml" ":!CHANGELOG.md" 2>$null
+        }
+        else {
+            # Download-ZIP copy (README-supported): no .git to grep, so scan
+            # the extracted text files with the same extension set instead.
+            $hits = @(Get-ChildItem -Path $repoRoot -Recurse -File -Include *.md, *.bat, *.sh, *.txt, *.yml -ErrorAction SilentlyContinue |
+                Where-Object {
+                    ($_.Name -ne "CHANGELOG.md") -and
+                    ($_.FullName -notmatch '[\\/]\.git[\\/]') -and
+                    ($_.FullName -notmatch '[\\/]archive[\\/]') -and
+                    (Select-String -LiteralPath $_.FullName -Pattern "scripts[/\\](windows|linux)" -Quiet)
+                } | ForEach-Object { $_.FullName })
+        }
         @($hits).Count | Should -Be 0
     }
 }

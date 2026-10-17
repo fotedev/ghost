@@ -7,8 +7,140 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-17
+
+### Added
+
+- **Python hybrid Phase 3 pilot — reset_cursor v0.3 thin manifest**
+  (2026-10-17): the Cursor reset's 15 steps now run every store mutation
+  through `src/python/ghost_cli.py` core subcommands via a single
+  `Invoke-GhostCore` helper — new core modules `ghost/filesweep.py`
+  (binary-store rename-or-delete, verified deletes, per-file tree sweeps)
+  and `ghost/winstore.py` (machine-id file, device_id_salt rotation, dotted
+  JSON key removal) plus 7 new subcommands (`backup`, `machineid-file`,
+  `salt-rotate`, `json-remove`, `store-delete`, `sweep-file`, `sweep-tree`),
+  all covered by the expanded unittest suite (58 cases incl. CLI bridge
+  contracts). Step order, audit keys, restore actions and the summary are
+  identical to v0.2 (archived at `archive/reset_cursor_windows-v0.2.ps1`,
+  local-only); step 4's inline temp-.py heredoc — the last one in the repo —
+  is replaced by the shared `delete-secrets` subcommand. Python is now
+  required for ALL Cursor reset steps (fail-fast up front). 1031 → 840
+  lines. The mandatory live comparison run (pilot acceptance #3) is
+  user-supervised and pending. Decision record + design:
+  [docs/PYTHON_HYBRID_ROADMAP.md](docs/PYTHON_HYBRID_ROADMAP.md) (Phase 2
+  leaf-tools migration CANCELLED with per-tool reasons).
+
+- **Clone-suite generator** (`tools/new_clone_suite.ps1`, 2026-10-17) —
+  turns the app-cloning playbook's Phases 3-10 mechanics into scaffolding:
+  from an intake JSON (or interactive defaults) it emits the reset manifest,
+  clone launcher, `.bat` wrapper, AUMID-shortcuts installer (+ branding
+  wiring + `-RepairPrimaryAumid`) and a spec stub with a ground-truth table,
+  then wires a new GHOST.bat submenu (backup + anchor edit + verify-after,
+  next submenu id / DispatchOne gids allocated by parsing the current file).
+  Every emitted `.ps1` is parse-checked before the tool claims success;
+  Phases 0-2 (discovery/isolation design) stay with the agent as marked
+  `<TODO: Phase 1 discovery>` slots. Acceptance: a generated demo suite
+  passed the harness and repo-integrity, then was removed.
+
+- **ZCode per-clone Telegram bots (UI-assisted, EC-D03)** — `tools/set_zcode_bot.ps1`
+  (`-VerifyOnly` audit / `-Target <name> -Fix` backup-first sync): fingerprints
+  the encrypted `credentials.json -> bot:<id>:credential` (`enc:v1:`, sha8
+  only, never values) + bot id across BOTH `bot-config.json` and
+  `bot-config.v3.json` in all 4 homes (the 2026-10-16 Fourth `v2=False /
+  v3=True` split looked disabled while polling — both files are now always
+  checked); fails loudly on any duplicate-while-enabled (HTTP 409 risk).
+  `src/windows/launch_zcode_second_instance.ps1 [2c]` upgraded from
+  always-disable to sha8-compare (duplicate -> disable both files; unique ->
+  preserve + `.telegram-routed` v2 marker, never reverted). Flow: operator
+  creates 3 BotFather bots, pastes each token once in that clone's ZCode UI
+  (app mints fresh `bot-<guid>` + `enc:v1:`), tooling guards/syncs. Quota
+  decision 2026-10-16: Option C — Fourth keeps its big quota isolated.
+  Docs: [docs/ZCODE_TELEGRAM_BOTS.md](docs/ZCODE_TELEGRAM_BOTS.md); tests:
+  `tests/set_zcode_bot.Tests.ps1` (4 passing).
+
+- **AutoClaw multi-instance clones (Primary + inst1–inst4)** — full suite per
+  [docs/AUTOCLAW_CLONES_SPEC.md](docs/AUTOCLAW_CLONES_SPEC.md):
+  `tools/patch_autoclaw_ports.ps1` (+ `.mjs` engine v1) widens the installed
+  app's hardcoded 4-slot MCP port array to 8 (backup + marker + `-Restore`,
+  verified byte-identical via SHA-256 round-trip; re-run after every AutoClaw
+  update); `src/windows/launch_autoclaw_clone.ps1` (-Instance inst1..inst4,
+  `-Status`) launches clones with env-var isolation (`USERPROFILE`/`HOME`,
+  `AUTOCLAW_GATEWAY_PORT` with actual-port read-back + drift recording) and a
+  credential-free seed (tokens stripped, `token-cache.json` excluded, gateway
+  state never copied — one manual login per clone) plus verify-after-launch
+  health/port/pairing checks; `src/windows/reset_autoclaw.ps1` (-Target
+  Primary|inst1..4|All, `-DryRun`) rotates both device identities (auth
+  `deviceId` + ed25519 keypair via node:crypto) and deletes the live operator
+  credential; `tools/install_autoclaw_clone_shortcuts.ps1` installs per-clone
+  AUMID shortcuts with `-RepairPrimaryAumid`; `src/windows/Launch-AutoClaw-Clone.bat`
+  double-click wrapper. GHOST.bat gains a fourth submenu (AutoClaw
+  Multi-Instance & Clones [1]–[12], gids 29–40) and IDE Resets [9].
+- **App cloning playbook docs** — [docs/APP_CLONING_PLAYBOOK.md](docs/APP_CLONING_PLAYBOOK.md)
+  (the generic clone-any-app process: identity suite with a
+  never-silently-degrade rule, developer-inputs contract, icon policy with
+  improvise+report as the default for missing icons, phases 0–10
+  checklists, and a fixed final-report format),
+  [docs/APP_CLONING_EDGE_CASES.md](docs/APP_CLONING_EDGE_CASES.md) (the
+  normative EC-xx catalog distilled from the ZCode 2026-09 and AutoClaw
+  2026-10 suites), and [docs/APP_CLONING_INTAKE_TEMPLATE.md](docs/APP_CLONING_INTAKE_TEMPLATE.md)
+  (the per-request fill-in form). AGENTS.md gains the "App cloning playbook"
+  section; `docs/README.md` indexes all three plus the previously missing
+  AUTOCLAW spec row.
+
 ### Fixed
 
+- **GHOST.bat menu input executed hostile self-input** (2026-10-17): the
+  unquoted `%chain%` / `%choice%` expansions ran `1 & calc` verbatim and
+  parens broke the parse. A new `:ValidateChoice` allowlists digits, spaces,
+  commas and U/u inside an isolated delayed-expansion probe, and all five
+  prompt sites reject before the "0" check, tokenization, for-in dispatch or
+  `:RunChain` call. Harness 12/12 incl. hostile amp/parens/submenu scenarios.
+- **Captcha watchdog could run twice and leaked its log-tail state**
+  (2026-10-17): a second resident copy (menu [11] again) double-fired
+  restarts/Telegram escalations on the shared state file — the watcher now
+  carries the taskbar watcher's guard (startup process scan + named mutex,
+  `-RunOnce` always runs). `Read-NewLogLines` was rewritten byte-level: it
+  consumes only up to the last complete newline (a trailing partial line or
+  partial multi-byte char is re-read complete next pass) and advances the
+  offset by bytes actually consumed instead of a file length probed after
+  `ReadToEnd` (the old race skipped whatever the agent appended in between).
+- **update_ghost misidentified a Download-ZIP copy sitting inside another
+  repository as a clone** (2026-10-17): `rev-parse --is-inside-work-tree`
+  answers "true" against the PARENT repo, so the updater fetched/pulled/reset
+  in the wrong place ("no origin remote" as the visible symptom). The clone
+  track now additionally requires `--show-toplevel` to equal the GHOST folder
+  itself; a parent-tree hit warns explicitly and routes into the ZIP-copy
+  conversion flow.
+- **Chat refresh classified a splash-phase clone as the Primary**
+  (2026-10-17): `refresh_zcode_second_chats.ps1` matched mains by window
+  title only, and a clone launching (splash title plain "ZCode") was claimed
+  as a Primary main with its app-servers recycled as Primary's. Classification
+  is now process-marker-first (the verified 2026-09-24/26 taskbar rule):
+  WMI subtree walk to the root main, clone roaming/home markers, clone v6
+  color title overrides a spurious Primary read; unresolved windows are
+  skipped, never guessed. Live smoke against running instances passed.
+- **Shortcut installers broke under PowerShell 7** (2026-10-17): both
+  installers set the `.lnk` TargetPath to `$PSHOME\powershell.exe`, which
+  does not exist in pwsh's own directory — shortcuts created by a pwsh-run
+  installer targeted a nonexistent exe. They now pin the OS-shipped
+  `System32\WindowsPowerShell\v1.0\powershell.exe` and fail fast if absent.
+- **block_qoder_domains corrupted non-ASCII hosts comments** (2026-10-17,
+  local-only tool): the hosts round-trip read BOM-less bytes as UTF-8 and
+  wrote with ASCII encoding, flattening every non-ASCII character to a
+  permanent `?`. Read/write now both use the system ANSI codepage (BOM
+  auto-detect still wins), matching how the Windows resolver reads hosts —
+  single-byte-codepage content survives byte-exactly.
+- **IDE Resets [9] dispatched the wrong task**: the Resets submenu had no
+  local→gid resolver, so typed ids reached `:DispatchOne` raw — local [9]
+  "Reset AutoClaw" therefore ran global gid 9 (the ZCode captcha watchdog,
+  already reachable as ZCode [11]) instead of gid 28
+  (`reset_autoclaw.ps1 -Target Primary`). A `:ResetsOne` resolver now maps
+  1–8 identity + 9→28, and both Resets dispatch sites route through it
+  (the prompt loop and the main-menu chained input `1 9`); bare global ids
+  from the main menu keep using `:RunChain`. Verified 2026-10-16: a
+  harness extracted the shipped `:ResetsOne` verbatim and passed all five
+  cases (1→gid 1, 8→gid 8, **9→gid 28**, unknown→error, chained `9 2`→
+  gid 28 then gid 2); CRLF intact (434/0); Pester repo-integrity green.
 - **Green-clone-alone showed the Primary's taskbar icon**: the Start-menu
   `ZCode.lnk` had been hijacked with `dev.zcode.app.4` AND its icon field
   wiped (`,0`), so the shell resolved the clone's AUMID to an icon-less
@@ -32,8 +164,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Launcher menus renumbered to continuous local ids**: each `GHOST.bat`
-  screen numbers its own tasks — Resets `[1]`–`[8]`, ZCode `[1]`–`[16]`
-  (5 launch + 5 reset + 6 sync/watchers), Maintenance `[1]`–`[2]` — with
+  screen numbers its own tasks — Resets `[1]`–`[8]`, ZCode `[1]`–`[17]`
+  (5 launch + 5 reset + 7 sync/watchers), Maintenance `[1]`–`[2]` — with
   per-screen resolvers (`:ZCodeOne` / `:MaintOne`) translating local ids to
   the unchanged global dispatch payloads. Chains typed inside a submenu use
   its local ids; `2 1 3 4` from the main menu opens ZCode and runs local

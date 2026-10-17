@@ -50,13 +50,13 @@ $devinIsAdmin = [Security.Principal.WindowsPrincipal]::new(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $devinIsAdmin) {
-    $devinLogOut = "$env:TEMP\devin_v0.3_result.log"
     $devinScript = $MyInvocation.MyCommand.Path
-    $devinArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$devinScript`" *> `"$devinLogOut`""
+    # -File passes only declared switches; a redirect operator after -File is
+    # just swallowed as an undeclared argument. The *_done.txt marker file
+    # (not a log) is the persisted result channel - the elevated console shows
+    # the full live output while the run progresses.
+    $devinArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$devinScript`""
     Start-Process powershell -Verb RunAs -ArgumentList $devinArgs -WindowStyle Normal -Wait
-    if (Test-Path -LiteralPath $devinLogOut) {
-        Get-Content -LiteralPath $devinLogOut
-    }
     if (Test-Path -LiteralPath "$env:TEMP\devin_v0.3_done.txt") {
         Get-Content -LiteralPath "$env:TEMP\devin_v0.3_done.txt"
     }
@@ -841,7 +841,10 @@ function Test-WatchdogRecreation {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
         $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
-        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok $true
+        if ($afterValue -eq "re-delete-failed") {
+            Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+        }
+        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
 }
 

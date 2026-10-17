@@ -100,6 +100,8 @@ ghost/
 ├── ghost.sh        # Linux interactive launcher
 ├── src/
 │   ├── windows/    # .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
+│   │               #   + ZCode/AutoClaw clone launchers (launch_zcode_second_instance.ps1,
+│   │               #   launch_autoclaw_clone.ps1) + .bat wrappers
 │   ├── linux/      # .sh resetters + id_reset_common.sh
 │   └── python/     # stdlib-only Python core (ghost/) + ghost_cli.py bootstrap —
 │                   #   owns the shared SQLite/JSON identity logic
@@ -111,6 +113,11 @@ ghost/
 │                   #   install_ghost_shortcut.ps1 (GHOST.lnk), update_ghost.ps1
 │                   #   (repo self-updater), refresh_zcode_second_chats.ps1
 │                   #   (cross-instance chat refresh + -Watch error watcher),
+│                   #   diagnose_zcode_freeze.ps1 (read-only freeze diagnostic),
+│                   #   patch_autoclaw_ports.ps1 + .mjs (AutoClaw app.asar MCP
+│                   #   port-array patch 4 -> 8 slots — re-run after app updates),
+│                   #   install_autoclaw_clone_shortcuts.ps1 (AutoClaw clone
+│                   #   shortcuts), make_ghost_icon.ps1 (regenerates the launcher icon),
 │                   #   zcode-{blue,yellow,green}-branding/ (icon assets)
 ├── tests/          # Pester 5 suite (PowerShell) + stdlib unittest suite (Python core)
 ├── docs/           # getting-started / architecture / cli / troubleshooting / faq
@@ -140,6 +147,9 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   — shows another instance's chats in a running sidebar without an app
   restart; `-Watch` runs as a daemon that auto-refreshes on quota/captcha
   failures
+- `tools/diagnose_zcode_freeze.ps1` — read-only freeze diagnostic: scans each
+  ZCode instance's logs + crash dumps for renderer-OOM / freeze events and
+  prints live RAM/commit pressure (`-Days N` widens the window)
 - `tools/watch_zcode_taskbar.ps1` — resident watcher that re-stamps every
   ZCode window's taskbar identity every 5 s (heals merges and fresh windows);
   `-InstallAutostart` adds a startup-folder shortcut, `-RunOnce` for testing
@@ -147,6 +157,17 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   (Desktop + repo root) that carry the launcher icon; `-Remove` uninstalls
 - `tools/update_ghost.ps1` — repo self-updater: fetch + compare + guarded
   `git pull --ff-only` (`-CheckOnly` reports without writing)
+- **AutoClaw multi-instance** — `src/windows/launch_autoclaw_clone.ps1
+  -Instance inst1|inst2|inst3|inst4` launches independent clones (own profile,
+  identity, gateway port; first run seeds the Primary profile minus every
+  credential store — one manual login per clone), `-Status` reports processes,
+  actual bound ports and health. `src/windows/reset_autoclaw.ps1 -Target
+  Primary|inst1..4|All` rotates both device identities and deletes the live
+  operator credential. `tools/patch_autoclaw_ports.ps1` widens the installed
+  `app.asar`'s hardcoded 4-slot MCP port array to 8 (`-Restore` undoes it;
+  re-run after every AutoClaw app update). `tools/install_autoclaw_clone_shortcuts.ps1`
+  installs Desktop + Start-menu shortcuts (`-Remove`, `-RepairPrimaryAumid`).
+  Design + verified ground truth: [docs/AUTOCLAW_CLONES_SPEC.md](docs/AUTOCLAW_CLONES_SPEC.md)
 - Telegram alerts for `tools/watch_zcode_captcha.ps1` come from
   `-TelegramBotToken`/`-TelegramChatId` params or `TELEGRAM_BOT_TOKEN` /
   `TELEGRAM_CHAT_ID` in `.envlocal` (copy [.env.example](.env.example) to

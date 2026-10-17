@@ -22,19 +22,18 @@ $qoderWorkIsAdmin = [Security.Principal.WindowsPrincipal]::new(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $qoderWorkIsAdmin) {
-    $qoderWorkLogOut = "$env:TEMP\qoderwork_v0.1_result.log"
     $qoderWorkScript = $MyInvocation.MyCommand.Path
     $qoderWorkSwitchList = @()
     if ($SkipMac)      { $qoderWorkSwitchList += "-SkipMac" }
     if ($SkipHostname) { $qoderWorkSwitchList += "-SkipHostname" }
     if ($DryRun)       { $qoderWorkSwitchList += "-DryRun" }
     $qoderWorkSwitchString = if ($qoderWorkSwitchList.Count -gt 0) { " " + ($qoderWorkSwitchList -join " ") } else { "" }
-    # Single-string argument list, same proven pattern as v0.3 Qoder.
-    $qoderWorkArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$qoderWorkScript`"$qoderWorkSwitchString *> `"$qoderWorkLogOut`""
+    # Single-string argument list, same proven pattern as v0.3 Qoder. -File
+    # passes only declared switches; a redirect operator here would be
+    # swallowed as an undeclared argument (the *_done.txt marker file is the
+    # persisted result).
+    $qoderWorkArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$qoderWorkScript`"$qoderWorkSwitchString"
     Start-Process powershell -Verb RunAs -ArgumentList $qoderWorkArgs -WindowStyle Normal -Wait
-    if (Test-Path $qoderWorkLogOut) {
-        Get-Content $qoderWorkLogOut
-    }
     if (Test-Path "$env:TEMP\qoderwork_v0.1_done.txt") {
         Get-Content "$env:TEMP\qoderwork_v0.1_done.txt"
     }
@@ -392,7 +391,6 @@ function Clear-QoderWorkAgentsDb {
         [Parameter(Mandatory = $true)][ref]$Audit
     )
 
-    $exactKeys = @()  # agents.db has no key/value store; it has typed tables.
     # CHAT PRESERVATION: chats/sub_chats/messages/projects are NEVER deleted.
     # They hold conversation content with no server-side identity signal
     # (same policy as Cursor/Windsurf/Trae/Qoder/ZCode/MiniMax scripts).
@@ -614,7 +612,11 @@ function Test-QoderWorkWatchdogRecreation {
     foreach ($path in $recreated) {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
-        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After "re-deleted" -Ok $true
+        $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
+        if ($afterValue -eq "re-delete-failed") {
+            Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+        }
+        Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
 }
 

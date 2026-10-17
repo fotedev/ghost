@@ -2,9 +2,10 @@
 
 Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 **`./ghost.sh`** (Linux). This page is the direct-command cheat sheet for
-scripts and CI. `GHOST.bat` groups its tasks into three submenus with
-continuous local numbering (IDE resets [1]-[8] / ZCode Multi-Instance & Clones
-[1]-[17] / System & GHOST Maintenance [1]-[2]); chain several tasks in one
+scripts and CI. `GHOST.bat` groups its tasks into four submenus with
+continuous local numbering (IDE resets [1]-[9] / ZCode Multi-Instance &
+Clones [1]-[17] / System & GHOST Maintenance [1]-[2] / AutoClaw
+Multi-Instance & Clones [1]-[12]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
 from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
 [1] [3] [4]) or a bare global id — this page cites menu positions as
@@ -53,8 +54,9 @@ Or double-click: `src\windows\Launch-ZCode-Second.bat` / `-Third.bat` /
 
 First launch of each clone copies history into its own home
 (`%USERPROFILE%\ZCodeSecondHome | ZCodeThirdHome | ZCodeFourthHome`), scrubs
-it to fresh IDs, and routes Telegram channel bots to Primary (one-time,
-automatic). Branding: Second = blue, Third = yellow, Fourth = green (separate
+it to fresh IDs, and reconciles Telegram channel bots via sha8 credential
+comparison (duplicates of Primary disabled, unique clone bots preserved —
+see [docs/ZCODE_TELEGRAM_BOTS.md](ZCODE_TELEGRAM_BOTS.md)). Branding: Second = blue, Third = yellow, Fourth = green (separate
 taskbar buttons + window titles "ZCode Blue"/"ZCode Yellow"/"ZCode Green").
 All instances share one install, so one update covers all — but re-run the
 icon patch (`tools\patch_zcode_icon_override.ps1`, ZCode [12]) after every app

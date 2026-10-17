@@ -100,7 +100,7 @@ and cross-account billing noise — disable it again.
 
 The per-clone branding rides on an `app.asar` patch (`ZCODE_ICON_DIR`,
 `ZCODE_AUMID_SUFFIX`, `ZCODE_ACCENT_HEX`, `ZCODE_INSTANCE_NAME`) that a ZCode
-app update silently reverts. Re-apply it once — `GHOST.bat` → [13], or
+app update silently reverts. Re-apply it once — `GHOST.bat` → ZCode [12], or
 `tools\patch_zcode_icon_override.ps1` — and every clone restores its icon,
 accent color, taskbar button and "ZCode <Color>" window title.
 
@@ -136,15 +136,15 @@ What to do:
 
 All instances share one session store, but each sidebar index is seeded at
 app-server spawn with no snapshot backfill — the data is there, the index is
-stale. Refresh without restarting the app: `GHOST.bat` → [15] (Second
-only) or [23] (all instances), or keep the detached watcher running ([22],
+stale. Refresh without restarting the app: `GHOST.bat` → ZCode [13] (Second
+only) or [15] (all instances), or keep the detached watcher running (ZCode [14],
 `-Watch -Target All`) to auto-refresh every running instance on quota/captcha
 failures. The hot-activity guard may defer the refresh while a turn streams;
 `-Force` bypasses it.
 
 ## ZCode windows stay merged in one taskbar button even though identities are stamped
 
-The watcher ([16]) stamps every window's `System.AppUserModel.ID`, but a
+The watcher (ZCode [16]) stamps every window's `System.AppUserModel.ID`, but a
 taskbar group that was formed while identities were still missing can PERSIST
 after the stamps land — the shell does not always re-evaluate an existing
 group, and a stale group can even keep the WRONG ICON (verified 2026-09-26:
@@ -170,7 +170,7 @@ If the watcher is running it re-stamps the final value within one interval
 even if the kick script dies mid-toggle, so this is safe. A silent watcher
 log does NOT mean the watcher is dead — check the mutex first (a second
 instance logs "watcher already running"). A watcher process started BEFORE
-a script edit keeps the old code — close its window and relaunch [16].
+a script edit keeps the old code — close its window and relaunch ZCode [16].
 
 ## A clone launched with the Primary's profile or taskbar icon
 
@@ -184,7 +184,7 @@ A pin rewrite can also empty that shortcut icon field (verified 2026-09-28:
 the hijacked Start-menu ZCode.lnk carried dev.zcode.app.4 with an empty icon,
 so a green clone running alone showed the Primary icon even though its window
 identity was correct). -RepairPrimaryAumid now restores the Primary shortcut
-icon to <ZCode.exe>,0 too. The resident watcher ([16]) self-heals a hijack
+icon to <ZCode.exe>,0 too. The resident watcher (ZCode [16]) self-heals a hijack
 every ~5 min (REPAIR/FAIL logged to taskbar.log); -RunOnce -CheckPrimaryHijack
 repairs once without starting the resident loop. Restart the resident watcher
 after any watcher-script edit: an old copy keeps the old code.
