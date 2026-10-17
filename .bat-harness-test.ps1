@@ -117,9 +117,24 @@ $hits = ([regex]::Matches($out, 'Unknown task "42"')).Count
 if ($hits -ne 1)                           { $failures += "I: expected 1 Unknown task from AutoClaw chain, got $hits" }
 if ($out -match '%PENDING_CHAIN%')         { $failures += 'I: literal %PENDING_CHAIN% leaked' }
 
+# J) hostile main-menu input - :ValidateChoice must reject (never execute)
+#    the injected command, show the hint, re-prompt, then exit cleanly
+$out = Invoke-Scenario 'J_hostile_main' @('1 & calc', '0')
+if ($out -match 'calc')               { $failures += 'J: injection attempt leaked through main prompt' }
+if ($out -notmatch 'Invalid input')   { $failures += 'J: rejection hint missing' }
+
+# K) hostile main-menu input with parens - PWNED must never execute
+$out = Invoke-Scenario 'K_hostile_parens' @('2 ) & echo PWNED', '0')
+if ($out -match 'PWNED')              { $failures += 'K: paren-amp injection executed' }
+
+# L) hostile ZCode submenu input - rejected at the submenu prompt
+$out = Invoke-Scenario 'L_hostile_zcode' @('2', '1 & calc', '0', '0')
+if ($out -match 'calc')               { $failures += 'L: injection attempt leaked through ZCode prompt' }
+if ($out -notmatch 'Invalid input')   { $failures += 'L: rejection hint missing' }
+
 if ($failures.Count -gt 0) {
     Write-Output 'HARNESS FAIL:'
     $failures | ForEach-Object { Write-Output "  - $_" }
     exit 1
 }
-Write-Output 'HARNESS PASS: all 9 scenarios clean'
+Write-Output 'HARNESS PASS: all 12 scenarios clean'

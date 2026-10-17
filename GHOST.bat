@@ -25,6 +25,12 @@ echo.
 set "choice="
 set /p choice=%PROMPT_TEXT%
 if not defined choice goto MAIN
+call :ValidateChoice choice
+if errorlevel 1 (
+    echo   Invalid input - menu numbers only, separated by spaces or commas.
+    timeout /t 2 >nul
+    goto MAIN
+)
 if "%choice%"=="0" (
     echo Done.
     timeout /t 1 >nul
@@ -83,6 +89,11 @@ set "PENDING_CHAIN="
 set "choice="
 set /p choice=%PROMPT_TEXT%
 if not defined choice goto RESETS_PROMPT
+call :ValidateChoice choice
+if errorlevel 1 (
+    echo   Invalid input - menu numbers only, separated by spaces or commas.
+    goto RESETS_PROMPT
+)
 if "%choice%"=="0" goto MAIN
 for %%t in (%choice:,= %) do call :ResetsOne %%t
 goto RESETS
@@ -123,6 +134,11 @@ set "PENDING_CHAIN="
 set "choice="
 set /p choice=%PROMPT_TEXT%
 if not defined choice goto ZCODE_PROMPT
+call :ValidateChoice choice
+if errorlevel 1 (
+    echo   Invalid input - menu numbers only, separated by spaces or commas.
+    goto ZCODE_PROMPT
+)
 if "%choice%"=="0" goto MAIN
 for %%t in (%choice:,= %) do call :ZCodeOne %%t
 goto ZCODE
@@ -143,6 +159,11 @@ set "PENDING_CHAIN="
 set "choice="
 set /p choice=%PROMPT_TEXT%
 if not defined choice goto MAINT_PROMPT
+call :ValidateChoice choice
+if errorlevel 1 (
+    echo   Invalid input - menu numbers only, separated by spaces or commas.
+    goto MAINT_PROMPT
+)
 if "%choice%"=="0" goto MAIN
 for %%t in (%choice:,= %) do call :MaintOne %%t
 goto MAINT
@@ -178,6 +199,11 @@ set "PENDING_CHAIN="
 set "choice="
 set /p choice=%PROMPT_TEXT%
 if not defined choice goto AUTOCLAW_PROMPT
+call :ValidateChoice choice
+if errorlevel 1 (
+    echo   Invalid input - menu numbers only, separated by spaces or commas.
+    goto AUTOCLAW_PROMPT
+)
 if "%choice%"=="0" goto MAIN
 for %%t in (%choice:,= %) do call :AutoClawOne %%t
 goto AUTOCLAW
@@ -187,6 +213,27 @@ rem Red "not found" message for a bad task id (shared by all resolvers).
 if defined ESC echo %ESC%[91mUnknown task "%~1" - check the menu and try again.%ESC%[0m
 if not defined ESC echo Unknown task "%~1" - check the menu and try again.
 exit /b
+
+:ValidateChoice
+rem %1 = NAME of the variable holding raw user input. errorlevel 1 = reject.
+rem Allowlist: digits, spaces, commas, U/u - menu ids, chain separators and
+rem the update shortcut. Everything else (quotes, ampersands, parens, carets,
+rem percent signs, non-ASCII) is rejected BEFORE any expansion uses the value,
+rem so the unquoted %%chain%% / %%choice%% expansions downstream can never
+rem split tokens or inject commands (self-input hardening, 2026-10-17).
+rem The probe runs in an isolated delayed-expansion scope: !var! values are
+rem post-parse DATA, so hostile characters cannot break out of the probe
+rem itself. ('!' in the raw value vanishes inside the probe and is inert to
+rem %-expansion, so a value carrying it can safely pass the allowlist.)
+setlocal EnableDelayedExpansion EnableExtensions
+set "VC_VAL=!%~1!"
+if not defined VC_VAL ( endlocal & exit /b 1 )
+rem Space must be the LAST delim char (for /f splits option groups at spaces
+rem and commas - a mid-string space breaks the options parse). eol=; is the
+rem default and stays: a value starting with ';' skips the probe but ';' is
+rem inert to cmd expansion, so the residual risk is an Unknown-task token.
+for /f "eol=; delims=0123456789,Uu " %%z in ("!VC_VAL!") do ( endlocal & exit /b 1 )
+endlocal & exit /b 0
 
 :ResetsOne
 rem Resolves an IDE Resets submenu-local id to its global task id and runs it.
