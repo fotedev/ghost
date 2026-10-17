@@ -34,7 +34,13 @@ def _cmd_sqlite_update(args):
 
 
 def _cmd_delete_secrets(args):
-    result = sqlite_keys.delete_secrets(args.db)
+    if args.config_b64:
+        cfg = _decode_updates(args.config_b64)
+        result = sqlite_keys.delete_secrets(
+            args.db, exact_keys=cfg.get("exact_keys"),
+            like_patterns=cfg.get("like_patterns"), escape=cfg.get("escape"))
+    else:
+        result = sqlite_keys.delete_secrets(args.db)
     print(json.dumps(result))
     return 0
 
@@ -131,6 +137,34 @@ def _cmd_sweep_tree(args):
     return 0 if report["ok"] else 1
 
 
+def _cmd_patch_argv(args):
+    payload = _decode_updates(args.payload_b64) if args.payload_b64 else {}
+    report = winstore.patch_argv_json(
+        args.path, args.backup_root, args.label,
+        new_id=payload.get("new_id"), username=payload.get("username"))
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
+
+
+def _cmd_replace_text(args):
+    payload = _decode_updates(args.payload_b64)
+    report = winstore.replace_text(
+        args.path, payload["find"], payload["replacement"],
+        args.backup_root, args.label)
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
+
+
+def _cmd_json_set(args):
+    payload = _decode_updates(args.payload_b64)
+    report = winstore.set_json_path(
+        args.path, payload["key"], payload["value"],
+        args.backup_root, args.label,
+        skip_if_empty=bool(payload.get("skip_if_empty")))
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="ghost", description="GHOST Python core CLI")
@@ -150,6 +184,9 @@ def build_parser():
         "delete-secrets",
         help="DELETE auth-secret keys + survivor verification")
     p.add_argument("db")
+    p.add_argument("config_b64", nargs="?", default=None,
+                   help='base64 of {"exact_keys": [...], "like_patterns": '
+                        '[...], "escape": "\\\\"} (default: Cursor keys)')
     p.set_defaults(func=_cmd_delete_secrets)
 
     p = sub.add_parser(
@@ -259,6 +296,42 @@ def build_parser():
     p.add_argument("backup_root")
     p.add_argument("label")
     p.set_defaults(func=_cmd_sweep_tree)
+
+    p = sub.add_parser(
+        "patch-argv",
+        help="regex-patch a JSONC argv.json crash-reporter-id + username "
+             "scrub (Update-ArgvJsonIdentity twin)")
+    p.add_argument("path")
+    p.add_argument("backup_root")
+    p.add_argument("label")
+    p.add_argument("payload_b64", nargs="?", default=None,
+                   help='base64 of {"new_id": "...", "username": "..."} '
+                        "(both optional)")
+    p.set_defaults(func=_cmd_patch_argv)
+
+    p = sub.add_parser(
+        "replace-text",
+        help="raw-text replace + absence verify "
+             "(Set-UsernameScrubbedFile twin)")
+    p.add_argument("path")
+    p.add_argument("backup_root")
+    p.add_argument("label")
+    p.add_argument("payload_b64",
+                   help='base64 of {"find": "...", "replacement": "..."}')
+    p.set_defaults(func=_cmd_replace_text)
+
+    p = sub.add_parser(
+        "json-set",
+        help="set a value at a dotted JSON key path + re-read verify "
+             "(Clear-AppOrgBinding twin; skip_if_empty for the "
+             "absent-or-empty SKIP contract)")
+    p.add_argument("path")
+    p.add_argument("backup_root")
+    p.add_argument("label")
+    p.add_argument("payload_b64",
+                   help='base64 of {"key": "a.b", "value": ..., '
+                        '"skip_if_empty": false}')
+    p.set_defaults(func=_cmd_json_set)
 
     return parser
 

@@ -85,27 +85,38 @@ def sqlite_update(db_path, updates, table="ItemTable"):
     return {"before": before, "after": after}
 
 
-def delete_secrets(db_path):
+def delete_secrets(db_path, exact_keys=None, like_patterns=None, escape=None):
     """DELETE auth-secret keys from ItemTable and verify zero survivors via
     read-only reopen. Returns {"deleted": [...], "survivors": [...]} where
     survivors is the per-pattern/per-key COUNT(*) list (all zeros on
-    success)."""
-    patterns = SECRETS_LIKE_PATTERNS
-    target_keys = SECRETS_TARGET_KEYS
+    success).
+
+    exact_keys / like_patterns default to the module's Cursor constants.
+    escape: an ESCAPE character for the LIKE patterns (e.g. "\\") — needed
+    when a pattern contains a literal underscore, which LIKE treats as a
+    single-character wildcard (the Windsurf/Devin auth patterns use
+    "windsurf\\_auth-%" etc. and pass escape="\\").
+    """
+    if like_patterns is None:
+        like_patterns = SECRETS_LIKE_PATTERNS
+    if exact_keys is None:
+        exact_keys = SECRETS_TARGET_KEYS
+    escape_clause = " ESCAPE '\\'" if escape else ""
     deleted = []
 
     conn = sqlite3.connect(db_path, timeout=10)
     try:
         cursor = conn.cursor()
-        for pattern in patterns:
+        for pattern in like_patterns:
             cursor.execute(
-                "SELECT key FROM ItemTable WHERE key LIKE ?", (pattern,))
+                "SELECT key FROM ItemTable WHERE key LIKE ?" + escape_clause,
+                (pattern,))
             for row in cursor.fetchall():
                 key = row[0]
                 cursor.execute(
                     "DELETE FROM ItemTable WHERE key = ?", (key,))
                 deleted.append(key)
-        for key in target_keys:
+        for key in exact_keys:
             cursor.execute("DELETE FROM ItemTable WHERE key = ?", (key,))
             deleted.append(key)
         conn.commit()
@@ -116,12 +127,12 @@ def delete_secrets(db_path):
     try:
         verify_cursor = verify_conn.cursor()
         survivors = []
-        for pattern in patterns:
+        for pattern in like_patterns:
             verify_cursor.execute(
-                "SELECT COUNT(*) FROM ItemTable WHERE key LIKE ?",
+                "SELECT COUNT(*) FROM ItemTable WHERE key LIKE ?" + escape_clause,
                 (pattern,))
             survivors.append(verify_cursor.fetchone()[0])
-        for key in target_keys:
+        for key in exact_keys:
             verify_cursor.execute(
                 "SELECT COUNT(*) FROM ItemTable WHERE key = ?", (key,))
             survivors.append(verify_cursor.fetchone()[0])

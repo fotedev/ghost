@@ -825,5 +825,142 @@ class WinstoreTests(unittest.TestCase):
         self.assertTrue(r["skipped"])
 
 
+class DevinPrepTests(unittest.TestCase):
+    """The Phase 3 devin-migration core additions: generalized delete_secrets,
+    JSONC argv patcher, raw-text scrubber, dotted JSON set."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = self._tmp.name
+        self.backup_root = os.path.join(self.base, "ID_Backups", "ts")
+        self._sleeps = []
+        self._orig_sleep = filesweep.time.sleep
+        filesweep.time.sleep = self._sleeps.append
+
+    def tearDown(self):
+        filesweep.time.sleep = self._orig_sleep
+        self._tmp.cleanup()
+
+    def _secret_db(self, rows):
+        db = os.path.join(self.base, "state.vscdb")
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)")
+        for k, v in rows:
+            conn.execute("INSERT INTO ItemTable VALUES (?, ?)", (k, v))
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_delete_secrets_generalized_with_escape(self):
+        db = self._secret_db([
+            ("codeium.windsurf-windsurf_auth", "TOKEN"),
+            ("windsurf_auth-extra", "TOKEN2"),
+            ("windsurfXauth-keep", "NOT-SECRET"),  # X is NOT a literal _
+            ("keep-me", "x"),
+        ])
+        r = sqlite_keys.delete_secrets(
+            db,
+            exact_keys=["codeium.windsurf-windsurf_auth"],
+            like_patterns=["windsurf\\_auth-%"],
+            escape="\\")
+        self.assertEqual(r["survivors"], [0, 0])
+        self.assertIn("windsurf_auth-extra", r["deleted"])
+        self.assertNotIn("windsurfXauth-keep", r["deleted"])
+        conn = sqlite3.connect(db)
+        remaining = conn.execute(
+            "SELECT key FROM ItemTable ORDER BY key").fetchall()
+        conn.close()
+        self.assertEqual([row[0] for row in remaining],
+                         ["keep-me", "windsurfXauth-keep"])
+
+    def test_delete_secrets_defaults_unchanged(self):
+        db = self._secret_db([
+            ("secret://aicoding.auth.t", "x"),
+            ("gituser", "u"),
+        ])
+        r = sqlite_keys.delete_secrets(db)
+        self.assertEqual(r["survivors"], [0, 0, 0])
+
+    def _argv(self):
+        path = os.path.join(self.base, "argv.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('// comments must survive\n{\n  '
+                    '"crash-reporter-id": "OLD-ID",\n'
+                    '  "user-data-dir": "C:\\\\Users\\\\FOTE\\\\x"\n}')
+        return path
+
+    def test_patch_argv_json_replaces_and_scrubs(self):
+        path = self._argv()
+        r = winstore.patch_argv_json(
+            path, self.backup_root, "argv.json",
+            new_id="NEW-ID", username="FOTE")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["before"], r["after"]), ("OLD-ID", "NEW-ID"))
+        self.assertTrue(r["user_dir_scrubbed"])
+        raw = open(path, encoding="utf-8-sig").read()
+        self.assertIn("// comments must survive", raw)  # JSONC preserved
+        self.assertNotIn("FOTE", raw)
+        self.assertIn("RESET", raw)
+
+    def test_patch_argv_json_inserts_missing_key(self):
+        path = os.path.join(self.base, "argv.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{\n  "disable-hardware-acceleration": true\n}')
+        r = winstore.patch_argv_json(path, self.backup_root, "argv.json",
+                                     new_id="NEW-ID")
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(r["before"])
+        self.assertEqual(r["after"], "NEW-ID")
+
+    def test_patch_argv_json_missing_file_is_skip_ok(self):
+        r = winstore.patch_argv_json(
+            os.path.join(self.base, "nope"), self.backup_root, "nope")
+        self.assertTrue(r["ok"])
+        self.assertTrue(r["skipped"])
+
+    def test_replace_text_scrubs_and_verifies(self):
+        path = os.path.join(self.base, "Preferences")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"profile": "C:\\\\Users\\\\FOTE\\\\Cursor"}')
+        r = winstore.replace_text(path, "FOTE", "RESET",
+                                  self.backup_root, "Preferences")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["before"], r["after"]), ("leaked", "clean"))
+        self.assertTrue(r["backed_up_to"])
+
+    def test_replace_text_clean_file_needs_no_backup(self):
+        path = os.path.join(self.base, "Preferences")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"profile": "clean"}')
+        r = winstore.replace_text(path, "FOTE", "RESET",
+                                  self.backup_root, "Preferences")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["before"], r["after"]), ("clean", "clean"))
+        self.assertIsNone(r["backed_up_to"])
+
+    def test_set_json_path_dotted(self):
+        path = os.path.join(self.base, "config.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"devin": {"org_id": "ORG-123"}}')
+        r = winstore.set_json_path(path, "devin.org_id", "",
+                                   self.backup_root, "config.json")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["before"], "ORG-123")
+        with open(path, "r", encoding="utf-8-sig") as f:
+            self.assertEqual(json.load(f)["devin"]["org_id"], "")
+
+    def test_set_json_path_skip_if_empty(self):
+        path = os.path.join(self.base, "config.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"devin": {"org_id": ""}}')
+        r = winstore.set_json_path(path, "devin.org_id", "NEW",
+                                   self.backup_root, "config.json",
+                                   skip_if_empty=True)
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(r["skipped"])
+        with open(path, "r", encoding="utf-8-sig") as f:
+            self.assertEqual(json.load(f)["devin"]["org_id"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -141,3 +141,7 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 Write-Output 'HARNESS PASS: all 12 scenarios clean'
+# Explicit exit: pwsh -File propagates the last native \$LASTEXITCODE, and the
+# scenarios' cmd exit code inherits GHOST.bat's `timeout` calls, which fail on
+# CI consoles (no interactive stdin) AFTER the PASS line was already printed.
+exit 0
