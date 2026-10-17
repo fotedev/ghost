@@ -286,7 +286,11 @@ if ($RepairPrimaryAumid) {
 }
 
 if (-not (Test-Path -LiteralPath $Launcher)) { throw "Launcher not found: $Launcher" }
-$psExe   = Join-Path $PSHOME 'powershell.exe'
+# Shortcuts always target the OS-shipped Windows PowerShell 5.1 - the
+# launchers are 5.1-first, and $PSHOME points at pwsh's own directory (no
+# powershell.exe) when this installer itself runs under PowerShell 7.
+$psExe   = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+if (-not (Test-Path -LiteralPath $psExe)) { throw "Windows PowerShell not found: $psExe" }
 $workDir = Split-Path -Parent $Launcher
 
 if ($Remove) {
