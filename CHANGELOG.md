@@ -30,6 +30,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   [docs/PYTHON_HYBRID_ROADMAP.md](docs/PYTHON_HYBRID_ROADMAP.md) (Phase 2
   leaf-tools migration CANCELLED with per-tool reasons).
 
+- **Phase 3 continuation — reset_devin v0.4 thin manifest** (2026-10-17):
+  the Windsurf/Devin reset's 17 steps (14 per data root × Devin/Windsurf +
+  3 global) run every store mutation through the core via `Invoke-GhostCore`,
+  same contract as reset_cursor v0.3 (step order, audit keys, restore
+  actions, summary identical to v0.3, archived at
+  `archive/reset_devin_windows-v0.3.ps1`, local-only). New groundwork
+  landed with it: `delete-secrets` generalized (optional exact_keys /
+  like_patterns / `ESCAPE '\'` — the windsurf/devin auth patterns; defaults
+  stay Cursor, zero caller breakage), `winstore.patch_argv_json` (JSONC
+  regex — comments survive, crash-reporter-id replaced/inserted, username
+  scrubbed), `winstore.replace_text` (raw-text scrub + absence verify) and
+  `winstore.set_json_path` (dotted-path set with the absent-or-empty SKIP
+  contract) + the `patch-argv` / `replace-text` / `json-set` subcommands.
+  **The repo's last inline temp-.py heredoc is gone.** Also fixed in both
+  manifests: `delete-secrets` `survivors` is a per-pattern LIST — PS
+  `array -eq 0` filters elements instead of answering "all zero", so
+  non-zero survivors could pass the step (reset_zcode already used
+  `Measure-Object -Sum`). Python required for all steps; 1419 → 1003 lines.
+  Live comparison run pending user supervision.
+
 - **Clone-suite generator** (`tools/new_clone_suite.ps1`, 2026-10-17) —
   turns the app-cloning playbook's Phases 3-10 mechanics into scaffolding:
   from an intake JSON (or interactive defaults) it emits the reset manifest,
