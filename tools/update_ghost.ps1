@@ -22,6 +22,10 @@
      reset --hard. A failed fetch, a setup failure or a declined overwrite
      removes the temporary .git again, leaving the ZIP folder untouched.
      Verify-after re-reads HEAD == origin before the normal update flow runs.
+     The same conversion path runs when the folder IS inside a work tree but
+     the work tree's top level is a PARENT repo (Download ZIP extracted inside
+     another repository) - rev-parse alone would answer 'true' against the
+     parent, and the update flow would pull/reset that parent instead.
   4. Git present + a git clone -> the classic flow: fetch origin
      (--tags --prune), compare HEAD with the remote default branch, list the
      new commits; without -CheckOnly ask before a git pull --ff-only.
@@ -118,6 +122,20 @@ function Test-GhostShape {
   return (Test-Path -LiteralPath (Join-Path $Root 'GHOST.bat') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $Root 'src') -PathType Container) -and
     (Test-Path -LiteralPath (Join-Path $Root 'tools\update_ghost.ps1') -PathType Leaf)
+}
+
+function Test-OwnWorkTree {
+  # True only when the git work tree found from the CWD is the GHOST folder
+  # ITSELF. A Download-ZIP copy extracted inside another repo (e.g.
+  # <projects-repo>\ghost-main\) answers --is-inside-work-tree with 'true'
+  # against the PARENT repo - the update flow would then pull/reset in that
+  # parent. git prints the top level with forward slashes; compare
+  # case-insensitively (Windows) after normalizing separators.
+  param([string]$Root)
+  $top = Invoke-Git 'rev-parse','--show-toplevel'
+  if ($top.ExitCode -ne 0 -or $top.StdOut.Count -eq 0) { return $false }
+  $gitTop = $top.StdOut[0].Trim().Replace('/', '\').TrimEnd('\')
+  return ($gitTop -ieq $Root.TrimEnd('\'))
 }
 
 function Remove-GhostPathRobust {
@@ -518,7 +536,20 @@ try {
   Write-Host '  [ok] git on PATH' -ForegroundColor Green
 
   $inTree = Invoke-Git 'rev-parse','--is-inside-work-tree'
-  if ($inTree.ExitCode -ne 0 -or $inTree.StdOut.Count -eq 0 -or $inTree.StdOut[0].Trim() -ne 'true') {
+  $inTreeOk = ($inTree.ExitCode -eq 0 -and $inTree.StdOut.Count -gt 0 -and $inTree.StdOut[0].Trim() -eq 'true')
+  $ownTree = $false
+  if ($inTreeOk) {
+    # 'true' alone is NOT enough: a ZIP copy inside a parent repo also answers
+    # true (git walks up). The top level must be the GHOST folder itself.
+    $ownTree = Test-OwnWorkTree -Root $RepoRoot
+  }
+  if ($ownTree) {
+    Write-Host '  [ok] inside a git work tree' -ForegroundColor Green
+  }
+  else {
+    if ($inTreeOk) {
+      Write-Host '  [warn] this GHOST folder sits inside ANOTHER repository''s work tree - treating it as a Download ZIP copy.' -ForegroundColor Yellow
+    }
     if (-not (Test-GhostShape -Root $RepoRoot)) {
       Write-Host ("  [FAILED] {0} is not a git work tree - re-clone the repo:" -f $RepoRoot) -ForegroundColor Red
       Write-Host ("           git clone {0}" -f $OriginUrl) -ForegroundColor Gray
@@ -528,9 +559,6 @@ try {
     if ($convResult -eq 'failed') { exit 1 }
     if ($convResult -eq 'aborted') { exit 0 }
     # 'converted' -> fall through into the normal update flow
-  }
-  else {
-    Write-Host '  [ok] inside a git work tree' -ForegroundColor Green
   }
 
   $remote = Invoke-Git 'remote','get-url','origin'
