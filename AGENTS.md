@@ -195,6 +195,14 @@ reset_devin.ps1       # Windsurf/Devin Desktop (rebranded 2026-06): 17 steps
                                    #            .codeium\config.json device_id, installation_id (.windsurf
                                    #            + cli\), credentials.toml delete, config.json org_id blank,
                                    #            extended cache sweep, LOCALAPPDATA updater sweep
+                                   #            v0.4 THIN MANIFEST (Phase 3 continuation — same contract as
+                                   #            reset_cursor v0.3): every mutation via ghost_cli.py core
+                                   #            subcommands incl. the GENERALIZED delete-secrets (ESCAPE'd
+                                   #            windsurf/devin LIKE patterns) — the repo's LAST temp-.py
+                                   #            heredoc is gone; patch-argv (JSONC) / replace-text /
+                                   #            json-set cover the app-specific steps; v0.3 archived at
+                                   #            archive/reset_devin_windows-v0.3.ps1 (local-only);
+                                   #            Python required for ALL steps
 reset_trae.ps1      # Trae: 16 steps (above + aha delete,
                                    #         ModularData\ckg_server\local_env.json device_id+host_map,
                                    #         ai-agent identity-rows-only scrub (chat preserved), SharedStorage,
