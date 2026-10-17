@@ -66,12 +66,24 @@ function Write-Utf8Crlf {
 }
 
 function ConvertTo-HashtableDeep {
+  # PSCustomObject is detected by TYPE NAME, never by -is [pscustomobject]:
+  # in PS 5.1 that check misfires inside ForEach-Object scriptblocks (a plain
+  # string element matched and its Length property leaked through as the
+  # converted value - verified empirically before this fix). Elements are
+  # collected via List, not pipeline, so nested arrays never unroll.
   param($Obj)
   if ($null -eq $Obj) { return $null }
-  if ($Obj -is [System.Collections.IEnumerable] -and -not ($Obj -is [string]) -and -not ($Obj -is [pscustomobject])) {
-    return @($Obj | ForEach-Object { ConvertTo-HashtableDeep $_ })
+  if ($Obj -is [System.Collections.IDictionary]) {
+    $h = @{}
+    foreach ($k in @($Obj.Keys)) { $h[$k] = ConvertTo-HashtableDeep $Obj[$k] }
+    return $h
   }
-  if ($Obj -is [pscustomobject]) {
+  if ($Obj -is [System.Collections.IEnumerable] -and -not ($Obj -is [string])) {
+    $list = New-Object System.Collections.Generic.List[object]
+    foreach ($el in $Obj) { [void]$list.Add((ConvertTo-HashtableDeep $el)) }
+    return ,$list.ToArray()
+  }
+  if ($Obj.GetType().Name -eq 'PSCustomObject') {
     $h = @{}
     foreach ($p in $Obj.PSObject.Properties) { $h[$p.Name] = ConvertTo-HashtableDeep $p.Value }
     return $h
@@ -498,8 +510,9 @@ function Edit-GhostMenu {
   if ($idx -lt 0) { throw 'GHOST.bat anchor missing: main-menu [4] dispatch block' }
   $closeIdx = $bat.IndexOf(")`r`n", $idx)
   if ($closeIdx -lt 0) { throw 'GHOST.bat anchor missing: main-menu [4] block close paren' }
+  $insertAt = $closeIdx + 3   # ")" CRLF = 3 chars: cut the \n and the edit dies mid-line
   $dispatch = "if `"%first%`"==`"$SubmenuId`" (`r`n    set `"PENDING_CHAIN=%rest%`"`r`n    goto $Pascal`r`n)`r`n"
-  $bat = $bat.Substring(0, $closeIdx + 2) + $dispatch + $bat.Substring($closeIdx + 2)
+  $bat = $bat.Substring(0, $insertAt) + $dispatch + $bat.Substring($insertAt)
 
   # Anchor 2: main-menu render - insert the colored entry after the [4] line
   # (the [2]/[3]/[4] entries render via the if-defined-ESC form, not :Opt).
@@ -568,8 +581,8 @@ exit /b
   if ($idx -lt 0) { throw "GHOST.bat anchor missing: gid $maxGid dispatch line" }
   $lineEnd = $bat.IndexOf("`r`n", $idx)
   $newGids = @(
-    ('if "%~1"=="{0}" (call :Detached "{1} inst1" "-NoProfile" "src\windows\launch___SLUG___clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)' -f ($GidBase), $Pascal)
-    ('if "%~1"=="{0}" (call :Run "src\windows\reset___SLUG__.ps1" -Target inst1 & exit /b)' -f ($GidBase + 1))
+    ('if "%~1"=="{0}" (call :Detached "{1} inst1" "-NoProfile" "src\windows\launch_{2}_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)' -f ($GidBase), $Pascal, $Slug)
+    ('if "%~1"=="{0}" (call :Run "src\windows\reset_{1}.ps1" -Target inst1 & exit /b)' -f ($GidBase + 1), $Slug)
   ) -join "`r`n"
   $bat = $bat.Substring(0, $lineEnd + 2) + $newGids + "`r`n" + $bat.Substring($lineEnd + 2)
 
@@ -689,5 +702,5 @@ Write-Host @'
 Next steps (playbook phases 0-2 - agent work, not scaffolding):
   1. Fill every <TODO: Phase 1 discovery> slot in the emitted scripts.
   2. Answer the ground-truth rows in docs\<SLUG>_CLONES_SPEC.md with provenance.
-  3. Run the .bat harness + Pester after wiring; icon decision per playbook §5.
+  3. Run the .bat harness + Pester after wiring; icon decision per playbook section 5.
 '@.Replace('<SLUG>', $slug)
