@@ -54,7 +54,9 @@ jobs:
             node --check $f
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $src = Get-Content -LiteralPath $f -Raw
-            if ($src -notmatch '(?m)^const ENGINE_VERSION = (\d+);$') {
+            # \s* before $: the runner checks out CRLF and (?m)$ does not
+            # match before the CR (first CI run caught this).
+            if ($src -notmatch '(?m)^const ENGINE_VERSION = (\d+);\s*$') {
               Write-Error "ENGINE_VERSION marker missing in $f"
               exit 1
             }
