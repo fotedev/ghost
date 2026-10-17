@@ -22,7 +22,7 @@ GHOST_CLI = os.path.join(REPO_ROOT, "src", "python", "ghost_cli.py")
 
 sys.path.insert(0, os.path.join(REPO_ROOT, "src", "python"))
 
-from ghost import audit, identity, json_patch, restore, sqlite_keys  # noqa: E402
+from ghost import audit, backup, identity, json_patch, restore, sqlite_keys  # noqa: E402
 
 
 def _b64(payload):
@@ -465,6 +465,129 @@ class CliSmokeTests(unittest.TestCase):
         proc = self._run("chat-check", "bogus", "whatever.db")
         self.assertEqual(proc.returncode, 2)
         self.assertIn("invalid choice", proc.stderr)
+
+
+class BackupToTimestampedDirTests(unittest.TestCase):
+    """ghost.backup — port of Backup-FileToTimestampDir with verify-after."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        base = self._tmp.name
+        self.src_dir = os.path.join(base, "store")
+        os.makedirs(self.src_dir)
+        with open(os.path.join(self.src_dir, "storage.json"), "w",
+                  encoding="utf-8") as f:
+            f.write('{"telemetry.machineId": "OLD"}')
+        with open(os.path.join(self.src_dir, "nested.log"), "w",
+                  encoding="utf-8") as f:
+            f.write("log line" * 10)
+        self.src_file = os.path.join(base, "state.vscdb")
+        with open(self.src_file, "wb") as f:
+            f.write(b"sqlite-bytes" * 64)
+        self.backup_root = os.path.join(base, "ID_Backups", "20261017-120000")
+        self._sleeps = []
+        self._orig_sleep = backup.time.sleep
+        backup.time.sleep = self._sleeps.append
+        self._orig_copy = backup._copy_once
+
+    def tearDown(self):
+        backup.time.sleep = self._orig_sleep
+        backup._copy_once = self._orig_copy
+        self._tmp.cleanup()
+
+    def test_file_backup_ok_and_content_identical(self):
+        r = backup.backup_to_timestamped_dir(
+            self.src_file, self.backup_root, "state.vscdb")
+        self.assertTrue(r["ok"], r)
+        self.assertFalse(r["skipped"])
+        self.assertIsNone(r["error"])
+        dst = os.path.join(self.backup_root, "state.vscdb")
+        self.assertEqual(r["destination"], dst)
+        with open(self.src_file, "rb") as a, open(dst, "rb") as b:
+            self.assertEqual(a.read(), b.read())
+
+    def test_tree_backup_ok_and_entries_match(self):
+        r = backup.backup_to_timestamped_dir(
+            self.src_dir, self.backup_root, "store")
+        self.assertTrue(r["ok"], r)
+        dst = os.path.join(self.backup_root, "store")
+        self.assertTrue(os.path.isfile(os.path.join(dst, "storage.json")))
+        self.assertTrue(os.path.isfile(os.path.join(dst, "nested.log")))
+
+    def test_missing_source_reports_skip(self):
+        r = backup.backup_to_timestamped_dir(
+            os.path.join(self._tmp.name, "nope.json"),
+            self.backup_root, "nope.json")
+        self.assertFalse(r["ok"])
+        self.assertTrue(r["skipped"])
+        self.assertIsNone(r["destination"])
+
+    def test_label_may_carry_a_subdirectory(self):
+        r = backup.backup_to_timestamped_dir(
+            self.src_file, self.backup_root, os.path.join("sub", "state.vscdb"))
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(os.path.isfile(
+            os.path.join(self.backup_root, "sub", "state.vscdb")))
+
+    def test_existing_destination_is_clobbered(self):
+        dst = os.path.join(self.backup_root, "state.vscdb")
+        os.makedirs(self.backup_root, exist_ok=True)
+        with open(dst, "wb") as f:
+            f.write(b"stale-backup-bytes")
+        r = backup.backup_to_timestamped_dir(
+            self.src_file, self.backup_root, "state.vscdb")
+        self.assertTrue(r["ok"], r)
+        with open(dst, "rb") as f:
+            self.assertEqual(f.read(), b"sqlite-bytes" * 64)
+
+    def test_transient_lock_retries_then_succeeds(self):
+        calls = []
+
+        def flaky(source, destination):
+            calls.append(destination)
+            if len(calls) < 3:
+                raise PermissionError("file in use")
+            self._orig_copy(source, destination)
+
+        backup._copy_once = flaky
+        r = backup.backup_to_timestamped_dir(
+            self.src_file, self.backup_root, "state.vscdb")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(self._sleeps), 2)
+
+    def test_permanent_lock_reports_locked_after_all_attempts(self):
+        def locked(source, destination):
+            raise PermissionError("being held by another process")
+
+        backup._copy_once = locked
+        r = backup.backup_to_timestamped_dir(
+            self.src_file, self.backup_root, "state.vscdb", attempts=4,
+            backoff_ms=1)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["error"], "locked")
+        self.assertIn("locked", r["detail"])
+        self.assertEqual(len(self._sleeps), 3)
+
+    def test_verify_mismatch_removes_the_partial_copy(self):
+        real_stats = backup._tree_stats
+
+        def lying_stats(path):
+            if path.endswith("state.vscdb") and self.backup_root in path:
+                return (1, 1)  # lie about the copy
+            return real_stats(path)
+
+        backup._tree_stats = lying_stats
+        try:
+            r = backup.backup_to_timestamped_dir(
+                self.src_file, self.backup_root, "state.vscdb")
+        finally:
+            backup._tree_stats = real_stats
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["error"], "verify")
+        self.assertIn("mismatch", r["detail"])
+        self.assertFalse(os.path.exists(
+            os.path.join(self.backup_root, "state.vscdb")))
 
 
 if __name__ == "__main__":
