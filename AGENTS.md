@@ -534,6 +534,40 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   `paired.json` holding only the clone's device key, Primary openclaw.json
   hash unchanged, and the whole `.openclaw-autoclaw` tree materializing in
   the clone home. One manual login remains per clone.
+- **First-run seed gate = the PRIMARY's profile lockfile, never "any
+  AutoClaw.exe process"** (live bug 2026-10-17): the gate used
+  `Get-Process -Name AutoClaw`, so inst1 RUNNING blocked inst2/3/4's first
+  launch for the full 180s wait and then aborted — user-visible as a cmd
+  window that flashes and closes with nothing opening. Clones are named
+  AutoClaw.exe too and never lock the Primary's files; the correct gate is
+  `Test-ProfileLockHeld` on `%APPDATA%\AutoClaw` (clean Primary exit leaves
+  no lockfile; a running instance holds it exclusively — semantics
+  verified on a live clone the same day). Running-clone detection also
+  needs the lockfile probe: WMI cannot see the clone, so the marker-based
+  subtree match alone misses it.
+- **Sign-in gate on the gateway (asar-verified 2026-10-17):** the embedded
+  gateway auto-starts only via `shouldLaunchGatewayAtColdStart =
+  isCloudMode || hasAcceptedRiskAgreement()` → `triggerGatewayLaunch()`,
+  whose start is parked on the renderer's `APP_MAIN_UI_READY`
+  (`markGatewayMainUiReady`); the handler re-checks via
+  `ensureEmbeddedGatewayLaunchedAfterRiskAgreement`. An instance sitting on
+  the SIGN-IN screen never sends it — NO gateway/MCP ports until the ONE
+  manual login completes and the main UI mounts (inst2 live case: seeded +
+  isolated + running, gateway absent while `auth.json` had no token; after
+  the user's inst1 login 02:13 its gateway bound 18799). The launcher
+  treats a missing gateway as WARN when the profile has no token (login
+  pending) and FAIL only when a token IS present.
+- **Browser-extension native host spawns bare Primary instances**
+  (live-verified 2026-10-17): `%APPDATA%\AutoClaw\chrome-ext\0.1.6\com.autoclaw.native_host_stub.json`
+  points at `C:\Program Files\AutoClaw\AutoClaw.exe` with NO arguments —
+  whenever the AutoClaw extension reconnects in Chrome/Edge it spawns a
+  bare AutoClaw.exe that opens the PRIMARY profile and rewrites its
+  `openclaw.json` (bare pid 12612 spawned 43s into inst2's launch; this is
+  also the source of the "openclaw.json modified externally" dialogs). The
+  launcher therefore attributes Primary-hash changes via the Primary
+  lockfile before/after (held during the window → WARN out-of-band, not a
+  clone breach); a clone's FIRST launch needs every Primary-profile window
+  closed — including that stray spawn.
 
 ## App cloning playbook (any new app)
 

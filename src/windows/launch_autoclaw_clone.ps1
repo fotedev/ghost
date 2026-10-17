@@ -369,9 +369,13 @@ $needsSeed = -not (Test-Path -LiteralPath $seedMarker)
 
 # Is this clone already running? Re-launching focuses the existing window and
 # exits (single-instance lock is keyed on the profile dir) - report, don't relaunch.
+# The lockfile-held probe is REQUIRED evidence: AutoClaw scrubs its PEB command
+# line (WMI CommandLine is permanently empty for it), so the marker-based subtree
+# match cannot see a running clone - only its exclusively-held profile lockfile can.
 $runningPids = Get-CloneSubtreePids -Markers $CloneMarkers
-if ($runningPids.Count -gt 0) {
-    Write-Host "[launch] $Instance already running (pids: $($runningPids -join ', ')) - nothing to do."
+if (($runningPids.Count -gt 0) -or (Test-ProfileLockHeld -ProfileDir $CloneProfile)) {
+    $runningHow = $(if ($runningPids.Count -gt 0) { $runningPids -join ', ' } else { 'profile lockfile held' })
+    Write-Host "[launch] $Instance already running ($runningHow) - nothing to do."
     Write-Host "         Use -Status for ports, or reset_autoclaw.ps1 -Target $Instance to reset it."
     exit 0
 }
@@ -382,19 +386,25 @@ if ($runningPids.Count -gt 0) {
 #    token/refreshToken live in token-cache.json and *.backup files too).
 if ($needsSeed) {
     # The first-run seed copies a live Chromium profile - leveldb LOCK files and
-    # open databases CANNOT be copied while the Primary runs (robocopy exit >= 8,
-    # verified live 2026-10-15). Mirror the resetters: first run requires the
-    # Primary closed; later launches (profile exists) never hit this path.
-    $primaryProcs = @(Get-Process -Name AutoClaw -ErrorAction SilentlyContinue)
-    if ($primaryProcs.Count -gt 0) {
-        Write-Host "[seed] AutoClaw is running - the FIRST-RUN seed needs it closed (locked profile files)." -ForegroundColor Yellow
-        Write-Host "[seed] Waiting up to 180s for AutoClaw to close (later launches do not need this)..."
+    # open databases CANNOT be copied while the PRIMARY runs (robocopy exit >= 8,
+    # verified live 2026-10-15). Gate on the PRIMARY's profile lockfile, NEVER on
+    # "any AutoClaw.exe running": clones hold their OWN profile lockfile and never
+    # lock the Primary's files, but their processes are also named AutoClaw.exe -
+    # the any-process check blocked every later clone's first launch for the full
+    # 180s window and then aborted with the Primary actually closed (live-verified
+    # 2026-10-17: inst1 running made inst2/3/4 unlaunchable - cmd flash, no app).
+    # A clean Primary exit leaves no lockfile; while running it holds it
+    # exclusively (lockfile-held semantics verified on a live clone 2026-10-17).
+    if (Test-ProfileLockHeld -ProfileDir $PrimaryProfile) {
+        Write-Host "[seed] the PRIMARY AutoClaw is running - the FIRST-RUN seed needs it closed (locked profile files)." -ForegroundColor Yellow
+        Write-Host "[seed] Waiting up to 180s for the Primary to close (running clones do NOT block the seed)..."
+        $primaryClosed = $false
         for ($i = 0; $i -lt 36; $i++) {
             Start-Sleep -Seconds 5
-            if (-not (Get-Process -Name AutoClaw -ErrorAction SilentlyContinue)) { break }
+            if (-not (Test-ProfileLockHeld -ProfileDir $PrimaryProfile)) { $primaryClosed = $true; break }
         }
-        if (@(Get-Process -Name AutoClaw -ErrorAction SilentlyContinue).Count -gt 0) {
-            throw "[seed] AutoClaw still running. Close it and re-run the launcher (first run only)."
+        if (-not $primaryClosed) {
+            throw "[seed] an AutoClaw instance is holding the PRIMARY profile. Close every AutoClaw window EXCEPT the clones - including any Primary window that opened by itself (the browser extension's native host spawns one on reconnect; live-verified 2026-10-17). Then re-run the launcher (first run only)."
         }
         Start-Sleep -Seconds 3   # let file handles release
     }
@@ -563,10 +573,17 @@ if ($homeMarkerRead -ne $CloneHome) {
 Write-Host "[launch] .autoclaw-home marker verified -> $CloneHome" -ForegroundColor Green
 
 # 5) Isolation proof baseline: the Primary's gateway config must not change.
+#    A Primary-profile instance appearing DURING the window (the browser
+#    extension's native host spawns a bare AutoClaw.exe that opens the Primary
+#    and rewrites its openclaw.json - live-verified 2026-10-17, pid 12612
+#    spawned 43s into inst2's launch) is NOT a clone breach; the lockfile state
+#    before/after distinguishes that from a real one.
 $primaryHashBefore = $null
+$primaryLockfileHeldBefore = $false
 if (Test-Path -LiteralPath (Join-Path $PrimaryState 'openclaw.json')) {
     $primaryHashBefore = (Get-FileHash -LiteralPath (Join-Path $PrimaryState 'openclaw.json') -Algorithm SHA256).Hash
 }
+$primaryLockfileHeldBefore = Test-ProfileLockHeld -ProfileDir $PrimaryProfile
 
 # 6) Launch detached. AutoClaw attaches to the parent console for stdout
 #    logging (AGENTS.md .bat rules) - route through cmd /c start "" so there is
@@ -708,8 +725,22 @@ else {
     }
 }
 if ($actualGateway.Count -eq 0) {
-    Write-Host ("[verify] FAILED - no gateway port found in {0}..{1}." -f $cfg.GatewayPort, ($cfg.GatewayPort + 9)) -ForegroundColor Red
-    $verifyOk = $false
+    # The gateway auto-starts only after the renderer's main UI mounts and sends
+    # APP_MAIN_UI_READY (main_ui_ready -> triggerGatewayLaunch, asar-verified
+    # 2026-10-17). A clone sitting on the SIGN-IN screen never sends it, so a
+    # login-pending instance legitimately has NO gateway/MCP yet - that state is
+    # the user's ONE manual login, not a launcher failure (inst2 live case).
+    $cloneAuthNow = $null
+    try { $cloneAuthNow = Get-Content -LiteralPath (Join-Path $CloneProfile 'auth.json') -Raw | ConvertFrom-Json } catch { }
+    $loginPending = ($null -eq $cloneAuthNow) -or ($null -eq (Get-JsonMemberValue $cloneAuthNow 'token'))
+    if ($loginPending) {
+        Write-Host ("[verify] WARN - no gateway port in {0}..{1}: instance is on the sign-in screen (no token)." -f $cfg.GatewayPort, ($cfg.GatewayPort + 9)) -ForegroundColor Yellow
+        Write-Host "         Complete the ONE manual login in the window - gateway + MCP start after the main UI loads." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host ("[verify] FAILED - no gateway port found in {0}..{1} (token present, so this is not the sign-in gate)." -f $cfg.GatewayPort, ($cfg.GatewayPort + 9)) -ForegroundColor Red
+        $verifyOk = $false
+    }
 }
 else {
     $gwPort = $actualGateway[0]
@@ -752,12 +783,22 @@ else {
     Write-Host "[verify] WARN - paired.json not created yet (appears after first pairing/login)." -ForegroundColor Yellow
 }
 
-# 7d) Isolation proof: the Primary's gateway config hash unchanged.
+# 7d) Isolation proof: the Primary's gateway config hash unchanged - attributed
+#     before failing. A Primary-profile instance spawning DURING the window
+#     (browser-extension native host) holds the Primary lockfile and rewrites
+#     its openclaw.json; that is out-of-band Primary activity, not a clone
+#     breach (live-verified 2026-10-17: bare pid 12612 at inst2+43s).
 if ($primaryHashBefore) {
     $primaryHashAfter = (Get-FileHash -LiteralPath (Join-Path $PrimaryState 'openclaw.json') -Algorithm SHA256).Hash
     if ($primaryHashAfter -ne $primaryHashBefore) {
-        Write-Host "[verify] FAILED - Primary openclaw.json changed during the launch cycle (isolation breach or concurrent Primary activity)." -ForegroundColor Red
-        $verifyOk = $false
+        $primaryLockfileHeldAfter = Test-ProfileLockHeld -ProfileDir $PrimaryProfile
+        if ($primaryLockfileHeldBefore -or $primaryLockfileHeldAfter) {
+            Write-Host "[verify] WARN - Primary openclaw.json changed while a Primary-profile instance was running (out-of-band browser-native-host spawn or concurrent Primary use - not attributable to this clone)." -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "[verify] FAILED - Primary openclaw.json changed during the launch cycle with NO Primary-profile instance running (isolation breach)." -ForegroundColor Red
+            $verifyOk = $false
+        }
     }
     else {
         Write-Host "[verify] Primary openclaw.json hash unchanged (isolation proof)." -ForegroundColor Green
