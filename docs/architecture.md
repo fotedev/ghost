@@ -11,15 +11,20 @@ src/windows/
 ├── reset_<app>.ps1                    # one thin manifest per app
 ├── change_device_id.ps1               # system-level: fingerprint / registry / profiles
 ├── launch_zcode_second_instance.ps1   # ZCode clone launcher (-Instance Second|Third|Fourth)
-└── Launch-ZCode-Second|Third|Fourth.bat  # double-click wrappers around the launcher
+├── Launch-ZCode-Second|Third|Fourth.bat  # double-click wrappers around the launcher
+├── launch_autoclaw_clone.ps1          # AutoClaw clone launcher (-Instance inst1..inst4, -Status)
+├── Launch-AutoClaw-Clone.bat          # double-click wrapper (interactive instance picker)
+└── reset_autoclaw.ps1                 # AutoClaw identity reset (-Target Primary|inst1..4|All)
 src/python/
 ├── ghost_cli.py                       # bootstrap: PS scripts call this absolute path
 └── ghost/                             # stdlib-only Python core (identity + SQLite logic)
 tools/
 ├── watch_zcode_captcha.ps1            # captcha-stall watchdog (no identity writes)
-├── patch_zcode_icon_override.ps1/.mjs # app.asar icon/accent/AUMID patch (engine v6)
+├── patch_zcode_icon_override.ps1/.mjs # app.asar icon/accent/AUMID patch (engine v7)
 ├── install_zcode_second_shortcuts.ps1 # clone shortcuts (Desktop + Start menu)
 ├── refresh_zcode_second_chats.ps1     # cross-instance chat refresh + -Watch watcher
+├── patch_autoclaw_ports.ps1/.mjs      # app.asar MCP-port-array patch, 4 -> 8 slots (engine v1)
+├── install_autoclaw_clone_shortcuts.ps1 # AutoClaw clone shortcuts (Desktop + Start menu)
 └── zcode-{blue,yellow,green}-branding/  # per-clone icon assets + generator
 ```
 
@@ -29,7 +34,6 @@ tools/
 |---|---|
 | `New-IdentitySet` | `{ devDeviceId (GUID), machineId (64 hex), macMachineId (128 hex), sqmId ({GUID}) }` |
 | `Assert-Administrator` | exits 1 when not elevated |
-| `Stop-AppProcesses` | kill loop with helper expansion (e.g. `Windsurf` → `Devin` + `codeium`) |
 | `Backup-FileToTimestampDir` | copy to `<app>\ID_Backups\<ts>\<label>` before any mutation |
 | `Set-JsonIdentity` | JSON patch + verify-after re-read |
 | `Set-SqliteKeys` | Python-backed SQLite UPSERT + verify-after (invokes `src\python\ghost_cli.py sqlite-update`, parameterized SQL) |
@@ -53,7 +57,7 @@ assumptions.
 | `delete-secrets <db>` | `reset_zcode.ps1` secrets bridge | JSON `{deleted, survivors}` |
 | `clear-cli-telemetry <db>` | `reset_zcode.ps1` [26/27] bridge | JSON `{deleted}` (connect failure → `{deleted: 0, error}` + exit 0) |
 | `chat-check missing\|hot <db> [index]` | `refresh_zcode_second_chats.ps1` helper | `COUNT:`/`MISSING:`/`AGE_MS:`/`INFLIGHT_*:` lines |
-| `json-patch`, `identity`, `restore-script`, `audit-log` | Python twins of the utils functions | JSON reports |
+| `json-patch`, `identity`, `restore-script`, `audit-log` | Python twins of the utils functions — `identity` is a manual diagnostic; the other three have no production caller today (kept as scaffolding for the planned PS→Python migration) | JSON reports |
 
 Payloads travel base64-encoded to sidestep native-argument quoting; values
 always use `?` placeholders; table names are validated against
@@ -109,7 +113,7 @@ rotated telemetry identity, and an independent ID set on reset
 (`reset_zcode.ps1 -Target Primary|Secondary|Third|Fourth|Both|All`).
 
 Visual identity comes from `tools/patch_zcode_icon_override.ps1`, a one-time
-`app.asar` patch (engine v6) that honors `ZCODE_ICON_DIR` (branded icon),
+`app.asar` patch (engine v7) that honors `ZCODE_ICON_DIR` (branded icon),
 `ZCODE_AUMID_SUFFIX` (separate taskbar button + pins), `ZCODE_ACCENT_HEX` +
 `ZCODE_INSTANCE_NAME` (accent color + "ZCode <Color>" window title). The patch
 also disables the clones' auto-updater so it can never silently revert itself —
@@ -121,6 +125,41 @@ all instances share one session store, so `tools/refresh_zcode_second_chats.ps1`
 recycles the target instance's app-server (auto-respawn reseeds the index
 baseline). Root-cause analysis and the error-triggered `-Watch` mode:
 [ZCODE_CHAT_SYNC_WATCHER_PLAN.md](ZCODE_CHAT_SYNC_WATCHER_PLAN.md).
+
+## Multi-instance isolation (AutoClaw: Primary + 4 clone slots)
+
+AutoClaw (Electron 33, `C:\Program Files\AutoClaw`) runs as Primary (default
+profile) plus up to four numbered clones, `inst1`–`inst4`, under
+`%USERPROFILE%\AutoClawCloneHome\instN\{home,profile,tmp}`. Unlike ZCode, the
+app **honours `--user-data-dir`** (the single-instance lock keys off the
+profile dir), so the launcher passes it as a second belt-and-braces layer on
+top of the env levers: `USERPROFILE`/`HOME` (the gateway derives its whole
+`~/.openclaw-autoclaw` state tree from `os.homedir()`), `TEMP`/`TMP`/`TMPDIR`,
+and `AUTOCLAW_GATEWAY_PORT` (supported override; a busy port silently shifts
+up to +9, so the launcher reads the actually-bound port back and records it —
+`instance-record.json`, `launch_autoclaw_clone.ps1 -Status`).
+
+The MCP HTTP server binds a **hardcoded 4-slot port array**
+(`19681–19684`) in the Electron main process — the multi-instance ceiling —
+so `tools/patch_autoclaw_ports.ps1` (+ `.mjs` engine v1) widens it to 8 slots
+in the installed `app.asar` (backup + marker + `-Restore`; an app update
+reverts it). Verified design constraints and the port plan live in
+[docs/AUTOCLAW_CLONES_SPEC.md](AUTOCLAW_CLONES_SPEC.md).
+
+Identity is stricter than ZCode's: AutoClaw keeps TWO device identities
+(`auth.json` `deviceId` + `identity\device.json` ed25519 keypair) and one
+live operator credential (`devices\paired.json`, admin-scoped). The first-run
+seed copies the Primary profile **excluding every credential store**
+(`token-cache.json`, `*.backup`, tokens stripped from `auth.json` — `userInfo`
+kept, so the clone opens on the account and needs one manual login), rotates
+the cloned identities, and never touches the gateway state tree (fresh per
+clone; the gateway regenerates `paired.json`). The clone's launcher then
+verifies: process tree stable, `/health` on its discovered MCP + gateway
+ports, `paired.json` holding only its own key, and the Primary's
+`openclaw.json` hash unchanged across the cycle.
+`reset_autoclaw.ps1 -Target Primary|inst1|inst2|inst3|inst4|All` repeats the
+rotation on demand. Every instance's `settings.json` gets
+`system.autoUpdate: false` — any auto-update would replace the patched asar.
 
 ## Testing
 

@@ -91,7 +91,3 @@ tools/block_qoder_domains.ps1
 # Shortcuts are per-machine binaries (paths embed the repo location) — regenerate
 # with tools\install_ghost_shortcut.ps1 instead of committing.
 *.lnk
-
-# Throwaway test harness for GHOST.bat menu input handling — local-only, regenerated
-# on demand by re-running the harness author against a TEST COPY of GHOST.bat.
-.bat-harness-test.ps1

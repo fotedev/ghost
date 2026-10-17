@@ -227,7 +227,8 @@ function Save-WatchState {
     $kept = @()
     foreach ($c in @($State.continues)) {
         try {
-            if ([datetime]([string]$c).Split("|")[1] -ge $pruneCut) { $kept += $c }
+            $stampUtc = [DateTimeOffset]::Parse((([string]$c).Split("|"))[1], [System.Globalization.CultureInfo]::InvariantCulture).UtcDateTime
+            if ($stampUtc -ge $pruneCut) { $kept += $c }
         }
         catch { }
     }
@@ -254,13 +255,33 @@ function Read-NewLogLines {
         [System.IO.FileShare]::ReadWrite)
     try {
         if ($Offset -gt $stream.Length) { $Offset = 0 }  # truncated/rotated
+        $length = [int]($stream.Length - $Offset)
+        if ($length -le 0) { return @{ Lines = @(); Offset = $Offset } }
         $null = $stream.Seek($Offset, [System.IO.SeekOrigin]::Begin)
-        $reader = New-Object System.IO.StreamReader($stream)
-        $text = $reader.ReadToEnd()
-        $reader.Close()
-        $newOffset = (Get-Item -LiteralPath $Path).Length
+        $buf = New-Object byte[] $length
+        $read = $stream.Read($buf, 0, $length)
+        if ($read -le 0) { return @{ Lines = @(); Offset = $Offset } }
+        if ($Offset -eq 0 -and $read -ge 3 -and $buf[0] -eq 239 -and $buf[1] -eq 187 -and $buf[2] -eq 191) {
+            $Offset = 3; $length = $read - 3
+            $tail = New-Object byte[] $length
+            [Array]::Copy($buf, 3, $tail, 0, $length)
+            $buf = $tail
+            $read = $length
+        }
+        # Consume only up to the LAST complete newline: the agent appends
+        # concurrently, so a trailing partial line (or partial multi-byte char)
+        # must stay unconsumed and be re-read complete on the next pass. The
+        # offset advances by the bytes actually consumed - never by a file
+        # length probed afterwards (the old Get-Item length skipped anything
+        # appended between ReadToEnd and the probe).
+        $lastNl = -1
+        for ($i = $read - 1; $i -ge 0; $i--) {
+            if ($buf[$i] -eq 10) { $lastNl = $i; break }
+        }
+        if ($lastNl -lt 0) { return @{ Lines = @(); Offset = $Offset } }
+        $text = [System.Text.Encoding]::UTF8.GetString($buf, 0, $lastNl + 1)
         $lines = @($text -split "`r?`n" | Where-Object { $_ -ne "" })
-        return @{ Lines = $lines; Offset = $newOffset }
+        return @{ Lines = $lines; Offset = ($Offset + $lastNl + 1) }
     }
     finally {
         $stream.Close()
@@ -469,15 +490,17 @@ function Test-ContinueAllowed {
         [Parameter(Mandatory = $true)][datetime]$Now
     )
     if ($NoAutoContinue) { return $false }
-    # Stamps are stored UTC ("...Z"); $Now arrives local (Get-Date). Normalize
-    # the cutoff to UTC or the tick comparison skews by the timezone offset
-    # and the hourly cap fires on the wrong window.
+    # Stamps are stored UTC ("...Z"); $Now arrives local (Get-Date). Parse the
+    # stamps as UTC explicitly - a bare [datetime] cast turns a Z-suffixed
+    # string into LOCAL time, skewing the tick comparison against the UTC
+    # cutoff by the timezone offset (the cap under-counts west of UTC).
     $cut = $Now.ToUniversalTime().AddHours(-1)
     $recent = 0
     foreach ($c in @($State.continues)) {
         try {
             $parts = ([string]$c).Split("|")
-            if (($parts[0] -ceq $Session) -and ([datetime]$parts[1] -ge $cut)) {
+            $stampUtc = [DateTimeOffset]::Parse($parts[1], [System.Globalization.CultureInfo]::InvariantCulture).UtcDateTime
+            if (($parts[0] -ceq $Session) -and ($stampUtc -ge $cut)) {
                 $recent++
             }
         }
@@ -552,6 +575,12 @@ function Invoke-SessionContinue {
             continue
         }
         $argList = @("`"$cli`"", "--resume", $p.session, "--prompt", $ResumeMessage, "--surface", "desktop")
+        # PS 5.1 joins a string[] -ArgumentList with spaces WITHOUT quoting, so
+        # the resume prompt (which contains spaces) must be pre-quoted or it
+        # splits into separate argv tokens. $cli is already quoted above.
+        $argList = @($argList | ForEach-Object {
+            if ($_ -match '\s' -and $_ -notmatch '^".*"$') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+        })
         $stamp = $Now.ToString("yyyyMMdd_HHmmss")
         $outLog = Join-Path $StateDir ("resume_" + $stamp + ".out.log")
         $errLog = Join-Path $StateDir ("resume_" + $stamp + ".err.log")
@@ -838,6 +867,10 @@ function Invoke-WatchPass {
 }
 
 # ---------- Main ----------
+# Resident console title: makes the window self-identifying no matter how it
+# was launched - a duplicate copy flash-closing via the guard below still
+# shows what it was (same pattern as watch_zcode_taskbar.ps1).
+try { $Host.UI.RawUI.WindowTitle = 'ZCode Captcha Watchdog (pid {0})' -f $PID } catch { }
 Write-Host "=== ZCode captcha watchdog ===" -ForegroundColor Cyan
 Write-Host "Leave this window OPEN (minimize it if you like). Closing it stops the watch." -ForegroundColor Yellow
 Write-Host ("LogDir : " + $LogDir) -ForegroundColor Gray
@@ -898,6 +931,41 @@ if ($RunOnce) {
     exit 0
 }
 
+# Single-instance guard (mirrors watch_zcode_taskbar.ps1): a startup process
+# scan first, then a named mutex. Two resident watchdogs on the shared state
+# file would double-fire restarts and Telegram escalations. The mutex only
+# serializes copies of THIS script version - a stale older copy (different or
+# absent mutex name) is caught by the scan instead. -RunOnce always runs
+# (above): it is a deliberate one-shot diagnostic.
+function Get-OtherWatchdogPids {
+    $leaf = (Split-Path -Leaf $PSCommandPath).ToLowerInvariant()
+    $found = @()
+    $procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
+    foreach ($p in $procs) {
+        if ([int]$p.ProcessId -eq $PID) { continue }
+        if ($p.CommandLine -and $p.CommandLine.ToLowerInvariant().Contains($leaf)) { $found += [int]$p.ProcessId }
+    }
+    return $found
+}
+
+$others = Get-OtherWatchdogPids
+if ($others.Count -gt 0) {
+    Write-Host ("watchdog already running (pid {0}) - exiting. Close that console or stop the pid first." -f ($others -join ', ')) -ForegroundColor Yellow
+    exit 0
+}
+
+$created = $false
+$mutex = New-Object System.Threading.Mutex($true, 'ZcodeCaptchaWatchdog', [ref]$created)
+if (-not $created) {
+    $holder = Get-OtherWatchdogPids
+    $who = ''
+    if ($holder.Count -gt 0) { $who = ' by pid ' + ($holder -join ', ') }
+    Write-Host ("watchdog already running (mutex held{0}) - exiting. Check Task Manager or the log." -f $who) -ForegroundColor Yellow
+    $mutex.Close()
+    exit 0
+}
+Write-WatchLog ("watchdog started (pid {0}, poll {1}s)" -f $PID, $PollSeconds) -Milestone
+
 try {
     while ($true) {
         $state = Invoke-WatchPass -State $state
@@ -907,5 +975,7 @@ try {
     }
 }
 finally {
+    $mutex.ReleaseMutex()
+    $mutex.Close()
     Save-WatchState -State $state
 }

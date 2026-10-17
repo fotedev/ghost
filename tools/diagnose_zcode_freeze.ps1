@@ -69,7 +69,7 @@ function Get-JsonLeaves {
 
 $Dates = @(0..($Days - 1) | ForEach-Object { (Get-Date).Date.AddDays(-$_).ToString('yyyy-MM-dd') })
 $Events = @()   # objects: Instance, Ts, Pid, Kind, Reason
-$OomOsError1455 = $false
+$script:OomOsError1455 = $false
 
 # ---- [1] per-instance crash events from the v2 logs -------------------------
 # Only the event lines carry a json payload ("...-gone: {"); the follow-up
@@ -184,7 +184,7 @@ foreach ($inst in $Instances) {
         Write-Output ('   ' + $stamp + '  ' + $dmp.Name)
         foreach ($one in @($prio + $rest)) {
             $out = '     ' + $one
-            if ($one -match 'last-os-error\s*=\s*1455') {
+            if ($one -match 'last-os-error\s*=\s*1455(?!\d)') {
                 $script:OomOsError1455 = $true
                 $out = $out + '   <-- ERROR_COMMITMENT_LIMIT: paging file too small'
             }

@@ -61,13 +61,18 @@ $AgentLogDir = Join-Path $env:USERPROFILE '.zcode\cli\log'
 $LogDir      = Join-Path $PSScriptRoot 'logs'
 $LogFile     = Join-Path $LogDir 'refresh_zcode_second_chats.log'
 
-# Window titles come from tools\patch_zcode_icon_override.ps1 (branding patch):
-# the Primary keeps the plain "ZCode" title, clones carry their color.
+# Instance classification is PROCESS-MARKER-first (the 2026-09-24/26 taskbar
+# lesson applies verbatim): a clone's window is titled plain "ZCode" during
+# the splash phase, so title-only rules claim it as Primary. Markers = the
+# roaming/home dir names the same launcher/watcher rules use (visible in the
+# subtree's WMI command lines); a clone's v6 color title overrides a spurious
+# Primary marker read. Markers and titles come from
+# tools\patch_zcode_icon_override.ps1 (the Primary keeps the plain title).
 $InstanceDefs = @(
-  @{ Name = 'Primary'; HomeRel = '';                Title = 'ZCode';        Exclude = @('Blue', 'Yellow', 'Green') }
-  @{ Name = 'Second';  HomeRel = 'ZCodeSecondHome'; Title = 'ZCode Blue';   Exclude = @() }
-  @{ Name = 'Third';   HomeRel = 'ZCodeThirdHome';  Title = 'ZCode Yellow'; Exclude = @() }
-  @{ Name = 'Fourth';  HomeRel = 'ZCodeFourthHome'; Title = 'ZCode Green';  Exclude = @() }
+  @{ Name = 'Primary'; HomeRel = '';                Title = 'ZCode';        Markers = @() }
+  @{ Name = 'Second';  HomeRel = 'ZCodeSecondHome'; Title = 'ZCode Blue';   Markers = @('ZCode-Second', 'ZCodeSecondHome') }
+  @{ Name = 'Third';   HomeRel = 'ZCodeThirdHome';  Title = 'ZCode Yellow'; Markers = @('ZCode-Third', 'ZCodeThirdHome') }
+  @{ Name = 'Fourth';  HomeRel = 'ZCodeFourthHome'; Title = 'ZCode Green';  Markers = @('ZCode-Fourth', 'ZCodeFourthHome') }
 )
 
 function Write-RunLog([string]$line) {
@@ -160,20 +165,89 @@ function Get-DescendantProcesses([int[]]$rootIds) {
   return $result
 }
 
+# One WMI snapshot per classification, keyed by pid, with parent->children
+# links (same shape as the taskbar watcher's Get-ZcodeProcessMap).
+function Get-ZcodeProcessMap {
+  $map = @{}
+  $procs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
+  foreach ($p in $procs) {
+    $map[[int]$p.ProcessId] = @{ Parent = [int]$p.ParentProcessId; Cmdline = [string]$p.CommandLine; Children = @() }
+  }
+  foreach ($p in $procs) {
+    $par = [int]$p.ParentProcessId
+    if ($map.ContainsKey($par)) { $map[$par].Children = @($map[$par].Children) + [int]$p.ProcessId }
+  }
+  return $map
+}
+
+# Classify a window's instance by walking its process tree to the root ZCode
+# main and matching clone markers across the whole subtree's command lines.
+# A clone main carries a bare exe command line; its children carry the clone
+# home/roaming paths. Unmatched trees are Primary (the launcher's rule).
+function Get-WindowMarkerInstance {
+  param($ProcMap, [int]$ProcessId)
+  if (-not $ProcMap -or -not $ProcMap.ContainsKey($ProcessId)) { return $null }
+  $root = $ProcessId
+  $climbed = @{}
+  while ($ProcMap.ContainsKey($root)) {
+    if ($climbed.ContainsKey($root)) { break }
+    $climbed[$root] = $true
+    $par = [int]$ProcMap[$root].Parent
+    if (-not $ProcMap.ContainsKey($par)) { break }
+    $root = $par
+  }
+  $seen = @{}
+  $queue = New-Object System.Collections.Queue
+  $queue.Enqueue($root)
+  while ($queue.Count -gt 0) {
+    $cur = [int]$queue.Dequeue()
+    if ($seen.ContainsKey($cur)) { continue }
+    $seen[$cur] = $true
+    $node = $ProcMap[$cur]
+    if (-not $node) { continue }
+    $cl = $node.Cmdline
+    if ($cl) {
+      foreach ($inst in $InstanceDefs) {
+        foreach ($marker in $inst.Markers) {
+          if ($cl -like ("*{0}*" -f $marker)) { return $inst }
+        }
+      }
+    }
+    foreach ($child in $node.Children) { $queue.Enqueue($child) }
+  }
+  return $InstanceDefs[0]
+}
+
+# Final classification: a clone's v6 color title is decisive when present
+# (it overrides a spurious Primary marker read - WMI can miss a fresh clone's
+# children for one snapshot); otherwise markers win over the splash-phase
+# plain title; a plain "ZCode" title with an unmarked tree is the Primary.
+# $null = ambiguous - the caller skips it loudly rather than guessing.
+function Resolve-WindowInstance {
+  param($ProcMap, $Win)
+  $markerInst = Get-WindowMarkerInstance -ProcMap $ProcMap -ProcessId $Win.Id
+  $t = [string]$Win.MainWindowTitle
+  foreach ($cand in $InstanceDefs) {
+    if ($cand.Name -ne 'Primary' -and $t -like ($cand.Title + '*')) { return $cand }
+  }
+  if ($markerInst -and $markerInst.Name -ne 'Primary') { return $markerInst }
+  if ($t -like 'ZCode*' -and $markerInst -and $markerInst.Name -eq 'Primary') { return $markerInst }
+  return $null
+}
+
 function Get-InstanceState([hashtable]$def) {
   # Snapshot of one instance: installed? running? workspace open? index in sync?
   $st = @{ Def = $def; Status = 'ok'; ErrText = ''; Mains = @(); Servers = @()
            TasksIndex = (Get-TasksIndexPath $def); MissingCount = 0; MissingLines = @() }
   if (-not (Test-Path $st.TasksIndex)) { $st.Status = 'not-installed'; return $st }
-  $mains = @(Get-Process -Name ZCode -ErrorAction SilentlyContinue | Where-Object {
-      if ($_.MainWindowHandle -eq 0) { $false }
-      else {
-        $t = [string]$_.MainWindowTitle
-        $ok = ($t -like ($def.Title + '*'))
-        if ($ok) { foreach ($x in $def.Exclude) { if ($t -like ('*' + $x + '*')) { $ok = $false } } }
-        $ok
-      }
-    })
+  $wins = @(Get-Process -Name ZCode -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+  if ($wins.Count -gt 0) {
+    $procMap = Get-ZcodeProcessMap
+    $mains = @($wins | Where-Object { (Resolve-WindowInstance -ProcMap $procMap -Win $_).Name -eq $def.Name })
+  }
+  else {
+    $mains = @()
+  }
   $st.Mains = $mains
   if ($mains.Count -eq 0) { $st.Status = 'not-running'; return $st }
   $desc = @(Get-DescendantProcesses ($mains | ForEach-Object { [int]$_.Id }))

@@ -107,6 +107,7 @@ public class ZcodeWindowAumid {
         void Commit();
     }
     [DllImport("shell32.dll")] public static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+    [DllImport("oleaut32.dll")] public static extern int PropVariantClear(ref PROPVARIANT pv);
     public static readonly PROPERTYKEY PKEY_AUMID = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
     static Guid IID_IPropertyStore = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
     // Stamp + read back; returns what the store actually holds.
@@ -132,9 +133,15 @@ public class ZcodeWindowAumid {
         PROPVARIANT back;
         var key = PKEY_AUMID;
         store.GetValue(ref key, out back);
-        if (back.vt == 31) return Marshal.PtrToStringUni(back.pointerValue);
-        if (back.vt == 0) return "<EMPTY>";
-        return "<readback vt=" + back.vt + ">";
+        // VT_LPWSTR is CoTaskMem-allocated by the property store: copy the
+        // string out first, then free the variant, or the resident watcher
+        // leaks on every 5 s read.
+        string result;
+        if (back.vt == 31) result = Marshal.PtrToStringUni(back.pointerValue);
+        else if (back.vt == 0) result = "<EMPTY>";
+        else result = "<readback vt=" + back.vt + ">";
+        PropVariantClear(ref back);
+        return result;
     }
 }
 "@

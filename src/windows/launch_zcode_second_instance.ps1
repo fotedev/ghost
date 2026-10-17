@@ -19,7 +19,7 @@
 #     Without that one-time patch the app ignores all four -> default look, no harm.
 param(
     # Which clone to launch. Defaults to Second so existing callers
-    # (Launch-ZCode-Second.bat, GHOST.bat menu [10]) stay valid unchanged.
+    # (Launch-ZCode-Second.bat, GHOST.bat ZCode submenu [1]) stay valid unchanged.
     [ValidateSet('Second', 'Third', 'Fourth')]
     [string]$Instance = 'Second'
 )
@@ -63,8 +63,6 @@ $CloneUserData  = Join-Path $AppData $cfg.UserData
 $CloneSession   = Join-Path $CloneUserData 'session'
 # Strings that identify THIS clone's processes in any CommandLine (live-check).
 $CloneMarkers   = @("*$($cfg.UserData)*", "*$($cfg.Home)*")
-
-if (-not (Test-Path -LiteralPath $ZCodeExe)) { throw "ZCode.exe not found: $ZCodeExe" }
 
 # 1) Ensure directories exist
 New-Item -ItemType Directory -Path $CloneHome -Force | Out-Null
@@ -157,17 +155,61 @@ if (-not (Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\setting.json'))) {
     Write-Host "[seed] $Instance profile already exists, skipping clone (independent)."
 }
 
-# 2c) Telegram routing (one-time, marker-guarded): a cloned profile carries the
-# PRIMARY's enabled Telegram bots, and two pollers on one token cause HTTP 409
-# conflicts plus random cross-account billing. Keep Telegram on Primary by
-# disabling telegram bots in the clone. Runs ONCE ever per clone (marker file)
-# so a deliberate re-enable in the clone UI is never reverted. Primary untouched.
+# 2c) Telegram routing (marker-guarded): one credential = one instance (EC-D03).
+# Two pollers on one token cause HTTP 409 + random cross-account billing.
+# v2 logic (2026-10-16): compare the clone's encrypted bot credential sha8
+# (credentials.json -> bot:<id>:credential, enc:v1:, hash only, never values)
+# + bot id against Primary across BOTH bot-config.json and bot-config.v3.json.
+# Duplicate of Primary -> disabled in both files. Unique (UI-assisted flow:
+# operator pasted a distinct BotFather token in the clone UI, app minted a
+# fresh bot-<guid>) -> preserved + v2 marker so future launches never revert
+# a deliberate unique bot. Legacy v1 markers (empty file) keep old behavior.
 $tgMarker = Join-Path $CloneHome '.telegram-routed'
+function Get-TgCredSha8 {
+    param([string]$CredentialsPath, [string]$CredentialRef)
+    if (-not (Test-Path -LiteralPath $CredentialsPath)) { return '' }
+    try { $creds = Get-Content -LiteralPath $CredentialsPath -Raw | ConvertFrom-Json }
+    catch { return '' }
+    $prop = $creds.PSObject.Properties[$CredentialRef]
+    if ($null -eq $prop) { return '' }
+    $val = [string]$prop.Value
+    if ([string]::IsNullOrEmpty($val)) { return '' }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($val)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $hash = $sha.ComputeHash($bytes) }
+    finally { if ($sha) { $sha.Dispose() } }
+    return ([BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()).Substring(0, 8)
+}
+$tgMarkerText = ''
 if (Test-Path -LiteralPath $tgMarker) {
+    try { $tgMarkerText = (Get-Content -LiteralPath $tgMarker -Raw -ErrorAction SilentlyContinue) }
+    catch { $tgMarkerText = '' }
+}
+if ($tgMarkerText -like 'v2 unique-bot*') {
+    Write-Host '[telegram-route] v2 unique-bot marker, preserving clone bot.' -ForegroundColor DarkGray
+} elseif (Test-Path -LiteralPath $tgMarker) {
     Write-Host '[telegram-route] Already reconciled, skipping.' -ForegroundColor DarkGray
 } else {
     $tgNoBom = New-Object System.Text.UTF8Encoding $false
     $tgDisabled = 0
+    $tgPreserved = 0
+    $tgPrimarySha8 = ''
+    $tgPrimaryId = ''
+    try {
+        $tgPrimaryCreds = Get-Content -LiteralPath (Join-Path $PrimaryZCode 'v2\credentials.json') -Raw | ConvertFrom-Json
+        foreach ($cfgName in @('v2\bot-config.json', 'v2\bot-config.v3.json')) {
+            $tgPrimaryCfg = Join-Path $PrimaryZCode $cfgName
+            if (-not (Test-Path -LiteralPath $tgPrimaryCfg)) { continue }
+            $pj = Get-Content -LiteralPath $tgPrimaryCfg -Raw | ConvertFrom-Json
+            foreach ($b in @($pj.bots)) {
+                if ($b.provider -ne 'telegram') { continue }
+                $tgPrimaryId = [string]$b.id
+                $tgPrimarySha8 = Get-TgCredSha8 -CredentialsPath (Join-Path $PrimaryZCode 'v2\credentials.json') -CredentialRef ([string]$b.credentialRef)
+                if ($tgPrimarySha8 -ne '') { break }
+            }
+            if ($tgPrimarySha8 -ne '') { break }
+        }
+    } catch { Write-Host '[telegram-route] Primary fingerprint SKIP, falling back to disable.' -ForegroundColor Yellow }
     foreach ($cfgName in @('v2\bot-config.json', 'v2\bot-config.v3.json')) {
         $tgCfg = Join-Path $CloneZCode $cfgName
         if (-not (Test-Path -LiteralPath $tgCfg)) { continue }
@@ -176,14 +218,25 @@ if (Test-Path -LiteralPath $tgMarker) {
             $changed = $false
             if (($null -ne $bj) -and ($null -ne $bj.PSObject.Properties['bots'])) {
                 foreach ($b in $bj.bots) {
-                    if (($b.provider -eq 'telegram') -and ($b.enabled -eq $true)) { $b.enabled = $false; $changed = $true; $tgDisabled++ }
+                    if ($b.provider -ne 'telegram') { continue }
+                    if ($b.enabled -ne $true) { continue }
+                    $cloneSha = Get-TgCredSha8 -CredentialsPath (Join-Path $CloneZCode 'v2\credentials.json') -CredentialRef ([string]$b.credentialRef)
+                    $isDup = $false
+                    if ($tgPrimarySha8 -ne '' -and $cloneSha -eq $tgPrimarySha8) { $isDup = $true }
+                    if ($tgPrimaryId -ne '' -and ([string]$b.id) -eq $tgPrimaryId) { $isDup = $true }
+                    if ($isDup) { $b.enabled = $false; $changed = $true; $tgDisabled++ }
+                    else {
+                        if ($cloneSha -ne '') { $tgPreserved++ }
+                        else { $b.enabled = $false; $changed = $true; $tgDisabled++ }
+                    }
                 }
             }
             if ($changed) { [System.IO.File]::WriteAllText($tgCfg, ($bj | ConvertTo-Json -Depth 20), $tgNoBom) }
         } catch { Write-Host "[telegram-route] $cfgName SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
     }
-    if ($tgDisabled -gt 0) { Write-Host ("[telegram-route] Disabled {0} Telegram bot(s) in $Instance; Telegram stays on Primary." -f $tgDisabled) -ForegroundColor Green }
-    else { Write-Host "[telegram-route] No enabled Telegram bots in $Instance; nothing to do." -ForegroundColor DarkGray }
+    if ($tgDisabled -gt 0) { Write-Host ("[telegram-route] Disabled {0} duplicate Telegram bot(s) in $Instance; Telegram stays on Primary." -f $tgDisabled) -ForegroundColor Green }
+    if ($tgPreserved -gt 0) { Write-Host ("[telegram-route] Preserved $tgPreserved unique Telegram bot row(s) in $Instance (distinct credential)." -f $tgPreserved) -ForegroundColor Green }
+    if (($tgDisabled -eq 0) -and ($tgPreserved -eq 0)) { Write-Host "[telegram-route] No enabled Telegram bots in $Instance; nothing to do." -ForegroundColor DarkGray }
     # Drop stale polling locks, but ONLY when this clone is not running (a live
     # poller owns its lock dir). A running instance picks up the config change
     # on its next restart.
@@ -227,13 +280,40 @@ if (Test-Path -LiteralPath $tgMarker) {
             if ($tgDisabled -gt 0) { Write-Host "[telegram-route] $Instance is running: restart it once to apply (config saved)." -ForegroundColor Yellow }
         } else {
             $tgLockRoot = Join-Path $CloneZCode 'v2\bots-runtime-locks\telegram-polling'
-            if (Test-Path -LiteralPath $tgLockRoot) {
+            if (($tgDisabled -gt 0) -and (Test-Path -LiteralPath $tgLockRoot)) {
                 Get-ChildItem -LiteralPath $tgLockRoot -Force -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -Confirm:$false -ErrorAction SilentlyContinue }
                 Write-Host "[telegram-route] Stale $Instance polling locks cleared." -ForegroundColor Green
             }
         }
     } catch { Write-Host "[telegram-route] lock check SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
-    New-Item -ItemType File -Path $tgMarker -Force | Out-Null
+    if ($tgPreserved -gt 0) {
+        $tgUniqueSha = ''
+        $tgUniqueId = ''
+        try {
+            foreach ($cfgName in @('v2\bot-config.json', 'v2\bot-config.v3.json')) {
+                $tgCfg = Join-Path $CloneZCode $cfgName
+                if (-not (Test-Path -LiteralPath $tgCfg)) { continue }
+                $uj = Get-Content -LiteralPath $tgCfg -Raw | ConvertFrom-Json
+                foreach ($b in @($uj.bots)) {
+                    if ($b.provider -ne 'telegram') { continue }
+                    if ($b.enabled -ne $true) { continue }
+                    $tgUniqueId = [string]$b.id
+                    $tgUniqueSha = Get-TgCredSha8 -CredentialsPath (Join-Path $CloneZCode 'v2\credentials.json') -CredentialRef ([string]$b.credentialRef)
+                    if ($tgUniqueSha -ne '') { break }
+                }
+                if ($tgUniqueSha -ne '') { break }
+            }
+        } catch { $tgUniqueSha = '' }
+        if ($tgUniqueSha -ne '') {
+            [System.IO.File]::WriteAllText($tgMarker, ('v2 unique-bot sha8=' + $tgUniqueSha + ' id=' + $tgUniqueId), $tgNoBom)
+        }
+        else {
+            New-Item -ItemType File -Path $tgMarker -Force | Out-Null
+        }
+    }
+    else {
+        New-Item -ItemType File -Path $tgMarker -Force | Out-Null
+    }
 }
 
 # 3) Launch the clone detached from THIS console.
@@ -348,6 +428,7 @@ public class ZcodeWindowAumid {
         void Commit();
     }
     [DllImport("shell32.dll")] public static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+    [DllImport("oleaut32.dll")] public static extern int PropVariantClear(ref PROPVARIANT pv);
     public static readonly PROPERTYKEY PKEY_AUMID = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
     static Guid IID_IPropertyStore = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
     // Stamp + read back; returns what the store actually holds.
@@ -373,9 +454,15 @@ public class ZcodeWindowAumid {
         PROPVARIANT back;
         var key = PKEY_AUMID;
         store.GetValue(ref key, out back);
-        if (back.vt == 31) return Marshal.PtrToStringUni(back.pointerValue);
-        if (back.vt == 0) return "<EMPTY>";
-        return "<readback vt=" + back.vt + ">";
+        // VT_LPWSTR is CoTaskMem-allocated by the property store: copy the
+        // string out first, then free the variant, or the resident watcher
+        // leaks on every 5 s read.
+        string result;
+        if (back.vt == 31) result = Marshal.PtrToStringUni(back.pointerValue);
+        else if (back.vt == 0) result = "<EMPTY>";
+        else result = "<readback vt=" + back.vt + ">";
+        PropVariantClear(ref back);
+        return result;
     }
 }
 "@
