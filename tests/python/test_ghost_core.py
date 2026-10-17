@@ -22,7 +22,7 @@ GHOST_CLI = os.path.join(REPO_ROOT, "src", "python", "ghost_cli.py")
 
 sys.path.insert(0, os.path.join(REPO_ROOT, "src", "python"))
 
-from ghost import audit, backup, identity, json_patch, restore, sqlite_keys  # noqa: E402
+from ghost import audit, backup, filesweep, identity, json_patch, restore, sqlite_keys, winstore  # noqa: E402
 
 
 def _b64(payload):
@@ -466,6 +466,63 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn("invalid choice", proc.stderr)
 
+    def test_machineid_file_command_bridge_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "machineid")
+            root = os.path.join(tmp, "ID_Backups", "ts")
+            payload_b64 = _b64({"value": "NEW-ID"})
+            proc = self._run("machineid-file", path, root, "machineid",
+                             payload_b64)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertEqual(report["after"], "NEW-ID")
+            # BOM-less UTF-8: the PS Set-VerifiedMachineIdFile regression.
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), b"NEW-ID")
+
+    def test_sweep_file_and_backup_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "Cookies")
+            with open(src, "wb") as f:
+                f.write(b"data")
+            root = os.path.join(tmp, "ID_Backups", "ts")
+            proc = self._run("backup", src, root, "Cookies")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertTrue(report["ok"])
+            self.assertTrue(os.path.exists(report["destination"]))
+            proc = self._run("sweep-file", src)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["after"], "deleted")
+            self.assertFalse(os.path.exists(src))
+
+    def test_store_delete_command_rename_bridge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = os.path.join(tmp, "Cookies")
+            with open(store, "wb") as f:
+                f.write(b"data")
+            root = os.path.join(tmp, "ID_Backups", "ts")
+            proc = self._run("store-delete", store, root, "Cookies",
+                             "--action", "rename")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertEqual(report["renamed_to"], store + ".backup")
+            self.assertFalse(os.path.exists(store))
+
+    def test_sweep_tree_command_reports_remaining(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = os.path.join(tmp, "sentry")
+            os.makedirs(tree)
+            with open(os.path.join(tree, "a.log"), "w", encoding="utf-8") as f:
+                f.write("x")
+            root = os.path.join(tmp, "ID_Backups", "ts")
+            proc = self._run("sweep-tree", tree, root, "sentry")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertTrue(report["ok"])
+            self.assertEqual(report["deleted"], 1)
+            self.assertEqual(report["remaining"], 0)
+
 
 class BackupToTimestampedDirTests(unittest.TestCase):
     """ghost.backup — port of Backup-FileToTimestampDir with verify-after."""
@@ -588,6 +645,183 @@ class BackupToTimestampedDirTests(unittest.TestCase):
         self.assertIn("mismatch", r["detail"])
         self.assertFalse(os.path.exists(
             os.path.join(self.backup_root, "state.vscdb")))
+
+
+class FilesweepTests(unittest.TestCase):
+    """ghost.filesweep — ports of the cursor file-identity helpers."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        base = self._tmp.name
+        self.store = os.path.join(base, "Cookies")
+        with open(self.store, "wb") as f:
+            f.write(b"binary-store-bytes" * 8)
+        self.tree = os.path.join(base, "sentry")
+        os.makedirs(os.path.join(self.tree, "sub"))
+        for name in ("a.log", "b.log", os.path.join("sub", "c.log")):
+            with open(os.path.join(self.tree, name), "w", encoding="utf-8") as f:
+                f.write("log" * 10)
+        self.backup_root = os.path.join(base, "ID_Backups", "20261017-130000")
+        self._sleeps = []
+        self._orig_sleep = filesweep.time.sleep
+        filesweep.time.sleep = self._sleeps.append
+
+    def tearDown(self):
+        filesweep.time.sleep = self._orig_sleep
+        self._tmp.cleanup()
+
+    def test_remove_verified_present_and_missing(self):
+        r = filesweep.remove_verified(self.store)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["before"], r["after"]), ("present", "deleted"))
+        self.assertFalse(os.path.exists(self.store))
+        r2 = filesweep.remove_verified(self.store)
+        self.assertTrue(r2["ok"])
+        self.assertTrue(r2["skipped"])
+        self.assertEqual((r2["before"], r2["after"]), ("missing", "skipped"))
+
+    def test_identity_store_delete_mode_with_backup(self):
+        r = filesweep.remove_identity_store(
+            self.store, "delete", self.backup_root)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["after"], "deleted")
+        self.assertTrue(r["backed_up_to"])
+        self.assertFalse(os.path.exists(self.store))
+        self.assertTrue(os.path.exists(r["backed_up_to"]))
+
+    def test_identity_store_rename_mode_clobbers_stale_backup(self):
+        stale = self.store + ".backup"
+        with open(stale, "wb") as f:
+            f.write(b"stale")
+        r = filesweep.remove_identity_store(
+            self.store, "rename", self.backup_root)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["renamed_to"], stale)
+        self.assertFalse(os.path.exists(self.store))
+        with open(stale, "rb") as f:
+            self.assertEqual(f.read(), b"binary-store-bytes" * 8)
+
+    def test_identity_store_missing_is_skip_ok(self):
+        r = filesweep.remove_identity_store(
+            os.path.join(self._tmp.name, "nope"), "delete", self.backup_root)
+        self.assertTrue(r["ok"])
+        self.assertTrue(r["skipped"])
+
+    def test_identity_store_relative_label_from_root_path(self):
+        root = self._tmp.name
+        r = filesweep.remove_identity_store(
+            self.store, "delete", self.backup_root, root_path=root)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["backed_up_to"],
+                         os.path.join(self.backup_root, "Cookies"))
+
+    def test_sweep_tree_deletes_every_file_and_verifies(self):
+        r = filesweep.sweep_tree(self.tree, self.backup_root, "sentry")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["deleted"], 3)
+        self.assertEqual(r["failed"], 0)
+        self.assertEqual(r["remaining"], 0)
+        self.assertTrue(r["backed_up_to"])
+        for _root, _dirs, names in os.walk(self.tree):
+            self.assertEqual(names, [])
+
+    def test_sweep_tree_missing_is_skip_ok(self):
+        r = filesweep.sweep_tree(
+            os.path.join(self._tmp.name, "no-tree"),
+            self.backup_root, "no-tree")
+        self.assertTrue(r["ok"])
+        self.assertTrue(r["skipped"])
+
+
+class WinstoreTests(unittest.TestCase):
+    """ghost.winstore — ports of the cursor JSON/text identity helpers."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = self._tmp.name
+        self.backup_root = os.path.join(self.base, "ID_Backups", "ts")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_machineid_file_write_and_verify(self):
+        path = os.path.join(self.base, "machineid")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("OLD-ID\n")
+        r = winstore.write_machineid_file(
+            path, "NEW-ID", self.backup_root, "machineid")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["before"], r["after"]), ("OLD-ID", "NEW-ID"))
+        self.assertTrue(r["backed_up_to"])
+        with open(path, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), "NEW-ID")
+
+    def test_machineid_file_creates_missing(self):
+        path = os.path.join(self.base, "Cursor", "machineid")
+        r = winstore.write_machineid_file(
+            path, "NEW-ID", self.backup_root, "machineid")
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(r["before"])
+        self.assertIsNone(r["backed_up_to"])
+
+    def test_salt_rotation_creates_nested_dicts(self):
+        path = os.path.join(self.base, "Preferences")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"other": 1}')
+        r = winstore.rotate_device_id_salt(path, self.backup_root, "Preferences")
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(r["before"])
+        self.assertRegex(r["after"], r"^[0-9a-f]{32}$")
+        with open(path, "r", encoding="utf-8-sig") as f:
+            content = json.load(f)
+        self.assertEqual(content["electron"]["media"]["device_id_salt"],
+                         r["after"])
+
+    def test_salt_rotation_replaces_existing_and_verifies(self):
+        path = os.path.join(self.base, "Preferences")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"electron": {"media": {"device_id_salt": "OLD"}}}')
+        r = winstore.rotate_device_id_salt(
+            path, self.backup_root, "Preferences", new_salt="a" * 32)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["before"], r["after"]), ("OLD", "a" * 32))
+        self.assertTrue(r["backed_up_to"])
+
+    def test_salt_rotation_missing_file_is_skip_ok(self):
+        r = winstore.rotate_device_id_salt(
+            os.path.join(self.base, "nope"), self.backup_root, "nope")
+        self.assertTrue(r["ok"])
+        self.assertTrue(r["skipped"])
+
+    def test_remove_json_keys_dotted_path(self):
+        path = os.path.join(self.base, "Local State")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"os_crypt": {"encrypted_key": "SECRET"}, "keep": 1}')
+        r = winstore.remove_json_keys(
+            path, ["os_crypt.encrypted_key"], self.backup_root, "Local State")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["before"], {"os_crypt.encrypted_key": "present"})
+        self.assertEqual(r["removed"], ["os_crypt.encrypted_key"])
+        with open(path, "r", encoding="utf-8-sig") as f:
+            content = json.load(f)
+        self.assertNotIn("encrypted_key", content["os_crypt"])
+        self.assertEqual(content["keep"], 1)
+
+    def test_remove_json_keys_missing_walk_is_skip_ok(self):
+        path = os.path.join(self.base, "Local State")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"keep": 1}')
+        r = winstore.remove_json_keys(
+            path, ["os_crypt.encrypted_key"], self.backup_root, "Local State")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["before"], {"os_crypt.encrypted_key": "missing"})
+
+    def test_remove_json_keys_missing_file_is_skip_ok(self):
+        r = winstore.remove_json_keys(
+            os.path.join(self.base, "nope"), ["a.b"],
+            self.backup_root, "nope")
+        self.assertTrue(r["ok"])
+        self.assertTrue(r["skipped"])
 
 
 if __name__ == "__main__":

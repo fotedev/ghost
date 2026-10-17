@@ -19,7 +19,7 @@ import base64
 import json
 import sys
 
-from ghost import audit, identity, json_patch, restore, sqlite_keys
+from ghost import audit, backup, filesweep, identity, json_patch, restore, sqlite_keys, winstore
 
 
 def _decode_updates(b64):
@@ -79,6 +79,56 @@ def _cmd_audit_log(args):
             entries = json.load(f)
     print(audit.write_audit_log(entries, args.out))
     return 0
+
+
+def _cmd_backup(args):
+    report = backup.backup_to_timestamped_dir(
+        args.source, args.backup_root, args.label)
+    print(json.dumps(report))
+    return 0 if (report["ok"] or report["skipped"]) else 1
+
+
+def _cmd_machineid_file(args):
+    payload = _decode_updates(args.payload_b64)
+    report = winstore.write_machineid_file(
+        args.path, payload["value"], args.backup_root, args.label)
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
+
+
+def _cmd_salt_rotate(args):
+    report = winstore.rotate_device_id_salt(
+        args.path, args.backup_root, args.label)
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
+
+
+def _cmd_json_remove(args):
+    payload = _decode_updates(args.payload_b64)
+    report = winstore.remove_json_keys(
+        args.path, payload["keys"], args.backup_root, args.label)
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
+
+
+def _cmd_store_delete(args):
+    report = filesweep.remove_identity_store(
+        args.path, args.action, args.backup_root, args.label,
+        root_path=args.root_path)
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
+
+
+def _cmd_sweep_file(args):
+    report = filesweep.remove_verified(args.path)
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
+
+
+def _cmd_sweep_tree(args):
+    report = filesweep.sweep_tree(args.path, args.backup_root, args.label)
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
 
 
 def build_parser():
@@ -143,6 +193,72 @@ def build_parser():
     p.add_argument("entries", nargs="?",
                    help="JSON file with the entries array (default [])")
     p.set_defaults(func=_cmd_audit_log)
+
+    p = sub.add_parser(
+        "backup",
+        help="copy a file/tree into a backup dir with lock retries + "
+             "verify-after (Backup-FileToTimestampDir twin)")
+    p.add_argument("source")
+    p.add_argument("backup_root")
+    p.add_argument("label")
+    p.set_defaults(func=_cmd_backup)
+
+    p = sub.add_parser(
+        "machineid-file",
+        help="backup + rewrite a machine-id text file + re-read verify "
+             "(Set-VerifiedMachineIdFile twin)")
+    p.add_argument("path")
+    p.add_argument("backup_root")
+    p.add_argument("label")
+    p.add_argument("payload_b64", help="base64 of {\"value\": \"<id>\"}")
+    p.set_defaults(func=_cmd_machineid_file)
+
+    p = sub.add_parser(
+        "salt-rotate",
+        help="rotate electron.media.device_id_salt in a Preferences JSON + "
+             "verify (Set-DeviceIdSalt twin)")
+    p.add_argument("path")
+    p.add_argument("backup_root")
+    p.add_argument("label")
+    p.set_defaults(func=_cmd_salt_rotate)
+
+    p = sub.add_parser(
+        "json-remove",
+        help="remove dotted JSON key paths + re-read verify "
+             "(Remove-OsCryptEncryptedKey twin)")
+    p.add_argument("path")
+    p.add_argument("backup_root")
+    p.add_argument("label")
+    p.add_argument("payload_b64", help="base64 of {\"keys\": [\"a.b\", ...]}")
+    p.set_defaults(func=_cmd_json_remove)
+
+    p = sub.add_parser(
+        "store-delete",
+        help="backup then rename-or-delete a binary identity store with "
+             "retries (Clear-BinaryIdentityStore twin, one path)")
+    p.add_argument("path")
+    p.add_argument("backup_root")
+    p.add_argument("label")
+    p.add_argument("--action", choices=["rename", "delete"], default="delete")
+    p.add_argument("--root-path", default=None,
+                   help="paths under this root get relative backup labels")
+    p.set_defaults(func=_cmd_store_delete)
+
+    p = sub.add_parser(
+        "sweep-file",
+        help="delete one file (no backup) + re-read verify "
+             "(Remove-VerifiedFileNoBackup twin)")
+    p.add_argument("path")
+    p.set_defaults(func=_cmd_sweep_file)
+
+    p = sub.add_parser(
+        "sweep-tree",
+        help="backup a tree then delete every file inside it individually "
+             "(Clear-TreeFilesIndividually twin)")
+    p.add_argument("path")
+    p.add_argument("backup_root")
+    p.add_argument("label")
+    p.set_defaults(func=_cmd_sweep_tree)
 
     return parser
 
