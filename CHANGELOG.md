@@ -11,6 +11,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Python hybrid Phase 3 pilot — reset_cursor v0.3 thin manifest**
+  (2026-10-17): the Cursor reset's 15 steps now run every store mutation
+  through `src/python/ghost_cli.py` core subcommands via a single
+  `Invoke-GhostCore` helper — new core modules `ghost/filesweep.py`
+  (binary-store rename-or-delete, verified deletes, per-file tree sweeps)
+  and `ghost/winstore.py` (machine-id file, device_id_salt rotation, dotted
+  JSON key removal) plus 7 new subcommands (`backup`, `machineid-file`,
+  `salt-rotate`, `json-remove`, `store-delete`, `sweep-file`, `sweep-tree`),
+  all covered by the expanded unittest suite (58 cases incl. CLI bridge
+  contracts). Step order, audit keys, restore actions and the summary are
+  identical to v0.2 (archived at `archive/reset_cursor_windows-v0.2.ps1`,
+  local-only); step 4's inline temp-.py heredoc — the last one in the repo —
+  is replaced by the shared `delete-secrets` subcommand. Python is now
+  required for ALL Cursor reset steps (fail-fast up front). 1031 → 840
+  lines. The mandatory live comparison run (pilot acceptance #3) is
+  user-supervised and pending. Decision record + design:
+  [docs/PYTHON_HYBRID_ROADMAP.md](docs/PYTHON_HYBRID_ROADMAP.md) (Phase 2
+  leaf-tools migration CANCELLED with per-tool reasons).
+
 - **Clone-suite generator** (`tools/new_clone_suite.ps1`, 2026-10-17) —
   turns the app-cloning playbook's Phases 3-10 mechanics into scaffolding:
   from an intake JSON (or interactive defaults) it emits the reset manifest,

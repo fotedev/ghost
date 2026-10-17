@@ -29,7 +29,9 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   refresh_zcode_second_chats chat-check) invoke it by absolute
                                #   path; tested by tests/python/test_ghost_core.py (unittest)
 docs/                              # IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, research notes (local-only);
-                                   #   ZCODE_CHAT_SYNC_WATCHER_PLAN.md (tracked — chat-sync root cause)
+                                   #   ZCODE_CHAT_SYNC_WATCHER_PLAN.md (tracked — chat-sync root cause);
+                                   #   PYTHON_HYBRID_ROADMAP.md (tracked — Phase 2 cancellation decision +
+                                   #   Phase 3 thin-manifest pilot design + acceptance criteria)
 archive/                           # superseded versions (local-only fallbacks — do not run, never committed)
 assets/                            # ghost.ico + ghost-source.png (launcher icon; regenerate via
                                    #   tools/make_ghost_icon.ps1 — never hand-edit)
@@ -145,6 +147,11 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     tools\autoclaw-<color>-branding\tray_icon.ico,0 (blue/yellow/
                                    #     green/red ← inst1..4; missing dir warns + falls back to the
                                    #     exe icon); AutoClaw submenu [2]
+                                   #   new_clone_suite.ps1 — clone-suite scaffolding generator (playbook
+                                   #     phases 3-10 mechanics): intake JSON → reset/launcher/.bat/
+                                   #     shortcuts/SPEC skeletons + GHOST.bat submenu anchor-edit with
+                                   #     verify-after; parse-checks every emitted .ps1; Phases 0-2 stay
+                                   #     with the agent as <TODO: Phase 1 discovery> slots
                                    #   make_clone_icon.ps1 — GENERIC clone-icon generator (any app,
                                    #     PS 5.1 + System.Drawing only): corner-sampled background →
                                    #     tile detection (LongestLowRun profiles, -BgTolerance, or
@@ -175,6 +182,13 @@ src/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scripts
 reset_cursor.ps1     # Cursor: 15 steps (machineid, storage.json, state.vscdb,
                                    #          auth-secrets scrub, device_id_salt, os_crypt rotation,
                                    #          Cookies/NPS/sentry/DIPS/Trust Tokens/Crashpad/logs, workspace DBs)
+                                   #          v0.3 THIN MANIFEST (Phase 3 pilot — docs/PYTHON_HYBRID_ROADMAP.md):
+                                   #          every store mutation runs via ghost_cli.py core subcommands
+                                   #          (Invoke-GhostCore = the single PS→Python point); step order,
+                                   #          audit keys, restore actions + summary identical to v0.2
+                                   #          (archived at archive/reset_cursor_windows-v0.2.ps1, local-only);
+                                   #          step 4's legacy temp-.py heredoc replaced by the shared
+                                   #          delete-secrets subcommand; Python now required for ALL steps
 reset_devin.ps1       # Windsurf/Devin Desktop (rebranded 2026-06): 17 steps
                                    #            x N auto-detected %APPDATA% roots (Devin, Windsurf):
                                    #            argv.json crash-reporter-id (.windsurf + .devin),
