@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
   Installs (or removes) Desktop + Start Menu shortcuts for the ZCode CLONE
-  instances (Second / Third / Fourth). Default: all three.
+  instances (Second / Third / Fourth / Fifth / Sixth). Default: all five.
 
 .DESCRIPTION
   A Windows .lnk cannot set environment variables, and each clone ZCode instance
@@ -36,9 +36,9 @@
 #>
 [CmdletBinding()]
 param(
-  # Which clone shortcut(s) to manage. Default: all three.
-  [ValidateSet('Second', 'Third', 'Fourth')]
-  [string[]]$Instance = @('Second', 'Third', 'Fourth'),
+  # Which clone shortcut(s) to manage. Default: all five.
+  [ValidateSet('Second', 'Third', 'Fourth', 'Fifth', 'Sixth')]
+  [string[]]$Instance = @('Second', 'Third', 'Fourth', 'Fifth', 'Sixth'),
   [switch]$Remove,
   [switch]$DesktopOnly,
   [switch]$StartMenuOnly,
@@ -52,7 +52,8 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Launcher = Join-Path $RepoRoot 'src\windows\launch_zcode_second_instance.ps1'
 
 # Must stay in sync with the InstanceMap in launch_zcode_second_instance.ps1.
-# Second is FROZEN (existing installed profile); Third = Yellow, Fourth = Green.
+# Second is FROZEN (existing installed profile); Third = Yellow, Fourth = Green,
+# Fifth = Red (2026-10-17), Sixth = Orange (2026-10-24).
 $InstanceDefs = @{
   'Second' = @{ ShortcutName = 'ZCode Second.lnk'; AumidSuffix = '2'
                 BrandingRepo = 'zcode-blue-branding';   DisplayName = 'Blue' }
@@ -60,6 +61,10 @@ $InstanceDefs = @{
                 BrandingRepo = 'zcode-yellow-branding'; DisplayName = 'Yellow' }
   'Fourth' = @{ ShortcutName = 'ZCode Fourth.lnk'; AumidSuffix = '4'
                 BrandingRepo = 'zcode-green-branding';  DisplayName = 'Green' }
+  'Fifth'  = @{ ShortcutName = 'ZCode Fifth.lnk';  AumidSuffix = '5'
+                BrandingRepo = 'zcode-red-branding';    DisplayName = 'Red' }
+  'Sixth'  = @{ ShortcutName = 'ZCode Sixth.lnk';  AumidSuffix = '6'
+                BrandingRepo = 'zcode-orange-branding'; DisplayName = 'Orange' }
 }
 $script:Failed = $false
 

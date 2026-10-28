@@ -8,7 +8,7 @@
 #   - -Target Third     -> %APPDATA%\ZCode-Third + %USERPROFILE%\ZCodeThirdHome\.zcode only
 #   - -Target Fourth    -> %APPDATA%\ZCode-Fourth + %USERPROFILE%\ZCodeFourthHome\.zcode only
 #   - -Target Both      -> orchestrates Secondary then Primary (back-compat)
-#   - -Target All       -> orchestrates Third + Fourth + Secondary, then Primary
+#   - -Target All       -> orchestrates Third + Fourth + Fifth + Sixth + Secondary, then Primary
 #                          (incl. Qoder), each child with its OWN fresh ID set.
 #     Per-instance identity rule: orchestrator modes NEVER duplicate IDs
 #     across instances.
@@ -78,7 +78,7 @@
 # ALL ZCode instances + Qoder by design. This script is app-data-only.
 
 param(
-    [ValidateSet('Primary', 'Secondary', 'Third', 'Fourth', 'Both', 'All')][string]$Target = 'Both',
+    [ValidateSet('Primary', 'Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Both', 'All')][string]$Target = 'Both',
     [switch]$SkipQoder
 )
 
@@ -1183,7 +1183,7 @@ function Get-StepAuditStatus {
 # Must stay in sync with the InstanceMap in launch_zcode_second_instance.ps1.
 function Get-ZcodeTargetRoots {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('Primary', 'Secondary', 'Third', 'Fourth')][string]$Label
+        [Parameter(Mandatory = $true)][ValidateSet('Primary', 'Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth')][string]$Label
     )
 
     switch ($Label) {
@@ -1208,6 +1208,20 @@ function Get-ZcodeTargetRoots {
                 UserProfile = Join-Path $env:USERPROFILE 'ZCodeFourthHome\.zcode'
             }
         }
+        'Fifth' {
+            return @{
+                Label       = 'Fifth'
+                Roaming     = Join-Path $env:APPDATA 'ZCode-Fifth'
+                UserProfile = Join-Path $env:USERPROFILE 'ZCodeFifthHome\.zcode'
+            }
+        }
+        'Sixth' {
+            return @{
+                Label       = 'Sixth'
+                Roaming     = Join-Path $env:APPDATA 'ZCode-Sixth'
+                UserProfile = Join-Path $env:USERPROFILE 'ZCodeSixthHome\.zcode'
+            }
+        }
         default {
             return @{
                 Label       = 'Primary'
@@ -1226,13 +1240,15 @@ function Get-ZcodeTargetRoots {
 # A main whose subtree carries one clone's marker strings (its roaming dir name
 # or clone home dir name) belongs to that clone; any other ZCode main is
 # Primary. Clone home dirs are disjoint, so the first marker match is decisive.
-# Returns @{ Primary = @(pids); Secondary = @(pids); Third = @(pids); Fourth = @(pids) }.
+# Returns @{ Primary = @(pids); Secondary = @(pids); Third = @(pids); Fourth = @(pids); Fifth = @(pids); Sixth = @(pids) }.
 $script:ZcodeCloneMarkers = @{
     Secondary = @('*ZCode-Second*', '*ZCodeSecondHome*')
     Third     = @('*ZCode-Third*', '*ZCodeThirdHome*')
     Fourth    = @('*ZCode-Fourth*', '*ZCodeFourthHome*')
+    Fifth     = @('*ZCode-Fifth*', '*ZCodeFifthHome*')
+    Sixth     = @('*ZCode-Sixth*', '*ZCodeSixthHome*')
 }
-$script:ZcodeAllLabels = @('Primary', 'Secondary', 'Third', 'Fourth')
+$script:ZcodeAllLabels = @('Primary', 'Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth')
 
 function Get-ZcodeTargetMains {
     $result = @{}
@@ -1266,7 +1282,7 @@ function Get-ZcodeTargetMains {
             if ($byParent.ContainsKey($childPid)) {
                 foreach ($c in $byParent[$childPid]) {
                     $cmd = [string]$c.CommandLine
-                    foreach ($label in @('Secondary', 'Third', 'Fourth')) {
+                    foreach ($label in @('Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth')) {
                         foreach ($mk in $script:ZcodeCloneMarkers[$label]) {
                             if ($cmd -like $mk) { $matchedLabel = $label; break }
                         }
@@ -1297,7 +1313,7 @@ function Get-ZcodeTargetMains {
 # with a diagnostic dump instead of killing all.
 function Stop-ZcodeTargetTree {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('Primary', 'Secondary', 'Third', 'Fourth')][string]$Label,
+        [Parameter(Mandatory = $true)][ValidateSet('Primary', 'Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth')][string]$Label,
         [int]$MaxAttempts = 10,
         [int]$DelayMs = 1500,
         [switch]$RequireSurvivor
@@ -1360,7 +1376,7 @@ function Stop-ZcodeTargetTree {
 # files (kilo.exe kept a log locked as an orphan process). NEVER touches any
 # ZCode* process: shared helpers (kilo/roo/cline/blackbox) are killed ONLY when
 # their ancestor chain does NOT lead to a surviving CLONE ZCode main (any of
-# Secondary/Third/Fourth), so running clone instances keep their helpers.
+# Secondary/Third/Fourth/Fifth/Sixth), so running clone instances keep their helpers.
 # Clone targets never call this (Qoder stays running there by design).
 function Stop-QoderProcessesOnly {
     param(
@@ -1375,7 +1391,7 @@ function Stop-QoderProcessesOnly {
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         $zmap = Get-ZcodeTargetMains
         $clonePids = @()
-        foreach ($cloneLabel in @('Secondary', 'Third', 'Fourth')) {
+        foreach ($cloneLabel in @('Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth')) {
             $clonePids += @($zmap[$cloneLabel])
         }
 
@@ -1418,7 +1434,7 @@ function Stop-QoderProcessesOnly {
         $qoderRemaining = @(Get-Process -Name "Qoder*" -ErrorAction SilentlyContinue).Count
         $zmapAfter = Get-ZcodeTargetMains
         $cloneSurvivors = 0
-        foreach ($cloneLabel in @('Secondary', 'Third', 'Fourth')) {
+        foreach ($cloneLabel in @('Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth')) {
             $cloneSurvivors += @($zmapAfter[$cloneLabel]).Count
         }
         Write-Host ("    attempt {0}/{1} - Qoder remaining: {2}, clone survivors: {3}" -f $attempt, $MaxAttempts, $qoderRemaining, $cloneSurvivors) -ForegroundColor DarkGray
@@ -1449,7 +1465,7 @@ $qoderIdBackupsRoot = Join-Path $qoderRoaming "ID_Backups"
 # so Qoder steps execute exactly once, in the Primary child). Each child
 # generates its OWN fresh ID set -> per-instance identity rule holds.
 # 'Both' = Secondary + Primary (kept for backward compatibility with menus).
-# 'All'  = Third + Fourth + Secondary + Primary.
+# 'All'  = Third + Fourth + Fifth + Sixth + Secondary + Primary.
 if (($Target -eq 'Both') -or ($Target -eq 'All')) {
     $v14Script = $MyInvocation.MyCommand.Path
     if ($Target -eq 'Both') {
@@ -1461,6 +1477,8 @@ if (($Target -eq 'Both') -or ($Target -eq 'All')) {
         $children = @(
             @{ Label = 'Third';     SkipQoder = $true },
             @{ Label = 'Fourth';    SkipQoder = $true },
+            @{ Label = 'Fifth';     SkipQoder = $true },
+            @{ Label = 'Sixth';     SkipQoder = $true },
             @{ Label = 'Secondary'; SkipQoder = $true },
             @{ Label = 'Primary';   SkipQoder = $false }
         )
@@ -1501,7 +1519,7 @@ $ids = New-IdentitySet
 
 if (-not (Test-Path -LiteralPath $zcodeRoaming)) {
     Write-Host "ZCode $Target instance not found at: $zcodeRoaming" -ForegroundColor Red
-    Write-Host "Hint: launch it once via its clone shortcut / launcher (Secondary/Third/Fourth) or ZCode.exe (Primary)." -ForegroundColor Yellow
+    Write-Host "Hint: launch it once via its clone shortcut / launcher (Secondary/Third/Fourth/Fifth/Sixth) or ZCode.exe (Primary)." -ForegroundColor Yellow
     exit 1
 }
 
