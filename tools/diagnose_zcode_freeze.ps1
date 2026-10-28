@@ -35,7 +35,9 @@ $Instances = @(
     @{ Name = 'Primary'; Home = $env:USERPROFILE },
     @{ Name = 'Second';  Home = (Join-Path $env:USERPROFILE 'ZCodeSecondHome') },
     @{ Name = 'Third';   Home = (Join-Path $env:USERPROFILE 'ZCodeThirdHome') },
-    @{ Name = 'Fourth';  Home = (Join-Path $env:USERPROFILE 'ZCodeFourthHome') }
+    @{ Name = 'Fourth';  Home = (Join-Path $env:USERPROFILE 'ZCodeFourthHome') },
+    @{ Name = 'Fifth';   Home = (Join-Path $env:USERPROFILE 'ZCodeFifthHome') },
+    @{ Name = 'Sixth';   Home = (Join-Path $env:USERPROFILE 'ZCodeSixthHome') }
 )
 
 function Write-Hdr([string]$Text) {
@@ -72,8 +74,10 @@ $Events = @()   # objects: Instance, Ts, Pid, Kind, Reason
 $script:OomOsError1455 = $false
 
 # ---- [1] per-instance crash events from the v2 logs -------------------------
-# Only the event lines carry a json payload ("...-gone: {"); the follow-up
-# "archived N dump(s) source=..." lines repeat the keyword and are skipped.
+# Only event-shaped lines match: the two -gone kinds require "keyword: {",
+# perf_freeze / unresponsive require a keyword delimiter (":" / "(" / space);
+# the follow-up "archived N dump(s) source=..." lines repeat the keyword and
+# are skipped.
 Write-Hdr ('[1] Renderer/child crash + freeze events, last ' + $Days + ' day(s)')
 foreach ($inst in $Instances) {
     $logDir = Join-Path $inst.Home '.zcode\v2\logs'
@@ -90,7 +94,13 @@ foreach ($inst in $Instances) {
         if (-not (Test-Path $logFile)) { continue }
         $scanned++
         try {
-            $hits = @(Select-String -LiteralPath $logFile -Pattern 'render-process-gone: \{|child-process-gone: \{|perf_freeze|unresponsive' -ErrorAction SilentlyContinue)
+            # -ErrorAction Stop: a locked/unreadable log must surface in the
+            # catch below, not silently yield zero events. perf_freeze /
+            # unresponsive require an event shape (keyword followed by ':',
+            # '(' or a space) so follow-up "archived N dump(s)" lines and prose
+            # repeats cannot match - the shape guard existed only for the two
+            # -gone kinds before.
+            $hits = @(Select-String -LiteralPath $logFile -Pattern 'render-process-gone: \{|child-process-gone: \{|perf_freeze[:( ]|unresponsive[:( ]' -ErrorAction Stop)
         } catch {
             Write-Output ('   log unreadable (in use?): ' + $date + '.log')
             continue
@@ -107,13 +117,13 @@ foreach ($inst in $Instances) {
             } elseif ($line -match 'child-process-gone: \{') {
                 $kind = 'child process gone'
                 if ($line -match '"reason":"([a-z\-]+)"') { $reason = $Matches[1] }
-            } elseif ($line -match 'perf_freeze') {
+            } elseif ($line -match 'perf_freeze[:( ]') {
                 $kind = 'window freeze >30s'
-            } elseif ($line -match 'unresponsive') {
+            } elseif ($line -match 'unresponsive[:( ]') {
                 $kind = 'window unresponsive >5s'
             }
             if ($kind -eq '') { continue }
-            $raw += [pscustomobject]@{ Ts = $ts; Pid = $pid2; Kind = $kind; Reason = $reason }
+            $raw += [pscustomobject]@{ Ts = $ts; Pid = $pid2; Kind = $kind; Reason = $reason; File = $date }
             $Events += [pscustomobject]@{ Instance = $inst.Name; Ts = $ts; Pid = $pid2; Kind = $kind; Reason = $reason }
         }
     }
@@ -129,7 +139,13 @@ foreach ($inst in $Instances) {
         foreach ($e in $raw) {
             $sec = $e.Ts
             if ($sec.Length -ge 19) { $sec = $sec.Substring(0, 19) }
-            $key = $sec + '|' + $e.Pid + '|' + $e.Kind + '|' + $e.Reason
+            if ($sec -eq '') {
+                # Unparsed timestamps ('') must not collapse into ONE bucket
+                # spanning every scanned day - key them per source log file.
+                $key = $e.File + '|(no timestamp)|' + $e.Pid + '|' + $e.Kind + '|' + $e.Reason
+            } else {
+                $key = $sec + '|' + $e.Pid + '|' + $e.Kind + '|' + $e.Reason
+            }
             if (-not $buckets.ContainsKey($key)) {
                 $buckets[$key] = @{ E = $e; Count = 0 }
             }
