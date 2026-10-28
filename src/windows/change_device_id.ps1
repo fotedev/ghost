@@ -496,6 +496,7 @@ try {
     reg export "HKLM\SYSTEM\CurrentControlSet\Control\SystemInformation" "$backupDir\SystemInformation.reg" /y | Out-Null
     reg export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion" "$backupDir\WindowsNTCurrentVersion.reg" /y | Out-Null
     reg export "HKLM\SOFTWARE\Microsoft\Cryptography" "$backupDir\Cryptography.reg" /y | Out-Null
+    reg export "HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor" "$backupDir\CentralProcessor.reg" /y | Out-Null
     # Backup user hives as well
     reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo" "$backupDir\SessionInfo.reg" /y | Out-Null
     reg export "HKCU\Software\Microsoft\IdentityCRL" "$backupDir\IdentityCRL.reg" /y | Out-Null
@@ -526,6 +527,22 @@ try {
 finally {
     if ($hostnameRng) { $hostnameRng.Dispose() }
 }
+
+# New CPU name: Win32_Processor.Name is read from ProcessorNameString
+# (HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\<n>) - the one
+# hardware signal (weight 0.12) a registry write can actually move.
+# Every subkey gets the same fictional name, not just subkey 0.
+$cpuNamePool = @(
+    "Intel(R) Core(TM) i7-10700 CPU @ 2.90GHz"
+    "Intel(R) Core(TM) i5-10400 CPU @ 2.90GHz"
+    "Intel(R) Core(TM) i7-1165G7 CPU @ 2.80GHz"
+    "Intel(R) Core(TM) i5-12400 CPU @ 2.50GHz"
+    "Intel(R) Core(TM) i3-10100 CPU @ 3.60GHz"
+    "AMD Ryzen 5 3600 6-Core Processor"
+    "AMD Ryzen 7 5800X 8-Core Processor"
+    "AMD Ryzen 5 5600G with Radeon Graphics"
+)
+$newCpuName = $cpuNamePool[(Get-Random -Minimum 0 -Maximum $cpuNamePool.Count)]
 
 # Validate computer name (15 characters max for NetBIOS compatibility)
 if ($newComputerName.Length -gt 15) {
@@ -597,9 +614,25 @@ $registryPaths = @(
     }
 )
 
-# Get a list of all user SIDs
+# Append the CPU name spoof entries after the array literal so they ride the
+# same backup/changelog/verify loop as every other write.
+$cpuKeys = Get-ChildItem -Path "HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor" -ErrorAction SilentlyContinue
+foreach ($cpuKey in $cpuKeys) {
+    $registryPaths += @{
+        Path = $cpuKey.PSPath
+        Name = "ProcessorNameString"
+        Value = $newCpuName
+        Type = "String"
+    }
+}
+
+# Get a list of all user SIDs. Exclude ProfileList .bak keys: loading the SAME
+# NTUSER.DAT under a second HKU name fails (the hive is already loaded under
+# the base SID), that failure was invisible ($LASTEXITCODE never checked),
+# and the first .bak-targeted write then aborted the whole LegacyReset with
+# a full rollback - on exactly the machines this tool targets.
 $userProfiles = Get-ChildItem -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" | 
-    Where-Object { $_.PSChildName -match "S-1-5-21" }
+    Where-Object { $_.PSChildName -match "S-1-5-21" -and $_.PSChildName -notlike "*.bak" }
 
 # Add user-specific registry entries to modify for each user profile
 foreach ($profile in $userProfiles) {
@@ -930,6 +963,7 @@ Write-Host "- New Device ID: $newDeviceID" -ForegroundColor Yellow
 Write-Host "- New Machine GUID: $newMachineGUID" -ForegroundColor Yellow
 Write-Host "- New Product ID: $newProductID" -ForegroundColor Yellow
 Write-Host "- New Computer Name: $newComputerName" -ForegroundColor Yellow
+Write-Host "- New CPU Name: $newCpuName" -ForegroundColor Yellow
 
 # Create restore script
 $restoreScriptPath = "$backupDir\restore_original_values.ps1"
@@ -947,6 +981,7 @@ reg import "$backupDir\DeviceMetadata.reg"
 reg import "$backupDir\SystemInformation.reg"
 reg import "$backupDir\WindowsNTCurrentVersion.reg"
 reg import "$backupDir\Cryptography.reg"
+reg import "$backupDir\CentralProcessor.reg"
 reg import "$backupDir\SessionInfo.reg"
 reg import "$backupDir\IdentityCRL.reg"
 reg import "$backupDir\Personalization.reg"
@@ -962,7 +997,7 @@ Write-Host "`nA restore script has been created at: $restoreScriptPath" -Foregro
 Write-Host "You can run this script to restore your original settings if needed." -ForegroundColor Cyan
 
 # Cleanup
-Remove-Variable -Name currentInfo, newDeviceID, newMachineGUID, newProductID, newComputerName, registryPaths, successCount, totalChanges, changeLog, rollbackNeeded, rollbackSucceeded -ErrorAction SilentlyContinue
+Remove-Variable -Name currentInfo, newDeviceID, newMachineGUID, newProductID, newComputerName, newCpuName, cpuNamePool, cpuKeys, registryPaths, successCount, totalChanges, changeLog, rollbackNeeded, rollbackSucceeded -ErrorAction SilentlyContinue
 
 # Prompt for restart
 $restart = Read-Host "`nWould you like to restart now? (y/n)"
