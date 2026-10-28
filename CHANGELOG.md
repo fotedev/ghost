@@ -7,6 +7,514 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-28
+
+### Added
+- **Open-task survey: tracked task backlog + four planning specs**
+  (2026-10-28): the 2026-10-24 bug-sweep remediation state lived only in
+  gitignored local folders; `docs/TASK_BACKLOG.md` now carries the tracked
+  status of every open item (the five write-guard-blocked files incl. 2
+  CRITICALs with ready-to-apply staged diffs, the pending qoder/watchers/trae
+  scopes, ZCode W1, the migration queue, clone-suite future work, ops backlog)
+  — spot-checked against the current tree, several stale pending items marked
+  DONE-since-source. New specs: `BUG_SWEEP_REMEDIATION_PLAN.md` (finish the
+  sweep: re-verify-before-apply rule, per-file procedure, acceptance gates),
+  `OPENCODE_CONFIG_SYNC_PLAN.md` (definitions-only Primary→clone config sync,
+  secrets never copied), `CLINE_WINDOW_IDENTITY_PLAN.md` (launcher-side window
+  stamping design, developer-deferred), `THIN_MANIFEST_MIGRATION_QUEUE_PLAN.md`
+  (per-script breakdown for the remaining five resetters with the
+  fix-before-migrate gate); docs/README.md index updated.
+- **Docs re-baseline: every doc brought up to the six-instance /
+  engine-v8 / MCP-sync-trio state** (2026-10-28): README + docs/README +
+  cli/architecture/getting-started/troubleshooting refreshed with the Sixth
+  clone, ZCode [24]-[26] MCP sync trio, diagnose_zcode_throttle.ps1
+  (CLI-only), spoof_wmi_serials.ps1 (Maintenance [3]), the
+  Cline/OpenCode/AutoClaw2 suites and cross-links to their specs;
+  ZCODE_TELEGRAM_BOTS.md instance counts updated to 6 homes (faq.md
+  audited — its answers reference the README platform table, no counts to
+  change);
+  AGENTS.md + GHOST.bat [12] engine label v7 -> v8;
+  ZCODE_RESET_EDGE_CASES_PLAN.md menu labels and status refreshed.
+  Historical v7 mentions kept where they document what shipped at the time.
+- **Install-and-forget watchers: the clone launcher ensures the resident
+  watchers** (2026-10-27): users who only install the clones never open
+  GHOST to start watchers manually, so launcher step 2e now runs on EVERY
+  clone launch (menu, Desktop/Start shortcuts, Launch ALL — all route
+  through launch_zcode_second_instance.ps1) and ensures both main watchers:
+  the MCP sync watcher and the taskbar identity watcher. Mechanism per
+  watcher: a mutex probe (no WMI, microseconds) detects "already running";
+  a missing Startup .lnk is installed once via the watcher's own
+  -InstallAutostart (which verify-after reads back); then the watcher
+  starts hidden via Start-Process with a pre-quoted -File argument (PS 5.1
+  ArgumentList joins unquoted). Best-effort by contract: any failure warns
+  and never blocks the launch; duplicates are converged by each watcher's
+  own mutex guard. The captcha watchdog stays manual (ZCode [13]) — its
+  kill/relaunch intervention and Telegram wiring make it a poor
+  auto-start default. Scope decided with the developer (MCP sync +
+  taskbar; start-now + autostart).
+- **ZCode MCP sync: add in ONE place (Primary), every clone gets it live**
+  (2026-10-27): a 15-agent verification pass (app.asar disassembly + logs of
+  all six instances) proved the long-standing "a live app may rewrite its
+  config on exit" guard rationale FALSE — the app holds no handle on
+  `<CloneHome>\.zcode\cli\config.json`, never rewrites it on exit (its own
+  writes are event-driven atomic tmp+rename), and reads `mcp.servers` at
+  every app-server spawn, one per new session (6-41 bootstraps/day per
+  instance). New: `tools/zcode_mcp_merge.ps1` — the pure merge core
+  extracted from sync_zcode_assets.ps1's Sync-McpDefinitions (unit-tested by
+  `tests/zcode_mcp_merge.Tests.ps1`: clone-local enabled toggles survive,
+  clone-only servers are never removed, new servers inherit the Primary's
+  enabled value, Primary definitions win, key-order-insensitive deep
+  compare); `tools/sync_zcode_assets.ps1 -McpOnly` — MCP-definitions-only
+  sync that is safe against RUNNING instances (skills/plugins keep the
+  old skip); `tools/watch_zcode_mcp_sync.ps1` — resident watcher (taskbar
+  watcher pattern: named mutex ZcodeMcpSyncWatcher + startup process scan +
+  self-titling console + Startup-folder autostart) that invokes the sync
+  child on every Primary config change (mtime+size signature, parse-guarded,
+  debounced), converges all drift on its first pass and re-verifies deeply
+  every ~5 min, with opt-in `-ApplyLive` recycling running instances'
+  app-servers after a sync (idle-guarded, never mid-turn, never -Force).
+  Wired as GHOST.bat ZCode `[24]` (one-shot live sync, gid 67), `[25]`
+  (resident watcher, gid 68) and `[26]` (sync + apply to running instances
+  now, gid 69); dispatch header range 1-66 -> 1-69. The watcher itself never
+  writes config — every write goes through sync_zcode_assets.ps1's backup +
+  verify-after + JSONL audit.
+
+### Fixed
+- **Launcher step 2d pre-launch sync never ran** (found 2026-10-28 by a
+  live launch test): `$SyncScript = Join-Path $PSScriptRoot '..\tools\...'`
+  resolved to `src\tools\` from the launcher's home in `src\windows\` —
+  the sync script lives at the repo-root `tools\`, so every launch printed
+  the quiet yellow "not found - skipping (clone stays as last synced)" line
+  and the pre-launch asset sync had effectively never executed since the
+  scripts moved into src/windows (OSS restructure v1.0.0). Branding's
+  step 3b always used the correct `'..\..\tools\'` depth, proving the
+  inconsistency. Fixed the path for 2d AND for the new step 2e watcher
+  paths (same trap).
+- **ZCode taskbar watcher auto-repair dead since 2026-09-28**
+  (2026-10-25): the resident watcher DETECTED every Primary shortcut hijack
+  (ZCode.lnk rewritten with a clone AUMID + wiped icon — the Start-menu
+  dedupe hiding a clone entry + the white taskbar icon) but its repair
+  never ran: inside Invoke-PrimaryHijackGuard the local
+  `$repair = Join-Path ...` assignment targeted the function's own
+  `[switch]$Repair` parameter (PowerShell variables are case-insensitive),
+  and binding the script-path string to a switch parameter throws
+  "Cannot convert ... to SwitchParameter" — 228 identical logged failures
+  before a diagnostic line captured the exception's InvocationInfo pointing
+  at the assignment. Renamed to `$repairScript`; auto-repair verified live
+  ([REPAIR] log line + clean ZCode.lnk read-back on both Desktop and Start
+  Menu).
+- **ZCode icon-override patch silently skipped after app updates**
+  (2026-10-24): the app updater replaces app.asar wholesale but leaves the
+  marker file in resources\, so patch_zcode_icon_override.ps1's
+  "marker exists" gate exited as "Already patched" and every clone lost its
+  in-app window + tray icons after an update (taskbar shortcut icons
+  survived since they never needed the patch). The script now byte-probes
+  app.asar for the engine's signature strings before the gate: signatures
+  present -> unchanged already-patched early exit; signatures missing ->
+  automatic re-patch without -Force, plus a FRESH backup of the new pristine
+  asar (reusing the original backup would have let a later -Restore
+  downgrade the app to the pre-update version).
+- **Icon-override engine v8: updater-secondary anchor tolerated on app
+  3.16.3** (2026-10-24): the 3.16.3 build added a second conjunction to the
+  auto-updater gate (enabled:<x>==="production"&&<flag>), so the v7 exact
+  anchor matched zero sites and aborted the whole re-patch after 9 of the 10
+  patch families had already applied (the engine refuses half-applied trees). v8 matches the bare and conjunct shapes
+  and appends the ZCODE_ICON_DIR guard as an extra && term; marker
+  patchVersion bumps to 8 so the next run auto-upgrades older markers.
+- **AutoClaw port/identity patch same update-recovery hardening**
+  (2026-10-24): the 1.20.0.887 update replaced app.asar AND removed
+  autoclaw-ports-patch.marker.json + ID_Backups, so re-running
+  patch_autoclaw_ports.ps1 would have treated the install as never patched
+  (fine) but a marker that DID survive would have dead-locked the gate like
+  the ZCode case. The script now byte-probes the asar for the v12 signature
+  strings (__autoclawWrapBW, .autoclaw-identity.json, __autoclawHomeOverride,
+  "19684, 19685" - all engine-emitted; a docstring-derived phantom string,
+  .autoclaw-icon.ico, was caught in review: it only ever exists as a runtime
+  userData file, never inside the asar) before the gate, re-patches
+  automatically when they are missing,
+  takes a fresh timestamped backup of the new pristine asar, and gates the
+  -Force pristine-extract on the probe instead of a findstr test (after an
+  update the new asar must be the extract source, not the old backup).
+  Dry-run verified against the live 1.20.0.887 asar: engine v12 applies all
+  four families (mcp-ports-8slot 1, home-override 569, aumid-suffix 2,
+  window-identity 4).
+
+### Added
+- **ZCode Start-Plan throttle diagnostic — `tools/diagnose_zcode_throttle.ps1`**
+  (2026-10-27, read-only): explains the "Reconnecting... x/10" /
+  "The system is busy, and automatic retries have reached the maximum
+  count" failures from the shared agent runtime JSONL
+  (`~\.zcode\cli\log\zcode-*.jsonl`, which every instance writes to). It
+  lists `model.main_turn.retry_start_plan_admission_busy` retries and
+  `turn.failed` entries with their cause chain
+  (`StartPlanBusyAutoRetryExhaustedError` → `providerCode 3009` "model
+  concurrency limit exceeded" / `model_rate_limited`, `maxAttempts 11` —
+  the UI's x/10 counter), builds an hourly histogram (local time) and a
+  per-session rollup, and the verdict spells out the finding that settled
+  the day's incident: server-side Start Plan admission control refusing
+  new streams under load — NOT a device/IP ban (auth + billing unaffected;
+  different accounts failed in the same minute; zero occurrences on
+  10-24..26) — plus the discrimination test (close all instances but one)
+  and the concurrency mitigations. `-Days N` widens the window; PS 5.1
+  parse-checked and live-validated against the 2026-10-27 logs.
+- **WMI hardware-serial spoof — `src/windows/spoof_wmi_serials.ps1`**
+  (2026-10-27, Maintenance `[3]` / gid 66, behind a `:ConfirmRun` gate): the
+  one portable technique from a Hydra Spoofer 1.5.5 review, rewritten to the
+  GHOST bar (the source's Python was not taken — bare excepts, zero
+  verify-after, f-string MOF generation, a wrong `Win32_BaseBoard` key). A
+  generated `.mof` redeclares `Win32_BIOS` / `Win32_BaseBoard` /
+  `Win32_ComputerSystemProduct` / `Win32_SystemEnclosure` /
+  `Win32_DiskDrive` / `Win32_PhysicalMemory` with `[DYNPROPS]` (real CIM key
+  properties, escaped literals, real instance keys) and compiles via
+  `mofcomp`, so WMI clients read spoofed serials; plus `SQMClient UserId`
+  and Bluetooth `LocalAddress` rotation (`-SkipBluetooth`) — the two
+  identity values GHOST had no coverage for. Backup-first
+  (`winmgmt /backup` aborts the run on failure), verify-after re-query as
+  the arbiter, audit log, generated `winmgmt /restore` script. Deliberately
+  excluded: CPU/GPU (Phase 5 + out of scope), `DigitalProductId`
+  randomization (activation risk), volume serials (license + unproven
+  signal — backlog in docs/WMI_SERIAL_SPOOFING.md). WMI layer only — does
+  not move the fingerprint self-test score (ground truth #4).
+- **ZCode Sixth clone (orange) — 6-instance suite** (2026-10-24): a fifth
+  branded clone joins the suite, bringing ZCode to parity with the other
+  suites (Primary + 5 clones) — instance `Sixth`, window title "ZCode
+  Orange", home `%USERPROFILE%\ZCodeSixthHome`, roaming
+  `%APPDATA%\ZCode-Sixth`, AUMID `dev.zcode.app.6`, accent `#CB5D06`
+  (derived from the blue accent by the same hue rotation that produced
+  Fifth's `#CA0607`), icon via `tools/zcode-orange-branding/` (blue master
+  +180° hue-rotate through `tools/make_clone_icon.ps1`). Wired everywhere
+  the four older clones are: launcher `-Instance Sixth` (+
+  `Launch-ZCode-Sixth.bat`), shortcuts installer (five clones now;
+  `ZCode Sixth.lnk`), taskbar watcher, captcha watchdog, chat refresher
+  (`-Target ...|Sixth|All`), asset sync (`-Target ...|Sixth|All`), bot
+  guardian (`tools/set_zcode_bot.ps1`), reset (`-Target Sixth`, `All` =
+  Third+Fourth+Fifth+Sixth+Secondary+Primary), freeze diagnostic, and
+  GHOST.bat ZCode submenu `[22]`/`[23]` (gids 64/65; the launch-all and
+  reset-all flows cover Sixth).
+- **OpenCode desktop multi-instance suite (c1..c5)** (2026-10-24): a
+  complete clone suite for OpenCode desktop (Electron 2.0.32, asInvoker,
+  `%LOCALAPPDATA%\Programs\@opencode-aidesktop`) beside the untouched
+  Primary (`%APPDATA%\ai.opencode.desktop` + `~\.local\share\opencode` +
+  `~\.config\opencode` — the latter holds live API keys and is never read
+  by clone scripts). Unlike AutoClaw2/Cline, packaged builds have NO env
+  lever for the userData (`OPENCODE_DESKTOP_TEST_ROOT` is unpackaged-only;
+  `OPENCODE_TEST_ONBOARDING` wipes its root every boot), so isolation runs
+  through the one-time clone-home asar patch
+  `tools/patch_opencode_clone_home.ps1` + `.mjs` (engine v1): the argv
+  flag `--opencode-clone-home=<dir>` feeds the app's OWN `ye()` test-mode
+  branch, which pins userData/sessionData per clone AND sets the four
+  `XDG_*` env vars (the app's own redirection surface, read
+  unconditionally in production) before the background-service spawn; the
+  per-clone userData also gives each clone its own Chromium
+  single-instance lock (N copies coexist natively). The same patch wraps
+  the app's SINGLE `setAppUserModelId` site (taskbar AUMID
+  `ai.opencode.desktop.cN`) and registers an app-level
+  `browser-window-created` listener that stamps window AUMID + per-color
+  icon + "OpenCode <Color>" title (this app has no `new X.BrowserWindow(`
+  sites — imports are aliased — so the AutoClaw-v12 constructor subclass
+  does not apply; the event is the equivalent hook). Engine carries the
+  full safety set: marker + patchVersion, `-Restore`, `node --check`,
+  zero-site abort, and the update-recovery byte-probe (an app update
+  reverts the patch; the probe re-patches automatically with a FRESH
+  backup). Launchers `src/windows/launch_opencode_clone.ps1` /
+  `launch_opencode_clones_all.ps1` (sequential): patch-signature preflight
+  ABORTS unpatched installs, per-clone lockfile running guard, identity
+  marker + icon rewritten fresh each launch, detached start + verify-after.
+  Shortcuts `tools/install_opencode_clone_shortcuts.ps1` (Desktop + Start
+  menu, suffixed AUMIDs, `-Remove`, `-RepairPrimaryAumid`). Orange (c5)
+  generated as a PLACEHOLDER via `make_clone_icon.ps1 -HueRotate 180` from
+  the blue master. No seeding, no reset script (Cline model): fresh state
+  per clone, ONE manual sign-in each. GHOST.bat submenu [6] OpenCode
+  Multi-Instance & Clones (gids 53-62); harness extended to 17 scenarios.
+  All anchors statically verified against the installed asar; LIVE-VERIFIED
+  2026-10-24/25: engine v1→v2 upgrade path proven (the main bundle is ESM —
+  no `require` — so v1's fs-based identity resolver silently no-oped and v2
+  moved identity to pure argv flags), locked-asar in-place swap fallback +
+  two-tier core/current signature probe landed from the same session, all
+  five clones verified (per-clone lockfiles HELD simultaneously, every
+  Chromium child on its own --user-data-dir, "OpenCode Blue"/"Orange"
+  window titles, ephemeral per-instance service ports — no port plan
+  needed), the updater stages 2.1.4 without installing (darwin-only
+  autoInstallOnAppQuit; patch survived), and the Primary snapshot diff
+  showed only the live user session's own artifacts — 0 clone-breach
+  signatures. One manual login per clone remains the developer touchpoint.
+- **Cline multi-instance suite (c1..c5)** (2026-10-24): a complete clone
+  suite for the standalone Cline desktop app (Tauri 2.11.1 + WebView2,
+  no asar) beside the untouched Primary `~\.cline` (120-file snapshot
+  diff = 0 across the whole verification session). Isolation is 100%
+  env-based and live-verified: `CLINE_DIR` (whole state tree),
+  `WEBVIEW2_USER_DATA_FOLDER` (per-clone web login profile),
+  `CLINE_HUB_PORT` + `CLINE_SIDECAR_PORT` (per-clone ports 25471-25475 /
+  3131-3135, outside the stock defaults and the stock hub probe range
+  25463..25466). The app's tauri-plugin-single-instance guard (fixed-key
+  mutex `bot.cline.app-sim` + hidden window `bot.cline.app-sic`/`-siw`)
+  is defeated WITHOUT patching: the second copy only exits when
+  FindWindowW finds the hidden window, so the launcher renames it
+  (`.neutralized`) pre- and post-launch with verify — 3 clones verified
+  running concurrently this way. The launcher itself enforces per-clone
+  single-instance (aborts on the clone's own held hub lock, since the
+  app-level guard is neutralized). Fresh profile per clone — ONE manual
+  sign-in each (identity: HKLM MachineGuid is shared, account identity
+  lives in the clone's `data\secrets.json` only). Taskbar identity is
+  shortcut-AUMIDs-only by developer decision (no patchable surface; pins
+  distinct via `bot.cline.app.cN`, running windows share the base
+  identity). New files: `src/windows/launch_cline_clone.ps1`
+  (+`-Status`), `src/windows/launch_cline_clones_all.ps1` (sequential,
+  honest fixed-stagger docs), `tools/install_cline_clone_shortcuts.ps1`
+  (Desktop + Start Menu, per-clone icons, suffixed AUMIDs, `-Remove`),
+  `tools/cline-orange-branding/` (5th color, tint-generated from the
+  blue master — hue-rotate rejected: the two-tone logo would produce the
+  rejected green family), `docs/CLINE_CLONES_SPEC.md` (spec +
+  provenance), GHOST.bat submenu [5] Cline Multi-Instance & Clones
+  (gids 44-52; harness extended to 14 scenarios). Pester + parse checks
+  green.
+- **AutoClaw2 multi-instance suite (c1..c5)** (2026-10-23): a complete
+  clone suite for the v2.1.1 redesign (zwork) beside the existing v1.20
+  inst1..4 system, with zero writes into any pre-existing install/profile
+  (v1.20 Primary, its clones, and the v2.1.1 Primary all preserved).
+  Isolation via the app''s official env lever `ZWORK_USER_DATA` (pinned
+  BEFORE `requestSingleInstanceLock()`; live-verified `acquired:true`
+  x5) + `AUTOCLAW_PROFILE_ROOT` pointing at a per-clone migration root
+  so clones never read a live Primary. asInvoker manifest verified (env
+  survives; no UAC relay needed - unlike v1.20). Per-profile device
+  identity is generated fresh by the app (device-id.json hashes verified
+  6/6 unique), so no identity seeding and no credential copying: ONE
+  manual sign-in per clone. New files:
+  `src/windows/launch_autoclaw2_clone.ps1` (+`-Status`),
+  `src/windows/launch_autoclaw2_clones_all.ps1` (sequential all-five),
+  `tools/install_autoclaw2_clone_shortcuts.ps1` (Desktop + Start Menu,
+  per-clone tinted icons, `-Remove`),
+  `tools/autoclaw2-{blue,yellow,green,red,orange}-branding/`,
+  `docs/AUTOCLAW2_CLONES_SPEC.md` (spec + provenance). Known limitation:
+  running windows share the base AUMID (one taskbar button per grouping);
+  shortcut AUMID suffix stamping deferred - the property-store write was
+  denied on this host (documented, cosmetic only). GHOST.bat menu
+  integration intentionally left to the developer (in-flight edits).
+  Verified live: 6 concurrent v2.1.1 copies (Primary + c1..c5) beside
+  v1.20 Primary + inst1, ~4.4 GB total RAM, no port conflicts.
+
+- **ZCode submenu [21] — "Reset ZCode Primary instance"** (2026-10-23): a
+  copy of IDE Resets [7] inside ZCode Multi-Instance & Clones, appended to
+  the end of the Reset Clones block (every existing entry and number
+  untouched). Both entries resolve to the same global id (gid 7 →
+  `reset_zcode.ps1 -Target Primary`), so the Primary reset is reachable
+  from either menu.
+
+- **AutoClaw submenu [13] — "Reset AutoClaw Primary instance"** (2026-10-23):
+  the same copy pattern as ZCode [21] — IDE Resets [9] ("Reset AutoClaw")
+  cloned into AutoClaw Multi-Instance & Clones, appended to the end of the
+  Reset Clones block (every existing entry and number untouched). Both
+  entries resolve to the same global id (gid 28 →
+  `reset_autoclaw.ps1 -Target Primary`), so the Primary reset is reachable
+  from either menu.
+
+- **CPU name spoof in `change_device_id.ps1` LegacyReset** (2026-10-18):
+  Phase 5's last live item — writes a fictional `ProcessorNameString` to
+  ALL `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\*` subkeys
+  (8-name realistic pool, `Get-Random`) so the fingerprint self-test's
+  heaviest changeable signal (`cpu.name`, weight 0.12) actually moves,
+  completing the documented 0.19 delta. Rides the existing
+  backup/changelog/verify-after/rollback loop; `CentralProcessor.reg`
+  exported to the backup dir and imported by the restore script; summary
+  prints the new name. Accepted by the live user-supervised run the same
+  day: `cpu.name` moved live (no reboot needed) — Phase 5 fully accepted.
+
+- **ZCode Fifth clone (red) — 5-instance suite** (2026-10-17): a fourth
+  branded clone joins the suite — instance `Fifth`, window title
+  "ZCode Red", home `%USERPROFILE%\ZCodeFifthHome`, roaming
+  `%APPDATA%\ZCode-Fifth`, AUMID `dev.zcode.app.5`, accent `#CA0607`.
+  Branding lives in `tools/zcode-red-branding/` (blue master +150°
+  hue-rotate via the new generic `tools/make_clone_icon.ps1` — identical
+  geometry to the existing four icons). Wired end to end: launcher
+  `-Instance Fifth` (+ `Launch-ZCode-Fifth.bat`), shortcuts installer
+  (four clones now; `ZCode Fifth.lnk` live-verified), taskbar watcher,
+  chat refresher (`-Target ...|Fifth|All`), reset (`-Target Fifth`,
+  `All` = Third+Fourth+Fifth+Secondary+Primary), freeze diagnostic,
+  Telegram bot guardian, and GHOST.bat ZCode `[18]` (gid 41; no
+  renumbering — existing citations stay valid) with the launch-all and
+  reset-all flows covering Fifth. First live launch is pending (the
+  one-time seed needs the Primary closed — robocopy exit 9 otherwise;
+  a partial seed is auto-detected and must be removed before re-running).
+
+- **ZCode reset menu item for Fifth** (2026-10-17): GHOST.bat ZCode submenu
+  gains `[19]` "Reset Fifth instance - Red" under `-- Reset Clones --`
+  (gid 42 → `reset_zcode.ps1 -Target Fifth`) — the individual reset that
+  was previously CLI-only. No renumbering; existing citations stay valid.
+
+- **Generic clone-icon generator `tools/make_clone_icon.ps1` +
+  AutoClaw per-clone icons** (2026-10-17): app-agnostic icon pipeline
+  (PS 5.1 + System.Drawing only): corner-sampled background detection →
+  tile crop (`-BgTolerance`/`-ManualCrop`) → rounded-corner alpha master →
+  multi-size `tray_icon.ico` (16..256 PNG-in-ICO) + `icon_windows.png` +
+  source provenance; `-HueRotate` derives clone colors. AutoClaw
+  inst1..inst4 shortcuts now carry per-clone icons
+  (`tools/autoclaw-{blue,yellow,green,red}-branding/` from
+  developer-supplied renders; red = blue +150°; `bad-green` rejected by
+  the developer), falling back to the exe icon when a branding dir is
+  missing. **Full staged color suites** for the future opencode/cline clones
+  (`tools/{opencode,cline}-{blue,yellow,green,red}-branding/`, all eight
+  dirs with `tray_icon.ico` + 1024 master + `source.jpg` provenance —
+  cline's unnamed renders assigned by measured dominant hue; `bad-green`
+  excluded) — icons only, no launcher/reset wiring yet by design.
+
+- **ZCode clone asset sync `tools/sync_zcode_assets.ps1`** (2026-10-17):
+  every clone resolves its own user-scope config
+  (`<CloneHome>\.zcode\cli\config.json` — the HOME override reaches the
+  app's config resolution, unlike the shared CLI session db), so the
+  one-time seed copies had drifted: all three seeded clones still ran the
+  broken `npx @supabase/mcp-server-supabase@latest` entry, lacked `sentry`,
+  had stale skill copies shadowing the shared `.agents` store, and missed
+  newer plugin versions. The sync merges MCP server DEFINITIONS from the
+  Primary (per-clone on/off toggles stay local; new servers carry the
+  Primary's enabled value; clone-only servers are kept; plugins/hooks stay
+  local), moves the stale `.zcode\skills` copies aside and junctions
+  `<CloneHome>\.agents` → `~\.agents` (live skills, no elevation), and
+  robocopy-mirrors the plugin cache + marketplaces when the version set
+  drifts (`plugins\data`/`cli\agents` stay per-instance). Running instance
+  = skip + warn; unseeded home = skip note; backup + verify-after
+  everywhere; JSONL audit per clone home. Wired as GHOST.bat ZCode `[20]`
+  (gid 43; no renumbering) and as launcher step 2d (pre-launch sync, never
+  blocks the launch). `-Target Second|Third|Fourth|Fifth|All` + `-DryRun`.
+
+- **AutoClaw clone taskbar identity v2 (spec §7.3c) — IMPLEMENTED**
+  (2026-10-17, live-verified 2026-10-18): separate taskbar buttons,
+  colored window icons and "AutoClaw <Color>" titles per clone, in the
+  taskbar AND the app itself. Shipped as two new families of the EXISTING
+  `tools/patch_autoclaw_ports.ps1` branding patch (engine v11 at ship;
+  v12 after the next-day fixes, see Fixed below): `aumid-suffix` wraps
+  both `setAppUserModelId` call sites to declare
+  `com.zhipuai.autoclaw.inst1..4` (equal to the shipped shortcut AUMIDs),
+  and `window-identity` routes every `new BrowserWindow` through a
+  subclass that stamps the window-level identity at creation time, sets
+  the branded window icon and forces the title. Branding rides a marker
+  file — `launch_autoclaw_clone.ps1` step 4c writes
+  `<CloneProfile>\.autoclaw-identity.json` and copies the branded
+  `.autoclaw-icon.ico` every launch (env vars die at the UAC boundary,
+  marker files do not); a missing marker means stock behavior, so the
+  Primary and bare native-host spawns are untouched. Live-verified on
+  the first relaunch 2026-10-18: the EC-C07 property-store readback
+  returns `com.zhipuai.autoclaw.inst1` on a live clone window.
+
+- **Phase 3 continuation — reset_devin v0.4 thin manifest** (2026-10-17):
+  the Windsurf/Devin reset's 17 steps (14 per data root × Devin/Windsurf +
+  3 global) run every store mutation through the core via `Invoke-GhostCore`,
+  same contract as reset_cursor v0.3 (step order, audit keys, restore
+  actions, summary identical to v0.3, archived at
+  `archive/reset_devin_windows-v0.3.ps1`, local-only). New groundwork
+  landed with it: `delete-secrets` generalized (optional exact_keys /
+  like_patterns / `ESCAPE '\'` — the windsurf/devin auth patterns; defaults
+  stay Cursor, zero caller breakage), `winstore.patch_argv_json` (JSONC
+  regex — comments survive, crash-reporter-id replaced/inserted, username
+  scrubbed), `winstore.replace_text` (raw-text scrub + absence verify) and
+  `winstore.set_json_path` (dotted-path set with the absent-or-empty SKIP
+  contract) + the `patch-argv` / `replace-text` / `json-set` subcommands.
+  **The repo's last inline temp-.py heredoc is gone.** Also fixed in both
+  manifests: `delete-secrets` `survivors` is a per-pattern LIST — PS
+  `array -eq 0` filters elements instead of answering "all zero", so
+  non-zero survivors could pass the step (reset_zcode already used
+  `Measure-Object -Sum`). Python required for all steps; 1419 → 1003 lines.
+  Live comparison run pending user supervision.
+
+### Fixed
+
+- **ZCode reset menu + watchdog hardening (partial)** (2026-10-23,
+  docs/ZCODE_RESET_EDGE_CASES_PLAN.md): GHOST.bat confirms before the
+  destructive multi-instance resets (gid 12 Both, gid 21 All-five; `choice`
+  reads the console so chains and the .bat harness are unaffected), and every
+  reset_zcode dispatch now prints the post-reset relaunch warning via
+  `:RunZcodeReset` (bare ZCode.exe = Primary profile). ZCode [6] label
+  pluralized; harness gains scenario M (reset-block render).
+  tools/watch_zcode_captcha.ps1 snapshots running instances by process markers
+  BEFORE its kill and relaunches clones via the launcher, Primary bare — the
+  old blanket bare ZCode.exe relaunch repopulated only the Primary profile and
+  silently voided every "survivors kept running" claim. The reset_zcode.ps1
+  v1.5 script-side items (shared-db scrub [26b], strict backups, abort
+  checkpoint, Python preflight, -DryRun, purge salvage, elevation exit-code
+  propagation) are PENDING — blocked by a workspace write-guard false positive
+  on [6b]'s apiKey-blanking line (user chose to defer).
+
+- **AutoClaw2 clone icons recolored** (2026-10-23): the first branding run
+  for the c1..c5 suite shipped five byte-identical `tray_icon.ico` files —
+  the new app icon is a monochrome white logo and `-HueRotate` does
+  nothing on gray art. `tools\make_clone_icon.ps1` gains a colorize mode
+  (`-TintHue/-TintSat/-TintValueFloor`: set hue + saturation, keep value,
+  dark tile background untouched), and all five
+  `tools\autoclaw2-{blue,yellow,green,red,orange}-branding` dirs were
+  regenerated with hues calibrated from the old autoclaw/zcode suites
+  (blue 206 / yellow 46 / green 166 / red 356 / orange 25; measured hue
+  deltas ≤0.1°, five distinct hashes, background mean within ±1 RGB).
+  Shortcuts already pointed at these paths (AUMIDs intact); icon cache
+  refreshed. Pre-color set archived at
+  `archive\autoclaw2-branding-precolor-20261023\`.
+
+- **AutoClaw patch engine v12 — three live-verified fixes** (2026-10-18,
+  found by the first live relaunch of the taskbar-identity v2):
+  (1) the window-identity wrap called `setAppDetails({ appUserModelId })` —
+  Electron 33's option key is **`appId`** (verified against the shipped
+  binary), so the window-level AUMID was never stamped;
+  (2) ctor-time stamping alone does not survive HWND recreation — the wrap
+  now re-stamps on `show` and on every title re-assert; the EC-C07
+  property-store readback now returns `com.zhipuai.autoclaw.inst1` live
+  (previously `<EMPTY>`); and
+  (3) `-Force` re-patch extracted the LIVE already-patched asar, whose
+  wrapped anchors made the engine skip its own sites — old injected code
+  silently survived re-runs while the marker timestamp refreshed. The tool
+  now extracts the PRISTINE backup asar whenever the live file carries the
+  wrap marker; engine bumped 11→12 so existing markers upgrade via the
+  normal re-apply path.
+- **AutoClaw launcher shipped clones without a window icon** (2026-10-18):
+  `launch_autoclaw_clone.ps1` computed `$RepoRoot` one level short of the
+  repo root (copied the tools/ one-parent pattern into a src/windows/ two-deep
+  script) and looked for the tray icon under `src\tools\...` — every launch
+  WARNed "icon source missing" and the clone identity went out iconless.
+  Fixed; live-verified: icon copies + window shows it.
+
+- **Window-stamping interop broke machine-wide** (2026-10-17): the
+  Windows 10 19041.**7548** cumulative update (July 2026) **removed the
+  `PropVariantClear` export from `oleaut32.dll`** — every `IPropertyStore`
+  stamp/read (taskbar watcher, clone launcher step [4]) died instantly
+  with `EntryPointNotFoundException`, and the resident watcher exited on
+  its first pass since the API disappeared. Both call sites
+  (`tools/watch_zcode_taskbar.ps1`, `src/windows/launch_zcode_second_instance.ps1`)
+  now import `PropVariantClear` from **`ole32.dll`** (verified present:
+  `ole32!PropVariantClear`; `oleaut32!PropVariantClear` = absent,
+  `propsys!PropVariantClear` = absent). Watcher passes live-verified:
+  Second/Third/Fourth re-stamped successfully.
+
+### Changed
+
+- **Docs re-baseline of stale deferred-task lists** (2026-10-18):
+  `docs/IMPLEMENTATION_PLAN.md` Phase 5 re-checked against the current
+  `change_device_id.ps1` — the 5 dead registry writes are already gone and
+  the bcdedit item is retired (the current lineage has no RAM section, and
+  `maxmem/truncatememory` never changed `TotalPhysicalMemory`, the signal
+  actually scored); `docs/AUTOCLAW_CLONES_SPEC.md` §12 Definition-of-done
+  boxes ticked with evidence dates (static gates re-run 2026-10-18:
+  Pester 36/36, PSSA Error-clean; the open items are the multi-instance
+  live verifications beyond inst1); `AGENTS.md` stale AutoClaw
+  "not yet implemented" sentence corrected (taskbar identity v2 shipped
+  2026-10-17). Same-day live closeouts: the CPU-spoof acceptance run
+  changed `cpu.name` live (no reboot needed) — Phase 5 fully accepted;
+  the AutoClaw taskbar-identity v2 EC-C07 window-AUMID readback observed
+  live on the first relaunch; and the Phase 3 thin-manifest pilot was
+  ACCEPTED by a live `reset_cursor.ps1` run (15/15 steps identical to the
+  archived v0.2, audit + restore script verified) — remaining migrations
+  per the roadmap order: trae → qoderwork → minimax → qoder → zcode last.
+
+- **Docs — AutoClaw clone taskbar identity upgraded to a REQUIRED v2 design**
+  (2026-10-17): the shared taskbar button is no longer the accepted end state.
+  `docs/AUTOCLAW_CLONES_SPEC.md` §7.3c now requires separate taskbar
+  buttons/window groups per clone (per-clone process AUMID
+  `com.zhipuai.autoclaw.inst1..4` via an app.asar branding patch, aligned with the
+  shipped shortcut AUMIDs) and the clone color icons visible BOTH in the taskbar AND
+  in the app window itself. Branding config rides a `--user-data-dir` marker file
+  (env vars do not survive the app's self-elevation); the window-level
+  IPropertyStore stamp is the elevation-gated fallback. Implemented the
+  same day (engine v11 — see the Added entry above) and live-verified
+  2026-10-18; the v1 shortcut-AUMID-only identity is historical.
+  `AGENTS.md`, `docs/APP_CLONING_PLAYBOOK.md` (intro + row 7 + Phase 8),
+  `docs/APP_CLONING_EDGE_CASES.md` (EC-C06) and `docs/README.md` aligned.
+
 ## [1.1.0] — 2026-10-17
 
 ### Added
@@ -29,26 +537,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   user-supervised and pending. Decision record + design:
   [docs/PYTHON_HYBRID_ROADMAP.md](docs/PYTHON_HYBRID_ROADMAP.md) (Phase 2
   leaf-tools migration CANCELLED with per-tool reasons).
-
-- **Phase 3 continuation — reset_devin v0.4 thin manifest** (2026-10-17):
-  the Windsurf/Devin reset's 17 steps (14 per data root × Devin/Windsurf +
-  3 global) run every store mutation through the core via `Invoke-GhostCore`,
-  same contract as reset_cursor v0.3 (step order, audit keys, restore
-  actions, summary identical to v0.3, archived at
-  `archive/reset_devin_windows-v0.3.ps1`, local-only). New groundwork
-  landed with it: `delete-secrets` generalized (optional exact_keys /
-  like_patterns / `ESCAPE '\'` — the windsurf/devin auth patterns; defaults
-  stay Cursor, zero caller breakage), `winstore.patch_argv_json` (JSONC
-  regex — comments survive, crash-reporter-id replaced/inserted, username
-  scrubbed), `winstore.replace_text` (raw-text scrub + absence verify) and
-  `winstore.set_json_path` (dotted-path set with the absent-or-empty SKIP
-  contract) + the `patch-argv` / `replace-text` / `json-set` subcommands.
-  **The repo's last inline temp-.py heredoc is gone.** Also fixed in both
-  manifests: `delete-secrets` `survivors` is a per-pattern LIST — PS
-  `array -eq 0` filters elements instead of answering "all zero", so
-  non-zero survivors could pass the step (reset_zcode already used
-  `Measure-Object -Sum`). Python required for all steps; 1419 → 1003 lines.
-  Live comparison run pending user supervision.
 
 - **Clone-suite generator** (`tools/new_clone_suite.ps1`, 2026-10-17) —
   turns the app-cloning playbook's Phases 3-10 mechanics into scaffolding:
