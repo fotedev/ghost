@@ -58,21 +58,26 @@ Describe "Get-PythonCommandInfo" {
     }
 
     It "rejects non-Python-3 candidates functionally (probe contract)" {
-        # The probe accepts only exit-0 + 'Python 3' output; simulate the
-        # contract with a fake exe that exits 9009 (the Store-stub behavior).
-        $fake = Join-Path $TestDrive "python_stub.cmd"
+        # The probe accepts only exit-0 + 'Python 3' output. The fake is named
+        # python.cmd so Get-Command actually resolves it as a candidate - a
+        # python_stub.cmd name can never become one, which made the old
+        # assertion vacuously true (a bare Get-Command regression could not
+        # fail this test). Prepending $TestDrive makes the 9009 stub the FIRST
+        # candidate, so a bare-acceptance regression returns the stub path.
+        $fake = Join-Path $TestDrive "python.cmd"
         Set-Content -LiteralPath $fake -Value "@echo Python was not found`r`nexit /b 9009`r`n" -Encoding ASCII
-        $env:PATH = "$TestDrive;$env:PATH"
+        $oldPath = $env:PATH
+        $env:PATH = "$TestDrive;$oldPath"
         try {
-            # A stub named python must not be returned as long as the probe
-            # keeps looking; on a host with a real python the probe returns
-            # that real one, never the stub path.
             $exe = Get-PythonCommandInfo
             if ($exe) {
-                (Get-Item -LiteralPath $exe).FullName | Should -Not -BeLike "*python_stub*"
+                # Either a real Python 3 was found (never the 9009 stub) or
+                # the probe correctly returned nothing at all.
+                (Get-Item -LiteralPath $exe).FullName | Should -Not -BeLike "$TestDrive*"
             }
         }
         finally {
+            $env:PATH = $oldPath
             Remove-Item -LiteralPath $fake -Force -ErrorAction SilentlyContinue
         }
     }

@@ -20,6 +20,7 @@ reset_cursor manifest switches over.
 import json
 import os
 import secrets
+import uuid
 
 from ghost.backup import backup_to_timestamped_dir
 
@@ -307,7 +308,10 @@ def patch_argv_json(path, backup_root, label, new_id=None, username=None):
         report["skipped"] = True
         return report
     if new_id is None:
-        new_id = str(secrets.token_hex(4))  # placeholder, replaced below
+        # Get-NewCrashReporterId contract: lowercase GUID. (The old default,
+        # token_hex(4) under a "replaced below" comment that never ran, was
+        # dead code emitting an 8-char id of the wrong shape.)
+        new_id = str(uuid.uuid4()).lower()
 
     raw = _read_raw(path)
     import re as _re
@@ -371,7 +375,10 @@ def replace_text(path, find, replacement, backup_root, label):
         _write_raw(path, before_text.replace(find, replacement))
 
     re_read = _read_raw(path)
-    if find in re_read:
+    # If the replacement itself contains the find string, "find still present"
+    # is the expected post-state and cannot distinguish failure - verify via
+    # the replacement landing instead.
+    if find in re_read and find not in replacement:
         report["after"] = "still-leaked"
         report["error"] = "verify: find string still present"
         return report

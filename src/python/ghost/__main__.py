@@ -346,7 +346,16 @@ def main(argv=None):
         pass
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001 - contract: one stderr line, exit 1
+        # stdout must stay a pure JSON/line contract for the PowerShell
+        # bridges (a traceback there would corrupt parsing); errors go to
+        # stderr and the exit code carries the failure loudly.
+        print(str(exc), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
