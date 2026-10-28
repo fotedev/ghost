@@ -48,6 +48,10 @@ Only the current run's backup is preserved — older `ID_Backups` timestamp
 folders are purged at the end of each successful run (by design: they hold
 your OLD fingerprints, which is exactly what the reset is trying to remove).
 
+`spoof_wmi_serials.ps1` does not use this mechanism — its WMI overrides roll
+back with the generated `winmgmt /restore` script instead (see
+[WMI_SERIAL_SPOOFING.md](WMI_SERIAL_SPOOFING.md)).
+
 ## A watchdog recreated an identity file
 
 The scripts re-probe core identity files (`Cookies`, `DIPS`, `SharedStorage`,
@@ -92,9 +96,14 @@ re-create these files by hand as `{}`.
 
 ## Telegram bot conflicts (HTTP 409)
 
-One bot token = one polling instance. The clone launcher disables bots in each
-clone profile automatically. If you re-enable one in a clone, you will get 409s
-and cross-account billing noise — disable it again.
+One bot token = one polling instance. The clone launcher reconciles bots by
+sha8 credential comparison across both `bot-config.json` and
+`bot-config.v3.json`: a token duplicated from the Primary is disabled
+automatically, while a UNIQUE clone bot is preserved (`.telegram-routed` v2
+marker — a deliberate re-enable is never reverted). If two instances still
+poll one token you get 409s and cross-account billing noise. Audit all 6
+homes (sha8 only, never values) with `tools\set_zcode_bot.ps1 -VerifyOnly`;
+see [docs/ZCODE_TELEGRAM_BOTS.md](ZCODE_TELEGRAM_BOTS.md).
 
 ## A ZCode clone lost its icon / color / title after an app update
 
@@ -114,7 +123,7 @@ source. The instance's log (`<home>\.zcode\v2\logs\YYYY-MM-DD.log`) records
 same second and Fourth that morning; the archived dump carries
 `v8-oom-last-os-error: 1455` (`ERROR_COMMITMENT_LIMIT`) — the Windows commit
 limit (RAM + pagefile) was exhausted, with msedge and git crashing the same
-minute. Running all four instances amplifies it. This is OS memory
+minute. Running all six instances amplifies it. This is OS memory
 exhaustion, not an app leak, a GPU problem, or a GHOST-side fault.
 
 What to do:
@@ -131,6 +140,48 @@ What to do:
   1.5-2x RAM, or system-managed) and/or run fewer instances concurrently.
 - Not the cause (checked 2026-09-25): GPU caches, the icon asar patch, the
   captcha watchdog (idle since 09-17) and db.sqlite locking.
+
+## "Reconnecting... x/10" / "The system is busy..." on every turn
+
+Not a ban. Verified 2026-10-27: this is Z.ai's **Start Plan admission
+control** refusing new model streams when the plan's concurrency pool
+saturates — auth and billing keep working (a real device/IP ban surfaces as
+401/403, never as "busy"). The `x/10` counter is the client's 11-attempt
+recovery loop; with several instances running the pool saturates faster and
+bursts land in the same minutes on different accounts.
+
+What to do:
+
+- Run the diagnostic: `tools\diagnose_zcode_throttle.ps1 -Days 7` (CLI-only,
+  no menu entry) — lists Start-Plan admission-busy retries + failed turns
+  with their cause chain (`StartPlanBusyAutoRetryExhaustedError` /
+  `model_rate_limited` / `providerCode 3009` "model concurrency limit
+  exceeded"), an hourly histogram in local time and a per-session rollup.
+  Note every instance writes the shared `~\.zcode\cli\log\zcode-*.jsonl`, so
+  events cannot be pinned to one instance.
+- Discrimination test for an incident: close every instance except one and
+  retry — if the single instance also stalls, it is the server-side pool,
+  not your machine.
+- Mitigation: run fewer instances concurrently during peak hours and space
+  out heavy turns.
+
+## MCP changes in the Primary never reach the clones
+
+The sync chain is: Primary `~\.zcode\cli\config.json` →
+`tools\watch_zcode_mcp_sync.ps1` (resident watcher) →
+`tools\sync_zcode_assets.ps1 -McpOnly -Target All` → each clone's OWN
+`<CloneHome>\.zcode\cli\config.json`. Debug order:
+
+- One-shot convergence: `GHOST.bat` → ZCode [26] (sync + apply live) or [24]
+  (sync only). Both are safe against RUNNING instances — verified 2026-10-27:
+  the app holds no handle on `config.json`, never rewrites it on exit, and
+  re-reads `mcp.servers` at every app-server spawn, so a synced definition
+  lands on each instance's NEXT chat with no restart.
+- "watcher already running" = the named mutex + startup process scan found a
+  second copy. A silent log is normal while stores are correct. Log:
+  `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`.
+- The FULL asset sync (skills junction + plugin cache mirror) still requires
+  the target clones closed first (ZCode [20]) — only `-McpOnly` is live-safe.
 
 ## Chats from one ZCode instance don't appear in another instance's sidebar
 
@@ -162,7 +213,7 @@ no watcher is running:
 
 ```powershell
 # hwnd from tools\watch_zcode_taskbar.ps1 logs or Get-Process MainWindowHandle
-$final = 'dev.zcode.app'   # Primary; clones use dev.zcode.app.<2|3|4>
+$final = 'dev.zcode.app'   # Primary; clones use dev.zcode.app.<2|3|4|5|6>
 [ZcodeWindowAumid]::Stamp($hwnd, "$final.kick") ; [ZcodeWindowAumid]::Stamp($hwnd, $final)
 ```
 
@@ -175,7 +226,7 @@ a script edit keeps the old code — close its window and relaunch ZCode [16].
 ## A clone launched with the Primary's profile or taskbar icon
 
 A bare `ZCode.exe` launch always gets the Primary's profile, AUMID and taskbar
-button. Launch clones only via their `ZCode Second/Third/Fourth` shortcuts or
+button. Launch clones only via their `ZCode Second/Third/Fourth/Fifth/Sixth` shortcuts or
 the `Launch-ZCode-*.bat` wrappers. If the Primary's Start-menu pin was taken
 over by a clone's AUMID, repair it with
 `tools\install_zcode_second_shortcuts.ps1 -RepairPrimaryAumid`.
