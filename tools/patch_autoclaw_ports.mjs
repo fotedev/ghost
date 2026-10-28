@@ -22,11 +22,28 @@
 //         via process.argv --user-data-dir, NOT getPath("userData") - the
 //         resolver runs before the app applies the profile switch, so v5's
 //         getPath lookup always saw the DEFAULT profile (verified live).
-// See docs/AUTOCLAW_CLONES_SPEC.md section 5.1/5.3 and section 7.3.
+//   aumid-suffix    (v11) per-clone AppUserModelID (spec section 7.3c's
+//                   deferred v2 taskbar identity): wraps BOTH real
+//                   setAppUserModelId("com.zhipuai.autoclaw") call sites to
+//                   append ".<aumidSuffix>" resolved from the identity marker.
+//   window-identity (v11) wraps every `new X.BrowserWindow(` through a cached
+//                   subclass: sets the window icon from
+//                   <userData>\.autoclaw-icon.ico, stamps the WINDOW-level
+//                   AppUserModelID via setAppDetails (at creation, BEFORE the
+//                   window is shown/grouped - no stale-group kick needed; the
+//                   ZCode kick existed for LATE external re-stamping), and
+//                   forces the "AutoClaw <Color>" title against renderer
+//                   document.title updates (ZCode pin-collision prevention).
+// Identity source (both families): <userData>\.autoclaw-identity.json,
+// written by launch_autoclaw_clone.ps1 step 4c. Missing marker => the resolver
+// returns null => every injected site is a no-op, so the Primary and any bare
+// spawn keep stock behavior. Colors live with the launcher and MUST stay in
+// sync with tools/install_autoclaw_clone_shortcuts.ps1 ($InstanceDefs).
+// See docs/AUTOCLAW_CLONES_SPEC.md section 5.1/5.3, 5.8 and 7.3c.
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-const ENGINE_VERSION = 10;
+const ENGINE_VERSION = 12;
 const extractedDir = process.argv[2];
 if (!extractedDir) {
   console.error(JSON.stringify({ ok: false, error: "usage: patch_autoclaw_ports.mjs <extractedDir>" }));
@@ -68,6 +85,41 @@ const ENV_PREFIX_LITERAL = ENV_CHECK + " || ";
 // The v7 scan body still inside already-v7-patched trees - v8's debug variant
 // never reached them (no pass re-emitted the scan). v9 swaps it by literal.
 const V7_SCAN_OLD = `(globalThis.__autoclawHomeOverride ??= (() => { try { const __a = process.argv; for (let __i = 0; __i < __a.length; __i++) { let __m = null; if (__a[__i].startsWith("--user-data-dir=")) __m = __a[__i].slice("--user-data-dir=".length); else if (__a[__i] === "--user-data-dir" && __i + 1 < __a.length) __m = __a[__i + 1]; if (__m) { __m = __m.replace(/^(?:"|')|(?:"|')$/g, "").trim(); const __v = require("fs").readFileSync(require("path").join(__m, ".autoclaw-home"), "utf8").trim(); if (__v) return __v; } } } catch (__e) {} return ""; })())`;
+
+// ── instance-identity (v11): per-clone taskbar identity ──────────────────────
+// The app calls app.setAppUserModelId("com.zhipuai.autoclaw") unconditionally
+// (2 real call sites in the installed 0.1.13 bundle - offsets verified
+// 2026-10-17; the remaining occurrences of the string are the macOS bundle-id
+// const and a deep-link URL, both untouched), so every instance merged into
+// ONE taskbar button. Env overrides are dead here (requireAdministrator
+// self-elevation wipes the environment), so the identity rides MARKER FILES
+// next to .autoclaw-home (same argv-scan contract: the ARG survives elevation,
+// env does not; value trimmed - the app's argv carries a trailing space):
+//   <userData>\.autoclaw-identity.json  { aumidSuffix, title, iconPath? }
+//   <userData>\.autoclaw-icon.ico       (copied by the launcher)
+const IDENTITY_RESOLVER = `(() => { try { const __a = process.argv; for (let __i = 0; __i < __a.length; __i++) { let __m = null; if (__a[__i].startsWith("--user-data-dir=")) __m = __a[__i].slice("--user-data-dir=".length); else if (__a[__i] === "--user-data-dir" && __i + 1 < __a.length) __m = __a[__i + 1]; if (__m) { __m = __m.trim().replace(/^(?:"|')|(?:"|')$/g, ""); const __p = require("path").join(__m, ".autoclaw-identity.json"); if (require("fs").existsSync(__p)) return JSON.parse(require("fs").readFileSync(__p, "utf8")); } } } catch (__x) {} return null; })()`;
+// Note the trim-then-strip order (deliberately MORE tolerant than the proven
+// home-override strip-then-trim): the observed production argv shape is an
+// UNQUOTED path + trailing space (v10 finding), but a quoted-path + trailing
+// space shape would survive strip-then-trim with a dangling quote.
+// aumid-suffix family. Done anchor = the emitted expression (verbatim prefix);
+// pristine anchor tolerates either quote style around the literal argument.
+const AUMID_DONE = `"com.zhipuai.autoclaw"+((__i)=>`;
+const AUMID_CALL_RE = /\.setAppUserModelId\(\s*(["'])com\.zhipuai\.autoclaw\1\s*\)/g;
+const AUMID_WRAPPED_ARG = `("com.zhipuai.autoclaw"+((__i)=>__i&&__i.aumidSuffix?"."+__i.aumidSuffix:"")(globalThis.__autoclawIdentity ??= ${IDENTITY_RESOLVER}))`;
+// window-identity family. Anchor = any `new <recv>.BrowserWindow(` (all 4
+// sites in 0.1.13 share the `require$$1$5` receiver; regex is receiver-generic
+// so a future minified rename only needs the marker gate to keep working).
+const WINDOW_WRAP_DONE = "globalThis.__autoclawWrapBW";
+const BROWSERWINDOW_RE = /new\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.BrowserWindow\s*\(/g;
+function windowIdentityWrap(recv) {
+  // TEMP DEBUG (2026-10-18): lifecycle trace to /ac-aumid-debug.txt (user
+  // TEMP - the elevated process keeps the user's TEMP env). No `this` inside
+  // __dbg (plain calls make it undefined in strict mode - cost a silent
+  // empty log once already). Same removal rule as ac-argv-debug.
+  const dbg = `try { require("fs").appendFileSync(require("os").tmpdir() + "/ac-aumid-debug.txt", JSON.stringify({ pid: process.pid, evt: __evt, hasFn: __hasFn === undefined ? null : String(__hasFn), err: String(__err && __err.message || "") }) + "\\n"); } catch (__d) {}`;
+  return `(globalThis.__autoclawWrapBW ??= (BW => { try { const __id = (globalThis.__autoclawIdentity ??= ${IDENTITY_RESOLVER}); if (!__id) return BW; const __aumid = "com.zhipuai.autoclaw" + (__id.aumidSuffix ? "." + __id.aumidSuffix : ""); const __dbg = function (__evt, __hasFn, __err) { ${dbg} }; __dbg("wrap-installed"); return class extends BW { constructor(...__a) { try { const __o = __a[0]; if (__o && typeof __o === "object") { if (typeof __id.iconPath === "string" && __id.iconPath) { try { if (require("fs").existsSync(__id.iconPath)) __o.icon = __id.iconPath; } catch (e1) {} } if (__id.title && !__o.title) __o.title = __id.title; } } catch (e0) {} super(...__a); try { if (typeof this.setAppDetails === "function") { try { this.setAppDetails({ appId: __aumid }); __dbg("ctor", true); } catch (__se) { __dbg("ctor", true, __se); } } else { __dbg("ctor", false); } if (typeof __id.iconPath === "string" && __id.iconPath) { try { this.setIcon(__id.iconPath); } catch (e2) {} } if (__id.title) { const __f = () => { try { if (this.getTitle() !== __id.title) this.setTitle(__id.title); } catch (e3) {} try { if (typeof this.setAppDetails === "function") { try { this.setAppDetails({ appId: __aumid }); __dbg("reassert", true); } catch (__se2) { __dbg("reassert", true, __se2); } } } catch (e8) {} }; try { this.on("ready-to-show", () => { __dbg("ready-to-show"); }); } catch (e11) {} try { this.on("show", () => { __dbg("shown"); try { if (typeof this.setAppDetails === "function") { try { this.setAppDetails({ appId: __aumid }); __dbg("show-restamp", true); } catch (__se3) { __dbg("show-restamp", true, __se3); } } } catch (e9) {} }); } catch (e10) {} try { this.on("closed", () => { __dbg("closed"); }); } catch (e12) {} try { this.on("page-title-updated", (__e) => { try { __e.preventDefault(); } catch (e4) {} __f(); }); } catch (e5) {} __f(); } } catch (e6) {} } }; } catch (e7) { return BW; } })(${recv}.BrowserWindow))`;
+}
 
 function homeOverrideIife(recv, q) {
   // TEMP DEBUG (2026-10-16): record argv + resolution outcome for field diagnosis.
@@ -193,6 +245,42 @@ const PATCHES = [
       return { src: out, count };
     },
   },
+  {
+    name: "aumid-suffix",
+    // v11: append ".<aumidSuffix>" to both real setAppUserModelId call sites
+    // (menu setup re-calls it later in startup; both ends suffixed
+    // identically, so the last write wins with the same value).
+    apply: (src) => {
+      if (src.includes(AUMID_DONE)) return { src, count: -1 };
+      let count = 0;
+      AUMID_CALL_RE.lastIndex = 0;
+      const out = src.replace(AUMID_CALL_RE, () => {
+        count++;
+        return ".setAppUserModelId(" + AUMID_WRAPPED_ARG + ")";
+      });
+      if (count === 0) return { src, count: 0 };
+      return { src: out, count };
+    },
+  },
+  {
+    name: "window-identity",
+    // v11: route every BrowserWindow construction through the cached subclass
+    // (window icon + forced "AutoClaw <Color>" title + window-level
+    // setAppDetails AUMID). Per-file verify safety: the resolver is embedded
+    // inline here, so a window-only file still carries every
+    // window-identity marker (see markersForPatch).
+    apply: (src) => {
+      if (src.includes(WINDOW_WRAP_DONE)) return { src, count: -1 };
+      let count = 0;
+      BROWSERWINDOW_RE.lastIndex = 0;
+      const out = src.replace(BROWSERWINDOW_RE, (m, recv) => {
+        count++;
+        return "new " + windowIdentityWrap(recv) + "(";
+      });
+      if (count === 0) return { src, count: 0 };
+      return { src: out, count };
+    },
+  },
 ];
 
 function markersForPatch(name) {
@@ -201,6 +289,14 @@ function markersForPatch(name) {
       return ["PRODUCTIVITY_MCP_CANDIDATE_PORTS", "19685", "19686", "19687", "19688"];
     case "home-override":
       return ["AUTOCLAW_HOME_DIR", ".autoclaw-home", "__autoclawHomeOverride"];
+    case "aumid-suffix":
+      // Embedded-resolver guarantees: every file this family patched contains
+      // the resolver (and therefore the marker path). Never list
+      // __autoclawWrapBW here - the AUMID call site can live in a different
+      // chunk than the window wrap, and the .ps1 verifies markers PER FILE.
+      return ["__autoclawIdentity", ".autoclaw-identity.json"];
+    case "window-identity":
+      return ["__autoclawWrapBW", "__autoclawIdentity", ".autoclaw-identity.json"];
     default:
       return [];
   }
