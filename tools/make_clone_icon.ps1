@@ -23,6 +23,13 @@
   Feeding one app's saved master with -HueRotate is how a derived color dir is born;
   the source dir's files are never touched.
 
+  -TintHue/-TintSat add a COLORIZE mode for monochrome art: hue-rotate only shifts
+  an existing hue and does nothing on white/gray logos, so tinting sets every
+  bright-enough pixel to the target hue + saturation while KEEPING its value
+  (shading survives; pixels at or below -TintValueFloor, i.e. the dark tile
+  background, stay untouched). Tint re-applies cleanly (same target = idempotent;
+  a different target re-colorizes from the tinted master).
+
   Every write is verified by re-reading (never silent-success). Previews over light
   and dark backgrounds land in TEMP and their paths are printed - eyeball them
   before wiring the dir into a shortcuts installer.
@@ -39,6 +46,12 @@
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_clone_icon.ps1 `
       -Source tools\autoclaw-blue-branding\icon_windows.png `
       -OutDir tools\autoclaw-red-branding -HueRotate 150
+.EXAMPLE
+  # colorize a monochrome (white-logo) master into a suite color; re-run per
+  # color dir without -Source (master reused), hues calibrated from the old
+  # autoclaw/zcode suites (blue 206, yellow 46, green 166, red 356, orange 25)
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_clone_icon.ps1 `
+      -OutDir tools\autoclaw2-blue-branding -TintHue 206 -TintSat 0.98
 #>
 param(
     [string]$Source = "",
@@ -49,6 +62,9 @@ param(
     [double]$CornerRadiusPercent = 22.0,
     [double]$BgTolerance = 30.0,       # Euclidean RGB distance still counted as background
     [double]$HueRotate = 0,            # degrees added to every colored pixel's hue
+    [double]$TintHue = -1.0,           # colorize mode: target hue 0..359 for a monochrome logo (-1 = off)
+    [double]$TintSat = 0.90,           # colorize mode: target saturation 0..1
+    [double]$TintValueFloor = 0.30,    # colorize mode: pixels at/below this brightness stay untouched
     [string]$ManualCrop = "",          # "x,y,size" square tile override, skips detection
     [int[]]$Sizes = @(16, 24, 32, 48, 64, 128, 256)
 )
@@ -285,6 +301,47 @@ namespace CloneIcon
             bmp.UnlockBits(d);
         }
 
+        // Colorize mode: give every bright-enough pixel the SAME hue + saturation
+        // while keeping its value, so shading and anti-aliasing survive. This is what
+        // HueRotate cannot do - a white/gray logo carries no hue to rotate, so five
+        // -HueRotate runs on monochrome art emit five identical icons. Pixels at or
+        // below vFloor (the dark tile background) are left untouched.
+        public static void Tint(Bitmap bmp, double hue, double sat, double vFloor)
+        {
+            Rectangle rect = new Rectangle(0, 0, bmp.Width, bmp.Height);
+            BitmapData d = bmp.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+            int stride = d.Stride;
+            byte[] buf = new byte[stride * bmp.Height];
+            Marshal.Copy(d.Scan0, buf, 0, buf.Length);
+            double h = hue % 360.0; if (h < 0) h += 360.0;
+            double s = Math.Max(0.0, Math.Min(1.0, sat));
+            for (int y = 0; y < bmp.Height; y++)
+            {
+                int row = y * stride;
+                for (int x = 0; x < bmp.Width; x++)
+                {
+                    int i = row + x * 4;                     // BGRA
+                    int mx = Math.Max(buf[i + 2], Math.Max(buf[i + 1], buf[i]));
+                    double v = mx / 255.0;
+                    if (v <= vFloor) continue;               // dark tile background stays
+                    double c = v * s;
+                    double xx = c * (1 - Math.Abs((h / 60.0) % 2 - 1));
+                    double m = v - c, rr = 0, gg = 0, bb = 0;
+                    if (h < 60) { rr = c; gg = xx; }
+                    else if (h < 120) { rr = xx; gg = c; }
+                    else if (h < 180) { gg = c; bb = xx; }
+                    else if (h < 240) { gg = xx; bb = c; }
+                    else if (h < 300) { rr = xx; bb = c; }
+                    else { rr = c; bb = xx; }
+                    buf[i + 2] = (byte)Math.Round((rr + m) * 255.0);
+                    buf[i + 1] = (byte)Math.Round((gg + m) * 255.0);
+                    buf[i] = (byte)Math.Round((bb + m) * 255.0);
+                }
+            }
+            Marshal.Copy(buf, 0, d.Scan0, buf.Length);
+            bmp.UnlockBits(d);
+        }
+
         public static bool HasTransparentCorners(Bitmap bmp)
         {
             return bmp.GetPixel(2, 2).A == 0
@@ -349,9 +406,16 @@ if ($HueRotate -ne 0) {
     [CloneIcon.Core]::HueRotate($master, $HueRotate)
 }
 
-if ($freshMaster -or $HueRotate -ne 0) {
-    # save whenever the in-memory master is new OR was recolored, so a derived-color
-    # dir becomes self-contained (its own re-runs reuse the derived master)
+if ($TintHue -ge 0) {
+    if ($TintHue -gt 360) { throw "-TintHue must be -1 (off) or 0..360" }
+    if ($TintSat -lt 0 -or $TintSat -gt 1) { throw "-TintSat must be 0..1" }
+    Write-Host ("      tint (colorize): hue {0} sat {1} (value floor {2})" -f $TintHue, $TintSat, $TintValueFloor)
+    [CloneIcon.Core]::Tint($master, $TintHue, $TintSat, $TintValueFloor)
+}
+
+if ($freshMaster -or $HueRotate -ne 0 -or $TintHue -ge 0) {
+    # save whenever the in-memory master is new OR was recolored (hue/tint), so a
+    # derived-color dir becomes self-contained (its own re-runs reuse the derived master)
     $master.Save($MasterPngPath, [System.Drawing.Imaging.ImageFormat]::Png)
     if (-not (Test-Path -LiteralPath $MasterPngPath)) { throw 'FAILED: master PNG was not written' }
     Write-Host ("      [ok] master saved: {0} ({1} KB)" -f $MasterPngPath, ([int]((Get-Item $MasterPngPath).Length / 1KB)))
