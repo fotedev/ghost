@@ -44,9 +44,11 @@ def _backup_label_for(path, root_path):
     """Get-PathBackupLabel twin: drive-prefixed relative path, or paths/<name>."""
     root = os.path.splitdrive(path)[0] + os.sep if os.path.splitdrive(path)[0] else ""
     if root_path:
-        norm_root = root_path.rstrip("\\/") + os.sep
-        if path.lower().startswith(norm_root.lower()):
-            return path[len(norm_root):]
+        # Trailing-separator guard: C:\Users\x must never prefix-match
+        # C:\Users\xy\store (the label would escape the intended root shape).
+        prefix = root_path.rstrip("\\/")
+        if path.lower() == prefix.lower() or path.lower().startswith(prefix.lower() + os.sep):
+            return path[len(prefix):].lstrip("\\/")
     if not root:
         return os.path.join("paths", os.path.basename(path))
     drive = root.rstrip("\\/").replace(":", "")
