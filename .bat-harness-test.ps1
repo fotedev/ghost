@@ -19,10 +19,10 @@ New-Item -ItemType Directory -Path $work | Out-Null
 # --- build the test copy -------------------------------------------------------
 $src = [System.IO.File]::ReadAllText("$repo\GHOST.bat")
 $count = ([regex]::Matches($src, [regex]::Escape('set /p choice=%PROMPT_TEXT%'))).Count
-# Floor 5 = main + the four hand-written submenus; generated clone suites
+# Floor 7 = main + the six hand-written submenus; generated clone suites
 # (tools\new_clone_suite.ps1) add one prompt per new submenu and the global
 # rewrite below covers every occurrence, so the check guards the floor only.
-if ($count -lt 5) { throw "expected at least 5 set /p sites in GHOST.bat (main + 4 submenus), found $count" }
+if ($count -lt 7) { throw "expected at least 7 set /p sites in GHOST.bat (main + 6 submenus), found $count" }
 $copy = $src.Replace('set /p choice=%PROMPT_TEXT%', 'call :TestNextInput choice')
 $sub = @'
 
@@ -135,12 +135,63 @@ $out = Invoke-Scenario 'L_hostile_zcode' @('2', '1 & calc', '0', '0')
 if ($out -match 'calc')               { $failures += 'L: injection attempt leaked through ZCode prompt' }
 if ($out -notmatch 'Invalid input')   { $failures += 'L: rejection hint missing' }
 
+# M) ZCode reset block renders the three high-risk entries incl. the appended
+#    Fifth reset, the all-six reset and the Primary reset copy; [6] pluralized
+$out = Invoke-Scenario 'M_zcode_reset_render' @('2', '0', '0')
+if ($out -notmatch '\[19\].*Reset Fifth instance - Red')   { $failures += 'M: ZCode [19] Fifth reset not rendered' }
+if ($out -notmatch '\[10\].*Reset ALL SIX instances')      { $failures += 'M: ZCode [10] all-six reset not rendered' }
+if ($out -notmatch '\[21\].*Reset ZCode Primary instance') { $failures += 'M: ZCode [21] Primary reset not rendered' }
+if ($out -notmatch '\[23\].*Reset Sixth instance - Orange') { $failures += 'M: ZCode [23] Sixth reset not rendered' }
+if ($out -notmatch '\[ 6\].*survivors kept running')       { $failures += 'M: ZCode [6] label not pluralized' }
+
+# N) Cline submenu (main [5]): renders clean, entries listed, no chain leak;
+#    invalid Cline chain id -> exactly one legit Unknown task
+$out = Invoke-Scenario 'N_cline_render' @('5', '0', '0')
+if ($out -match 'Unknown task')               { $failures += 'N: Unknown task on Cline submenu render' }
+if ($out -match '%PENDING_CHAIN%')            { $failures += 'N: literal %PENDING_CHAIN% leaked' }
+if ($out -notmatch 'Cline Multi-Instance')    { $failures += 'N: Cline submenu not shown' }
+if ($out -notmatch '\[ 1\].*Launch c1')       { $failures += 'N: Cline [1] Launch c1 not rendered' }
+if ($out -notmatch '\[ 5\].*Launch ALL clones') { $failures += 'N: Cline [5] Launch ALL not rendered' }
+if ($out -notmatch '\[ 8\].*Clone status')    { $failures += 'N: Cline [8] Clone status not rendered' }
+$out = Invoke-Scenario 'N_cline_invalid' @('5 77', '0', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "77"')).Count
+if ($hits -ne 1)                              { $failures += "N: expected 1 Unknown task from Cline chain, got $hits" }
+
+# O) OpenCode submenu (main [6]): main menu lists it, renders clean, entries
+#    listed incl. the two-digit [10], no chain leak
+$out = Invoke-Scenario 'O_opencode_render' @('6', '0', '0')
+if ($out -match 'Unknown task')                  { $failures += 'O: Unknown task on OpenCode submenu render' }
+if ($out -match '%PENDING_CHAIN%')               { $failures += 'O: literal %PENDING_CHAIN% leaked' }
+if ($out -notmatch 'OpenCode Multi-Instance')    { $failures += 'O: OpenCode submenu not shown' }
+if ($out -notmatch '\[ 1\].*Launch c1')          { $failures += 'O: OpenCode [1] Launch c1 not rendered' }
+if ($out -notmatch '\[ 7\].*Apply clone-home patch') { $failures += 'O: OpenCode [7] Apply clone-home patch not rendered' }
+if ($out -notmatch '\[10\].*Remove clone shortcuts') { $failures += 'O: OpenCode [10] Remove shortcuts not rendered' }
+
+# P) invalid OpenCode chain id "6 77" -> exactly one legit Unknown task
+$out = Invoke-Scenario 'P_opencode_invalid' @('6 77', '0', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "77"')).Count
+if ($hits -ne 1)                                 { $failures += "P: expected 1 Unknown task from OpenCode chain, got $hits" }
+if ($out -match '%PENDING_CHAIN%')               { $failures += 'P: literal %PENDING_CHAIN% leaked' }
+if ($out -notmatch 'OpenCode Multi-Instance')    { $failures += 'P: OpenCode submenu not reached via sub-path' }
+
+# Q) hostile OpenCode submenu input - rejected at the submenu prompt
+$out = Invoke-Scenario 'Q_hostile_opencode' @('6', '1 & calc', '0', '0')
+if ($out -match 'calc')                          { $failures += 'Q: injection attempt leaked through OpenCode prompt' }
+if ($out -notmatch 'Invalid input')              { $failures += 'Q: rejection hint missing' }
+
+# R) MCP sync block renders in the ZCode submenu: the live sync, the watcher
+#    and the one-shot live-apply entries (2026-10-27)
+$out = Invoke-Scenario 'R_mcp_sync_render' @('2', '0', '0')
+if ($out -notmatch '\[24\].*Sync MCPs to all clones')      { $failures += 'R: ZCode [24] Sync MCPs not rendered' }
+if ($out -notmatch '\[25\].*MCP sync watcher')             { $failures += 'R: ZCode [25] MCP sync watcher not rendered' }
+if ($out -notmatch '\[26\].*Sync MCPs \+ apply live now')  { $failures += 'R: ZCode [26] Sync + apply live not rendered' }
+
 if ($failures.Count -gt 0) {
     Write-Output 'HARNESS FAIL:'
     $failures | ForEach-Object { Write-Output "  - $_" }
     exit 1
 }
-Write-Output 'HARNESS PASS: all 12 scenarios clean'
+Write-Output 'HARNESS PASS: all 18 scenarios clean'
 # Explicit exit: pwsh -File propagates the last native \$LASTEXITCODE, and the
 # scenarios' cmd exit code inherits GHOST.bat's `timeout` calls, which fail on
 # CI consoles (no interactive stdin) AFTER the PASS line was already printed.
