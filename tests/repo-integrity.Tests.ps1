@@ -89,6 +89,42 @@ Describe "GHOST.bat dispatch integrity" {
         $stale = @($targets | Where-Object { $_ -like "scripts\*" })
         $stale | Should -BeNullOrEmpty
     }
+
+    It "keeps the dispatch header range and every resolver target consistent" {
+        $repoRoot = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
+        $raw = Get-Content -LiteralPath (Join-Path $repoRoot "GHOST.bat") -Raw
+
+        # Scope the gid extraction to the :DispatchOne LABEL's block only -
+        # earlier `call :DispatchOne` references live inside the five
+        # resolvers (which use the same `if "%~1"=="N"` shape for their LOCAL
+        # ids), so anchor on the label at line start. The block ends at the
+        # next top-level label.
+        $i = $raw.IndexOf("`r`n:DispatchOne")
+        $i | Should -BeGreaterThan 0
+        $i += 2
+        $j = $raw.IndexOf("`r`n:", $i)
+        $j | Should -BeGreaterThan $i
+        $block = $raw.Substring($i, $j - $i)
+
+        $dispatchGids = @([regex]::Matches($block, 'if "%~1"=="(\d+)"') |
+            ForEach-Object { [int]$_.Groups[1].Value } | Select-Object -Unique)
+        $dispatchGids.Count | Should -BeGreaterOrEqual 40
+
+        # The block's header comment must state the real covered range
+        # ("(1-NN; ... unused)") - a stale upper bound hid a whole suite once
+        # (the "(1-62)" comment while gids 64/65 were already dispatched).
+        $header = [regex]::Match($block, 'rem Runs one task by global id \((\d+)-(\d+)[^)]*\)')
+        $header.Success | Should -BeTrue
+        [int]$header.Groups[2].Value | Should -Be (($dispatchGids | Measure-Object -Maximum).Maximum)
+
+        # Every resolver RESOLVED=NN mapping must land on a real dispatch
+        # case - a typo'd resolver target would print "Unknown task" forever.
+        $resolverTargets = @([regex]::Matches($raw, 'set "RESOLVED=(\d+)"') |
+            ForEach-Object { [int]$_.Groups[1].Value } | Select-Object -Unique)
+        $resolverTargets.Count | Should -BeGreaterOrEqual 30
+        $dangling = @($resolverTargets | Where-Object { $dispatchGids -notcontains $_ })
+        $dangling | Should -BeNullOrEmpty -Because "every resolver gid must have a :DispatchOne case"
+    }
 }
 
 Describe "ghost.sh dispatch integrity" {
