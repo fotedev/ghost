@@ -33,9 +33,17 @@ if (-not $qoderWorkIsAdmin) {
     # swallowed as an undeclared argument (the *_done.txt marker file is the
     # persisted result).
     $qoderWorkArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$qoderWorkScript`"$qoderWorkSwitchString"
+    # Remove any done-marker from a previous run BEFORE launching: the elevated
+    # child writes the marker only at the very end, so an early exit (e.g. the
+    # tree-kill give-up) would otherwise leave the PREVIOUS run's summary here
+    # to be printed as this run's result.
+    Remove-Item "$env:TEMP\qoderwork_v0.1_done.txt" -ErrorAction SilentlyContinue
     Start-Process powershell -Verb RunAs -ArgumentList $qoderWorkArgs -WindowStyle Normal -Wait
     if (Test-Path "$env:TEMP\qoderwork_v0.1_done.txt") {
         Get-Content "$env:TEMP\qoderwork_v0.1_done.txt"
+    }
+    else {
+        Write-Host "no result marker produced this run -- the elevated reset window may have exited early" -ForegroundColor Yellow
     }
     exit
 }
@@ -60,7 +68,7 @@ Write-GhostBanner -Target "QoderWork Identity Reset" -Version "0.1"
 #          (chat preservation, same policy as all other IDE scripts).
 #          Fixed step numbering (all [n/26]) + hostname audit variable.
 #
-# The script covers N file-level steps + 5 system-level steps, mirroring the
+# The script covers 21 file-level steps + 5 system-level steps, mirroring the
 # AGENTS.md "Cursor pattern":
 #   - verify-after every write
 #   - audit log to <root>\ID_Backups\<ts>\audit_<ts>.json
@@ -203,13 +211,27 @@ function Reset-QoderWorkStatusJson {
 
     $before = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
 
-    $newObj = [ordered]@{
+    # Field-targeted rewrite (same pattern as Update-QoderWorkPreferences):
+    # clone the parsed object and overwrite only the known keys, so any key a
+    # newer QoderWork version adds to .status.json survives the reset instead
+    # of being silently dropped by a fixed-shape rebuild.
+    $newObj = $before | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+
+    $statusPatch = [ordered]@{
         logged_in      = $false
         version        = if ($before.PSObject.Properties['version']) { $before.version } else { "" }
         schema_version = if ($before.PSObject.Properties['schema_version']) { $before.schema_version } else { 1 }
         product        = if ($before.PSObject.Properties['product']) { $before.product } else { "qoderwork" }
         snapshot_at    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
         writer         = "main"
+    }
+    foreach ($statusKey in @($statusPatch.Keys)) {
+        if ($null -ne $newObj.PSObject.Properties[$statusKey]) {
+            $newObj.$statusKey = $statusPatch[$statusKey]
+        }
+        else {
+            Add-Member -InputObject $newObj -NotePropertyName $statusKey -NotePropertyValue $statusPatch[$statusKey]
+        }
     }
 
     if ($DryRun) {
@@ -221,7 +243,7 @@ function Reset-QoderWorkStatusJson {
     # No-BOM UTF-8 write (mirrors reset_zcode_windows-v1.0.ps1:384). Set-Content
     # with -Encoding UTF8 emits a BOM under PS 5.1, which Chromium's JSON parser
     # rejects and falls back to the old value.
-    [System.IO.File]::WriteAllText($Path, ($newObj | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+    [System.IO.File]::WriteAllText($Path, ($newObj | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
         $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
@@ -474,7 +496,8 @@ try:
         cursor.execute("SELECT COUNT(*) FROM " + table)
         result["before"][table] = cursor.fetchone()[0]
         cursor.execute("DELETE FROM " + table)
-        result["after"][table] = 0
+        cursor.execute("SELECT COUNT(*) FROM " + table)
+        result["after"][table] = cursor.fetchone()[0]
 
     for key in app_settings_reset_keys:
         cursor.execute("SELECT COUNT(*) FROM app_settings WHERE key = ?", (key,))
@@ -491,10 +514,6 @@ print(json.dumps(result))
 "@
 
     try {
-        # No-BOM UTF-8 write for the temp .py (mirrors reset_zcode_windows-v1.0.ps1:176).
-        # A BOM at the start of the temp file trips CPython's parser before the
-        # shebang line is read.
-        [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
         if ($DryRun) {
             Write-Host "    [DRY-RUN] would scrub agents.db tables ($($exactTables.Count)) + app_settings keys ($($appSettingsResetKeys.Count))" -ForegroundColor DarkGray
             foreach ($table in $exactTables) {
@@ -505,6 +524,12 @@ print(json.dumps(result))
             }
             return $true
         }
+
+        # No-BOM UTF-8 write for the temp .py (mirrors reset_zcode_windows-v1.0.ps1:176).
+        # A BOM at the start of the temp file trips CPython's parser before the
+        # shebang line is read. Written only on a real run -- a dry run must not
+        # create files, not even in TEMP.
+        [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
 
         $commandOutput = & $pythonCommand $tempScriptPath $DbPath
         if ($LASTEXITCODE -ne 0) {
@@ -521,6 +546,14 @@ print(json.dumps(result))
         foreach ($table in $exactTables) {
             $before = $result.before.$table
             $after = $result.after.$table
+            if ($after -eq "schema-missing") {
+                # Schema evolution: the table no longer exists in agents.db, so
+                # there is nothing to scrub. Benign -- must not fail the run.
+                # Audit with a WARN flavor so the JSON shows why it was skipped.
+                Write-Host "    [WARN] table absent from current schema, nothing to scrub: $table" -ForegroundColor Yellow
+                Add-AuditEntry -Audit $Audit -File $DbPath -Key $table -Before "schema-missing" -After "schema-missing (warn: absent from current schema)" -Ok $true
+                continue
+            }
             $ok = ($before -is [int]) -and ($after -eq 0)
             Add-AuditEntry -Audit $Audit -File $DbPath -Key $table -Before ("count=" + $before) -After ("count=" + $after) -Ok $ok
             if (-not $ok) { $allOk = $false }
@@ -529,6 +562,12 @@ print(json.dumps(result))
         foreach ($key in $appSettingsResetKeys) {
             $before = $result.before.$key
             $after = $result.after.$key
+            if ($after -eq "schema-missing") {
+                # Same schema-evolution contract as the tables loop above.
+                Write-Host "    [WARN] app_settings absent from current schema, nothing to scrub: $key" -ForegroundColor Yellow
+                Add-AuditEntry -Audit $Audit -File $DbPath -Key ("app_settings:" + $key) -Before "schema-missing" -After "schema-missing (warn: absent from current schema)" -Ok $true
+                continue
+            }
             $ok = ($before -is [int]) -and ($after -eq 0)
             Add-AuditEntry -Audit $Audit -File $DbPath -Key ("app_settings:" + $key) -Before ("count=" + $before) -After ("count=" + $after) -Ok $ok
             if (-not $ok) { $allOk = $false }
@@ -585,6 +624,25 @@ function Invoke-ClearBinaryIdentityStore {
     return $results
 }
 
+# Derive a step's pass/fail from the audit entries it appended (from index
+# $BeforeCount to the end). Clear-BinaryIdentityStore records failed deletes
+# ONLY as ok=$false audit entries -- its returned action rows carry no ok flag
+# and are emitted for successful paths only -- so the caller must inspect the
+# audit delta to know whether a binary-store step actually succeeded.
+function Test-StepAuditOk {
+    param(
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [Parameter(Mandatory = $true)][int]$BeforeCount
+    )
+
+    if ($null -eq $Audit.Value) { return $true }
+    $entries = @($Audit.Value)
+    for ($i = $BeforeCount; $i -lt $entries.Count; $i++) {
+        if (-not $entries[$i].ok) { return $false }
+    }
+    return $true
+}
+
 # Post-reset watchdog probe: if a slow-shutdown helper recreated the rum store
 # or agents.db core rows within 2s, re-delete. Same pattern as v0.3 Qoder.
 function Test-QoderWorkWatchdogRecreation {
@@ -606,18 +664,21 @@ function Test-QoderWorkWatchdogRecreation {
     if ($recreated.Count -eq 0) {
         Write-Host "[OK] no identity files were recreated by a watchdog" -ForegroundColor Green
         Add-AuditEntry -Audit $Audit -File "watchdog-probe" -Key "recreation-check" -Before "none" -After "none" -Ok $true
-        return
+        return $true
     }
 
+    $recreatedOk = $true
     foreach ($path in $recreated) {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
         $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
         if ($afterValue -eq "re-delete-failed") {
             Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+            $recreatedOk = $false
         }
         Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
+    return $recreatedOk
 }
 
 # Old ID_Backups directories (from previous reset runs) preserve complete snapshots
@@ -633,7 +694,7 @@ function Invoke-OldIdBackupsPurge {
     if (-not (Test-Path -LiteralPath $IdBackupsRoot)) {
         Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "missing" -After "skipped" -Ok $true
         Write-Host "    no ID_Backups directory to purge" -ForegroundColor DarkGray
-        return
+        return $true
     }
 
     $allBackups = @(Get-ChildItem -LiteralPath $IdBackupsRoot -Directory -ErrorAction SilentlyContinue |
@@ -643,18 +704,32 @@ function Invoke-OldIdBackupsPurge {
     if ($toDelete.Count -eq 0) {
         Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "none" -After "none" -Ok $true
         Write-Host "    no older ID_Backups to purge (only current run present)" -ForegroundColor DarkGray
-        return
+        return $true
     }
 
+    $purgeOk = $true
     foreach ($dir in $toDelete) {
         if ($DryRun) {
             Write-Host "    [DRY-RUN] would purge older backup: $($dir.Name)" -ForegroundColor DarkGray
+            Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "would-purge" -Ok $true
             continue
         }
         Write-Host "    [PURGE] $($dir.Name) (preserved old fingerprint; deleting)" -ForegroundColor DarkGray
         Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        if (Test-Path -LiteralPath $dir.FullName) {
+            # Never silent-success: a locked directory (open in Explorer or an
+            # editor is the ordinary case) survives the purge. Audit the real
+            # result and fail the step so the summary/exit code cannot claim a
+            # clean run while old-ID backups are still on disk.
+            Write-Host "    [FAILED] could not purge older backup (locked?): $($dir.Name)" -ForegroundColor Red
+            Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "delete-failed" -Ok $false
+            $purgeOk = $false
+        }
+        else {
+            Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        }
     }
+    return $purgeOk
 }
 
 # Set and verify a REG_SZ value. Used for the source IDs that live outside the
@@ -1150,26 +1225,44 @@ if (Reset-QoderWorkExternalCommandsRegistry -Path $extRegPath -BackupRoot $backu
 # --- [5/26] ~\.qoderwork\.cache\ deletion ---
 Write-Host "`n[5/26] Deleting ~\.qoderwork\.cache\..." -ForegroundColor Cyan
 $dotCachePath = Join-Path $userQoderWorkRoot ".cache"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($dotCachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] .cache" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] .cache" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] .cache (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [6/26] ~\.qoderwork\cache\ deletion (MCP market cache) ---
 Write-Host "`n[6/26] Deleting ~\.qoderwork\cache\..." -ForegroundColor Cyan
 $cachePath = Join-Path $userQoderWorkRoot "cache"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($cachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] cache" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] cache" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] cache (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [7/26] ~\.qoderwork\logs\ deletion ---
 Write-Host "`n[7/26] Deleting ~\.qoderwork\logs\..." -ForegroundColor Cyan
 $logsPath = Join-Path $userQoderWorkRoot "logs"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($logsPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] logs" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] logs" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] logs (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [8/26] rum-electron-store\ deletion (CROSS-PRODUCT RUM ID) ---
 # This is the single most important file in the script. The Alibaba ARMS
@@ -1177,18 +1270,30 @@ $passCount++
 # QoderWork install with the previously-banned Qoder install.
 Write-Host "`n[8/26] Deleting Roaming\QoderWork\rum-electron-store\ (cross-product RUM)..." -ForegroundColor Cyan
 $rumStorePath = Join-Path $root "rum-electron-store"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($rumStorePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] rum-electron-store (ARMS _arms_uid wiped)" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] rum-electron-store (ARMS _arms_uid wiped)" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] rum-electron-store (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [9/26] Local State (Chromium os_crypt encrypted key) ---
 Write-Host "`n[9/26] Deleting Roaming\QoderWork\Local State (Chromium os_crypt key)..." -ForegroundColor Cyan
 $localStatePath = Join-Path $root "Local State"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($localStatePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] Local State" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] Local State" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] Local State (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [10/26] Partitions\main\Preferences device_id_salt ---
 Write-Host "`n[10/26] Updating Partitions\main\Preferences electron.media.device_id_salt..." -ForegroundColor Cyan
@@ -1213,34 +1318,58 @@ $netPaths = @(
     (Join-Path $profileRoot "Network\Trust Tokens-journal"),
     (Join-Path $profileRoot "Network\NetworkDataMigrated")
 )
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths $netPaths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] Network stores" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] Network stores" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] Network stores (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [12/26] Partitions\main\Local Storage\ (LevelDB) ---
 Write-Host "`n[12/26] Deleting Partitions\main\Local Storage\ (LevelDB identity keys)..." -ForegroundColor Cyan
 $localStoragePath = Join-Path $profileRoot "Local Storage"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($localStoragePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] Local Storage" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] Local Storage" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] Local Storage (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [13/26] Partitions\main\Session Storage\ ---
 Write-Host "`n[13/26] Deleting Partitions\main\Session Storage\..." -ForegroundColor Cyan
 $sessionStoragePath = Join-Path $profileRoot "Session Storage"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($sessionStoragePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] Session Storage" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] Session Storage" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] Session Storage (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [14/26] Partitions\main\Shared Dictionary\ ---
 Write-Host "`n[14/26] Deleting Partitions\main\Shared Dictionary\..." -ForegroundColor Cyan
 $sharedDictPath = Join-Path $profileRoot "Shared Dictionary"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($sharedDictPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] Shared Dictionary" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] Shared Dictionary" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] Shared Dictionary (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [15/26] Partitions\main\Cache\ + Code Cache\ + GPUCache\ + Dawn*Cache\ ---
 Write-Host "`n[15/26] Deleting Partitions\main\Cache\ + Code Cache\ + GPUCache\ + Dawn*Cache\..." -ForegroundColor Cyan
@@ -1252,26 +1381,44 @@ $cachePaths = @(
     (Join-Path $profileRoot "DawnWebGPUCache"),
     (Join-Path $profileRoot "blob_storage")
 )
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths $cachePaths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $profileRoot
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] cache trees" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] cache trees" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] cache trees (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [16/26] Roaming\QoderWork\SharedStorage\ (Electron SharedStorage 4KB file) ---
 Write-Host "`n[16/26] Deleting Roaming\QoderWork\SharedStorage\..." -ForegroundColor Cyan
 $sharedStoragePath = Join-Path $root "SharedStorage"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($sharedStoragePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] SharedStorage" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] SharedStorage" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] SharedStorage (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [17/26] data\dns-cache\ deletion (Qoder endpoint IP cache) ---
 Write-Host "`n[17/26] Deleting data\dns-cache\ (Qoder endpoint IP cache)..." -ForegroundColor Cyan
 $dnsCachePath = Join-Path $root "data\dns-cache"
+$stepAuditCount = $audit.Count
 $binaryActions = Invoke-ClearBinaryIdentityStore -Paths @($dnsCachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 if (-not $DryRun) { $actions += @($binaryActions) }
-Write-Host "    [OK] data\dns-cache" -ForegroundColor Green
-$passCount++
+if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+    Write-Host "    [OK] data\dns-cache" -ForegroundColor Green
+    $passCount++
+} else {
+    Write-Host "    [FAILED] data\dns-cache (one or more deletes failed -- see audit log)" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [18/26] data\dynamic-text\qoder-work.json: KEEP (UI strings, not identity) ---
 # Note: This file contains error.114 (the cross-product ban message). We do NOT
@@ -1290,6 +1437,21 @@ if (-not $DryRun) {
     if ($backupAgentsDb) {
         Add-ActionEntry -Actions ([ref]$actions) -OriginalPath $agentsDbPath -BackupPath $backupAgentsDb
     }
+    # SQLite sidecars: the pre-step force-kill can leave a hot -journal or a
+    # committed-but-uncheckpointed -wal/-shm next to agents.db. A .db-only
+    # backup restores stale or torn chat data, so back each sidecar up
+    # alongside the database (sidecar-aware like reset_qoder.ps1) and record
+    # it for the restore script -- restoring the .db together with its
+    # sidecars replays exactly the state that was on disk.
+    foreach ($agentsDbSidecarSuffix in @("-wal", "-shm", "-journal")) {
+        $agentsDbSidecarPath = $agentsDbPath + $agentsDbSidecarSuffix
+        if (Test-Path -LiteralPath $agentsDbSidecarPath) {
+            $backupAgentsDbSidecar = Backup-FileToTimestampDir -Source $agentsDbSidecarPath -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $agentsDbSidecarPath)
+            if ($backupAgentsDbSidecar) {
+                Add-ActionEntry -Actions ([ref]$actions) -OriginalPath $agentsDbSidecarPath -BackupPath $backupAgentsDbSidecar
+            }
+        }
+    }
 }
 if (Clear-QoderWorkAgentsDb -DbPath $agentsDbPath -Audit ([ref]$audit)) {
     Write-Host "    [OK] agents.db scrubbed" -ForegroundColor Green
@@ -1301,16 +1463,25 @@ if (Clear-QoderWorkAgentsDb -DbPath $agentsDbPath -Audit ([ref]$audit)) {
 
 # --- [20/26] Old ID_Backups purge (keep newest only) ---
 Write-Host "`n[20/26] Purging old ID_Backups directories (keep current run only)..." -ForegroundColor Cyan
-Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit)
-$passCount++
+if (Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit)) {
+    $passCount++
+} else {
+    Write-Host "    [FAILED] one or more older ID_Backups directories could not be purged" -ForegroundColor Red
+    $failCount++
+}
 
 # --- [21/26] Post-write watchdog re-verify ---
 Write-Host "`n[21/26] Post-write watchdog re-verify..." -ForegroundColor Cyan
 $watchdogCorePaths = @($rumStorePath, $localStatePath)
+$watchdogOk = $true
 if (-not $DryRun) {
-    Test-QoderWorkWatchdogRecreation -CorePaths $watchdogCorePaths -Audit ([ref]$audit)
+    $watchdogOk = Test-QoderWorkWatchdogRecreation -CorePaths $watchdogCorePaths -Audit ([ref]$audit)
 }
-$passCount++
+if ($watchdogOk) {
+    $passCount++
+} else {
+    $failCount++
+}
 
 # === SYSTEM-LEVEL STEPS (mirrors v0.3 Qoder; opt-out via -SkipMac / -SkipHostname) ===
 
@@ -1330,10 +1501,16 @@ if ($existingAuthFiles.Count -eq 0) {
     $passCount++
 } else {
     Write-Host "`n[22/26] Deleting auth.dat/auth-v2.dat (encrypted auth tokens)..." -ForegroundColor Cyan
+    $stepAuditCount = $audit.Count
     $authActions = Invoke-ClearBinaryIdentityStore -Paths $existingAuthFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
     if (-not $DryRun) { $actions += @($authActions) }
-    Write-Host "    [OK] auth binaries" -ForegroundColor Green
-    $passCount++
+    if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
+        Write-Host "    [OK] auth binaries" -ForegroundColor Green
+        $passCount++
+    } else {
+        Write-Host "    [FAILED] auth binaries (one or more deletes failed -- see audit log)" -ForegroundColor Red
+        $failCount++
+    }
 }
 
 # --- [23/26] HKLM MachineGuid source rotation (QoderWork OTel reads this via REG.exe) ---
@@ -1381,10 +1558,10 @@ if ($sqmClientResult.Success) { $passCount++ } else { $failCount++ }
 
 # --- [26/26] NIC MAC + Hostname (system-level defenses) ---
 if ($SkipMac) {
-    Write-Host "`n[26/26-OPT] SKIPPED (-SkipMac) -- NIC MAC addresses left unchanged" -ForegroundColor Yellow
+    Write-Host "`n[26/26] SKIPPED (-SkipMac) -- NIC MAC addresses left unchanged" -ForegroundColor Yellow
     Add-AuditEntry -Audit ([ref]$audit) -File "NetAdapter::all" -Key "NetworkAddress" -Before "skipped" -After "skipped-by-user" -Ok $true
 } else {
-    Write-Host "`n[26/26-OPT] Rotating NIC MAC addresses (physical adapters only)..." -ForegroundColor Cyan
+    Write-Host "`n[26/26] Rotating NIC MAC addresses (physical adapters only)..." -ForegroundColor Cyan
     $physicalAdapters = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })
 
     if ($physicalAdapters.Count -eq 0) {
@@ -1409,10 +1586,10 @@ if ($SkipMac) {
 }
 
 if ($SkipHostname) {
-    Write-Host "`n[26/26-OPT] SKIPPED (-SkipHostname) -- hostname left unchanged" -ForegroundColor Yellow
+    Write-Host "`n[26/26] SKIPPED (-SkipHostname) -- hostname left unchanged" -ForegroundColor Yellow
     Add-AuditEntry -Audit ([ref]$audit) -File "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName" -Key "ComputerName" -Before "skipped" -After "skipped-by-user" -Ok $true
 } else {
-    Write-Host "`n[26/26-OPT] Changing hostname (registry-only, restart required)..." -ForegroundColor Cyan
+    Write-Host "`n[26/26] Changing hostname (registry-only, restart required)..." -ForegroundColor Cyan
     $newHostname = New-RandomHostname
     Write-Host "    old: $env:COMPUTERNAME -> new: $newHostname" -ForegroundColor Gray
     if (Set-SystemHostname -NewHostname $newHostname -OldHostname $env:COMPUTERNAME -Audit ([ref]$audit)) {
@@ -1435,7 +1612,16 @@ Add-AuditEntry -Audit ([ref]$audit) -File $systemManifestPath -Key "system-manif
 Write-Host ""
 Write-Host "[*] System manifest saved: $systemManifestPath" -ForegroundColor Gray
 
-$systemRestoreScriptPath = New-SystemRestoreScript -BackupRoot $backupRoot -App $app -Manifest $systemManifest -Timestamp $timestamp
+if (-not $DryRun) {
+    $systemRestoreScriptPath = New-SystemRestoreScript -BackupRoot $backupRoot -App $app -Manifest $systemManifest -Timestamp $timestamp
+} else {
+    # New-SystemRestoreScript writes into $backupRoot, which a dry run never
+    # creates ([System.IO.File]::WriteAllText does not create directories) --
+    # calling it here threw DirectoryNotFoundException and killed every -DryRun
+    # run before the summary/marker could be written. Gate it exactly like the
+    # audit-log branch below.
+    $systemRestoreScriptPath = "<dry-run>"
+}
 Write-Host "[*] System restore script: $systemRestoreScriptPath" -ForegroundColor Gray
 
 # --- Audit + file-level restore + summary ---
@@ -1448,7 +1634,12 @@ if (-not $DryRun) {
     Write-Host "[DRY-RUN] would write audit log to $auditPath and restore script to <backupRoot>" -ForegroundColor DarkGray
 }
 
-# Surface any per-file failures captured in the audit.
+# Surface any per-file failures captured in the audit. Diagnostic listing
+# only: every failing entry is already counted exactly once by its own step
+# (steps [1]-[4], [10], [19], [23]-[26] via their return values; the
+# binary-store steps via Test-StepAuditOk; the purge and watchdog via return
+# values), so adding them to $failCount here double-counted every failure in
+# the summary and the done marker.
 $auditFailures = @($audit | Where-Object { -not $_.ok })
 if ($auditFailures.Count -gt 0) {
     Write-Host ""
@@ -1456,7 +1647,6 @@ if ($auditFailures.Count -gt 0) {
     foreach ($f in $auditFailures) {
         Write-Host ("    {0} | key={1} | {2}" -f $f.file, $f.key, $f.after) -ForegroundColor Yellow
     }
-    $failCount += $auditFailures.Count
 }
 
 Write-Host "`n=== Summary ===" -ForegroundColor Cyan

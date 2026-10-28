@@ -142,10 +142,21 @@ if (-not $mmoIsAdmin) {
     # (not a log) is the persisted result channel - the elevated console shows
     # the full live output while the run progresses.
     $mmoArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$mmoScript`"$mmoSwitchString"
-    Start-Process powershell -Verb RunAs -ArgumentList $mmoArgs -WindowStyle Normal -Wait
+    # A stale done-marker from an earlier run would be printed below as THIS
+    # run's result (the marker persists across runs; the elevated child only
+    # writes it at the very end, never on the version/kill preflight aborts).
+    # Delete it BEFORE launching the child, and propagate the child's exit code
+    # via -PassThru instead of always exiting 0.
+    Remove-Item -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt" -Force -ErrorAction SilentlyContinue
+    $mmoChild = Start-Process powershell -Verb RunAs -ArgumentList $mmoArgs -WindowStyle Normal -Wait -PassThru
     if (Test-Path -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt") {
         Get-Content -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt"
     }
+    # ExitCode can be unreadable for an elevated child on some hosts - degrade
+    # to a plain exit 0 rather than throwing after a successful run.
+    $mmoExitCode = $null
+    try { $mmoExitCode = $mmoChild.ExitCode } catch { $mmoExitCode = $null }
+    if ($null -ne $mmoExitCode) { exit $mmoExitCode }
     exit
 }
 
@@ -215,7 +226,7 @@ function Set-VerifiedMachineIdFile {
 
     $beforeValue = $null
     if (Test-Path -LiteralPath $Path) {
-        $beforeValue = (Get-Content -LiteralPath $Path -Raw).Trim()
+        $beforeValue = (Get-Content -LiteralPath $Path -Raw -Encoding UTF8).Trim()
         $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
         if ($backupPath) {
             Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
@@ -229,7 +240,7 @@ function Set-VerifiedMachineIdFile {
 
     # No-BOM UTF-8. Set-Content -Encoding UTF8 emits a BOM on PS 5.1.
     [System.IO.File]::WriteAllText($Path, $Value, (New-Object System.Text.UTF8Encoding $false))
-    $afterValue = (Get-Content -LiteralPath $Path -Raw).Trim()
+    $afterValue = (Get-Content -LiteralPath $Path -Raw -Encoding UTF8).Trim()
     $ok = $afterValue -eq $Value
     Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $beforeValue -After $afterValue -Ok $ok
     return $ok
@@ -277,7 +288,7 @@ function Clear-AllJsonNodes {
 
     $nodeNames = @()
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($null -ne $content) {
             $nodeNames = @($content.PSObject.Properties.Name)
         }
@@ -300,7 +311,7 @@ function Clear-AllJsonNodes {
     [System.IO.File]::WriteAllText($Path, "{}", (New-Object System.Text.UTF8Encoding $false))
 
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
         $afterCount = 0
         if ($null -ne $verified) {
             $afterCount = @($verified.PSObject.Properties).Count
@@ -343,7 +354,7 @@ function Remove-JsonNodesVerified {
     }
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "node-removal" -Before "present" -After "parse-failed" -Ok $false
@@ -377,7 +388,7 @@ function Remove-JsonNodesVerified {
     [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "node-removal" -Before ($presentTargets -join ",") -After "verify-parse-failed" -Ok $false
@@ -458,6 +469,15 @@ function Clear-TreeFilesIndividually {
     $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
 
     $files = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)
+
+    # No backup -> no delete (never-silent-success: an unbacked deletion has no
+    # restore path). The backup is whole-tree, so skip the WHOLE tree honestly.
+    if (-not $backupPath) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After ("backup-failed: " + $files.Count + " file(s) skipped") -Ok $false
+        Write-Host "    [FAILED] backup failed - tree NOT deleted (no restore path): $Path" -ForegroundColor Red
+        return @{ Deleted = 0; Failed = $files.Count; FailedPaths = @($files | ForEach-Object { $_.FullName }) }
+    }
+
     $deleted = 0
     $failed = 0
     $failedPaths = @()
@@ -529,8 +549,9 @@ function Remove-VerifiedFileNoBackup {
 }
 
 # Reparse-point-safe removal (junction/symlink guard). Removes the link itself
-# without following it; real dirs go through the restorable delete path. Never
-# touches the link target.
+# without following it -- renamed IN PLACE to "<name>.backup" first so the
+# generated restore script can rename it back (recreating the link); real dirs
+# go through the restorable delete path. Never touches the link target.
 function Remove-AppPathSafely {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -550,9 +571,52 @@ function Remove-AppPathSafely {
     if ($isReparsePoint) {
         $linkType = if ($item.LinkType) { $item.LinkType } else { "ReparsePoint" }
         $target = if ($item.Target) { $item.Target } else { "<unknown>" }
-        Write-Host "    [LINK] $Path ($linkType -> $target) -- removing link only" -ForegroundColor DarkGray
-        $item.Delete()
-        Add-AuditEntry -Audit $Audit -File $Path -Key "user-subdir" -Before ("$linkType->$target") -After "link-removed" -Ok $true
+        Write-Host "    [LINK] $Path ($linkType -> $target)" -ForegroundColor DarkGray
+
+        # Restorable link removal: rename the link IN PLACE to "<name>.backup"
+        # (a same-directory rename preserves the reparse point) and record a
+        # "rename" action -- the generated restore script renames it back,
+        # recreating the link at the original path. The link target is never
+        # touched. Clobber a stale "<name>.backup" first (mandatory
+        # convention); if the rename is impossible, fall back to link-only
+        # delete with the recreate command recorded in the audit.
+        $linkBackupPath = "$Path.backup"
+        $linkRenamed = $false
+        $linkRenameError = $null
+        if (Test-Path -LiteralPath $linkBackupPath) {
+            $null = Remove-Item -LiteralPath $linkBackupPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if (-not (Test-Path -LiteralPath $linkBackupPath)) {
+            try {
+                Rename-Item -LiteralPath $Path -NewName ([System.IO.Path]::GetFileName($linkBackupPath)) -ErrorAction Stop
+                if ((Test-Path -LiteralPath $linkBackupPath) -and (-not (Test-Path -LiteralPath $Path))) {
+                    $linkRenamed = $true
+                }
+                else {
+                    $linkRenameError = "rename did not verify"
+                }
+            }
+            catch {
+                $linkRenameError = $_.Exception.Message
+            }
+        }
+        else {
+            $linkRenameError = "stale <name>.backup could not be removed"
+        }
+
+        if ($linkRenamed) {
+            Write-Host "    [OK] link renamed to backup (restorable): $linkBackupPath" -ForegroundColor DarkGray
+            Add-AuditEntry -Audit $Audit -File $Path -Key "user-subdir" -Before ("$linkType->$target") -After ("link-moved-to-backup: " + $linkBackupPath) -Ok $true
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -Action "rename" -RenamedPath $linkBackupPath
+            return "link-removed"
+        }
+
+        if (Test-Path -LiteralPath $Path) {
+            Write-Host "    [WARN] link not restorable ($linkRenameError) - removing link only; recreate with:" -ForegroundColor Yellow
+            Write-Host "           New-Item -ItemType Junction -Path `"$Path`" -Value `"$target`"" -ForegroundColor Yellow
+            $item.Delete()
+        }
+        Add-AuditEntry -Audit $Audit -File $Path -Key "user-subdir" -Before ("$linkType->$target") -After ("link-removed-not-restorable: " + $linkRenameError) -Ok $true
         Add-ActionEntry -Actions $Actions -OriginalPath $Path -Action "delete"
         return "link-removed"
     }
@@ -581,7 +645,7 @@ function Remove-OsCryptEncryptedKey {
     }
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After "parse-failed" -Ok $false
@@ -610,7 +674,7 @@ function Remove-OsCryptEncryptedKey {
     [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
         $afterValue = if ($null -eq $verified.os_crypt.PSObject.Properties['encrypted_key']) { "removed" } else { "still-present" }
         $ok = $afterValue -eq "removed"
         Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After $afterValue -Ok $ok
@@ -650,7 +714,7 @@ function Set-DeviceIdSalt {
     }
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before "present" -After "parse-failed" -Ok $false
@@ -694,7 +758,7 @@ function Set-DeviceIdSalt {
     [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
         $actualValue = $verified.electron.media.device_id_salt
         $ok = $actualValue -eq $NewSalt
         Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before $beforeValue -After $actualValue -Ok $ok
@@ -739,7 +803,7 @@ function Reset-OpenCodeWindowIds {
     }
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before "present" -After "parse-failed" -Ok $false
@@ -776,7 +840,7 @@ function Reset-OpenCodeWindowIds {
     [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before ($oldIds -join ",") -After "verify-parse-failed" -Ok $false
@@ -941,7 +1005,15 @@ function Invoke-OldIdBackupsPurge {
     foreach ($dir in $toDelete) {
         Write-Host "    [PURGE] $($dir.Name) (preserved old fingerprint; deleting)" -ForegroundColor DarkGray
         Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        # SilentlyContinue hides real failures: verify the delete actually
+        # happened and audit residue honestly (Test-WatchdogRecreation style).
+        if (Test-Path -LiteralPath $dir.FullName) {
+            Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "still-present" -Ok $false
+            Write-Host "    [FAILED] old-ID backup could not be deleted (locked?): $($dir.FullName)" -ForegroundColor Red
+        }
+        else {
+            Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        }
     }
 }
 
@@ -976,6 +1048,7 @@ function Get-OpenCodeVersionInfo {
 
     # 1. Desktop package.json next to the Electron userData dir.
     $pkgPaths = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\@opencode-aidesktop\resources\app\package.json"),
         (Join-Path $env:LOCALAPPDATA "Programs\opencode\resources\app\package.json"),
         (Join-Path ${env:ProgramFiles} "opencode\resources\app\package.json")
     )
@@ -984,7 +1057,17 @@ function Get-OpenCodeVersionInfo {
             try {
                 $j = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
                 if ($null -ne $j -and $null -ne $j.PSObject.Properties['version']) {
-                    $candidates += @{ Version = [string]$j.version; Source = $p }
+                    # Strip semver prerelease/build suffixes ("1.18.0-beta.1",
+                    # "1.18.0+build") with the same regex the CLI path below
+                    # uses -- [version] cannot parse them and would fail the
+                    # gate on a valid, up-to-date install.
+                    $pkgVersion = [string]$j.version
+                    if ($pkgVersion -match '(\d+\.\d+\.\d+)') {
+                        $candidates += @{ Version = $Matches[1]; Source = $p }
+                    }
+                    else {
+                        $candidates += @{ Version = $pkgVersion; Source = $p }
+                    }
                 }
             }
             catch {
@@ -1149,7 +1232,13 @@ $failCount = 0
 $newUpdaterIdOC = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 $newGhDeviceIdOC = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 $newUpdaterIdMM = ([guid]::NewGuid().ToString()).ToLowerInvariant()
-$newSalt = -join ((1..32) | ForEach-Object { "{0:X}" -f (Get-Random -Maximum 16) })
+# Crypto RNG instead of Get-Random (time-seeded PRNG is unsuitable for
+# identity material): 16 bytes -> 32 lowercase hex chars (cursor canon).
+$newSaltRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$newSaltBytes = New-Object byte[] 16
+$newSaltRng.GetBytes($newSaltBytes)
+$newSaltRng.Dispose()
+$newSalt = -join ($newSaltBytes | ForEach-Object { $_.ToString("x2") })
 $newDesktopDeviceId = $null
 
 # --- [1/22] OpenCode CLI auth.json wipe (forces re-login) ---
@@ -1503,8 +1592,16 @@ Write-Host "`n[10/22] Deleting MiniMax auth-state.json (namespace + legacy root)
 $auditStart = $audit.Count
 $mmAuthStateActions = Clear-BinaryIdentityStore -Paths @($mmAuthStatePath, $mmLegacyAuthStatePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 $actions += @($mmAuthStateActions)
-$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmHome
+# Both deletion targets sit under $mmHome (namespace: auth\prod\en\mcode-public,
+# legacy: auth\); gate on the audit over BOTH roots AND the direct absence of
+# both files before claiming [OK].
+$status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmMcodePublic
 if ($status.Success) {
+    $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmHome
+}
+$namespaceAuthGone = (-not (Test-Path -LiteralPath $mmAuthStatePath))
+$legacyAuthGone = (-not (Test-Path -LiteralPath $mmLegacyAuthStatePath))
+if ($status.Success -and $namespaceAuthGone -and $legacyAuthGone) {
     Write-Host "[OK] auth-state.json absent (namespace + legacy root)" -ForegroundColor Green
     $passCount++
 }
@@ -2079,7 +2176,12 @@ else {
     Write-Host "[FAILED] uninstall_metrics still present in Local State" -ForegroundColor Red
     $failCount++
 }
-$ocWindowIdsProbeOk = $false
+# Mirror step [7]'s skip semantics: opencode.settings absent OR windowIds
+# absent/empty = honest skip (nothing was rotated), never a failure. The probe
+# fails only when windowIds exists but holds stale or non-GUID entries, or the
+# file cannot be parsed.
+$ocWindowIdsProbeOk = $true
+$ocWindowIdsProbed = $false
 if (Test-Path -LiteralPath $ocSettingsPath) {
     try {
         $wsProbe = Get-Content -LiteralPath $ocSettingsPath -Raw | ConvertFrom-Json
@@ -2088,7 +2190,7 @@ if (Test-Path -LiteralPath $ocSettingsPath) {
             $wsIds = @($wsProbe.windowIds)
         }
         if ($wsIds.Count -gt 0) {
-            $ocWindowIdsProbeOk = $true
+            $ocWindowIdsProbed = $true
             foreach ($wid in $wsIds) {
                 if (($wid -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') -or ($ocOldWindowIds -contains $wid)) {
                     $ocWindowIdsProbeOk = $false
@@ -2101,11 +2203,13 @@ if (Test-Path -LiteralPath $ocSettingsPath) {
         $ocWindowIdsProbeOk = $false
     }
 }
-else {
-    $ocWindowIdsProbeOk = $true
-}
 if ($ocWindowIdsProbeOk) {
-    Write-Host "[OK] windowIds final probe passed (fresh GUIDs, old IDs gone)" -ForegroundColor Green
+    if ($ocWindowIdsProbed) {
+        Write-Host "[OK] windowIds final probe passed (fresh GUIDs, old IDs gone)" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[OK] windowIds absent (nothing was rotated - skipped, matches step [7])" -ForegroundColor Green
+    }
     $passCount++
 }
 else {

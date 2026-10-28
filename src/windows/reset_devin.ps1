@@ -22,7 +22,7 @@
 #   - Local Storage\leveldb (UI state) + Backups\ (editor backups): preserved.
 #   - User\workspaceStorage\**: serviceMachineId UPSERT only; tables/files and
 #     stale .backup sidecars are never deleted.
-#   - Third-party secrets (mcp_token_github, other extensions' secret://
+#   - Third-party secrets (mcp_token_github, other extensions' secret-store
 #     entries, github-authentication): never touched.
 #   - .devin\.windsurf extensions/plans/worktrees + mcp_config.json: untouched.
 #   - WebStorage + IndexedDB deliberately NOT touched (possible chat data).
@@ -38,6 +38,10 @@
 # Usage (Windows 10, PowerShell 5.1 or 7 -- just double-click or run):
 #   powershell -ExecutionPolicy Bypass -File reset_devin.ps1
 # Prerequisite: close Windsurf / Devin Desktop first (the script force-kills both).
+# NOTE: the kill list also force-kills generic extension-helper names (kilo /
+# roo / cline / cline-host / blackbox) that are NOT Windsurf/Devin-namespaced -
+# a helper running for a DIFFERENT IDE is killed too (aggressive pre-reset
+# sweep by design; close other IDEs before running).
 # Requirement: Python (python or python3) for EVERY store mutation now
 # (v0.3 needed it only for SQLite writes) - the run fails fast without it.
 
@@ -56,6 +60,10 @@ if (-not $devinIsAdmin) {
     # (not a log) is the persisted result channel - the elevated console shows
     # the full live output while the run progresses.
     $devinArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$devinScript`""
+    # A stale marker from a PREVIOUS run must go before the relaunch: an
+    # early child exit (no roots found, kill failure, terminating error)
+    # never rewrites it, and the parent would display the old run's summary.
+    Remove-Item -LiteralPath "$env:TEMP\devin_v0.4_done.txt" -ErrorAction SilentlyContinue
     Start-Process powershell -Verb RunAs -ArgumentList $devinArgs -WindowStyle Normal -Wait
     if (Test-Path -LiteralPath "$env:TEMP\devin_v0.4_done.txt") {
         Get-Content -LiteralPath "$env:TEMP\devin_v0.4_done.txt"
@@ -123,9 +131,14 @@ function _B64Payload {
 
 function Invoke-GhostCore {
     # The one PS -> Python invocation point for every store mutation.
-    # Returns the parsed JSON report, or $null when the core is missing or
-    # the subcommand failed (exit code non-zero). Same recipe Set-SqliteKeys
-    # uses: functional python probe + UTF-8 console + exit-code check.
+    # Returns the parsed JSON report ($null only when the core/interpreter is
+    # missing or the output is unparseable). A non-zero exit WITH a parseable
+    # JSON report still returns it: the core prints its report before exiting
+    # non-zero (locked file, verify failure), and callers branch on .ok /
+    # .skipped, so a failed report reaches the [FAILED] path instead of
+    # vanishing into a silent $null (Backup-ViaCore's WARN was unreachable).
+    # Same recipe Set-SqliteKeys uses: functional python probe + UTF-8
+    # console + exit-code check.
     param([Parameter(Mandatory = $true)][string[]]$CliArgs)
 
     $cli = Get-GhostPythonCli
@@ -141,6 +154,16 @@ function Invoke-GhostCore {
     Set-GhostConsoleUtf8
     $output = & $pythonCommand $cli @CliArgs
     if ($LASTEXITCODE -ne 0) {
+        # Salvage the report the core printed before failing (see header).
+        try {
+            $failedReport = ($output -join "`n") | ConvertFrom-Json
+        }
+        catch {
+            $failedReport = $null
+        }
+        if ($null -ne $failedReport) {
+            return $failedReport
+        }
         return $null
     }
     try {
@@ -157,6 +180,14 @@ function Backup-ViaCore {
     # action. A locked/failed backup is reported but NOT fatal - the v0.3
     # contract verbatim (a file whose copy could not be read may still be
     # deletable, and the caller proceeds).
+    #
+    # Each source is backed up ONCE per run ($script:DevinBackedUpSources):
+    # a same-path second backup of an already-mutated file (state.vscdb is
+    # backed up in steps [3] AND [4]) used to add a second restore action
+    # entry pointing at POST-MUTATION content, so the restore script would
+    # have "restored" step [3]'s state with step [4]'s bytes. The core's
+    # backup uniquify handles the timestamp-dir label collision; this dedupe
+    # keeps the manifest honest (one pristine copy, one action entry).
     param(
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][string]$BackupRoot,
@@ -164,10 +195,23 @@ function Backup-ViaCore {
         [Parameter(Mandatory = $true)][ref]$Actions
     )
 
+    if ($null -eq $script:DevinBackedUpSources) {
+        $script:DevinBackedUpSources = @{}
+    }
+    if ($script:DevinBackedUpSources.ContainsKey($Source)) {
+        # @{} keys are case-insensitive by default in PS - matches NTFS paths.
+        Write-Host "    [SKIP] backup already taken this run: $Source" -ForegroundColor DarkGray
+        return $true
+    }
+
     $report = Invoke-GhostCore @("backup", $Source, $BackupRoot, $Label)
-    if ($null -eq $report) { return $false }
+    if ($null -eq $report) {
+        Write-Host "    [WARN] backup did not complete (no core report) - proceeding" -ForegroundColor Yellow
+        return $false
+    }
     if ($report.skipped) { return $false }
     if ($report.ok -and $report.destination) {
+        $script:DevinBackedUpSources[$Source] = $report.destination
         Add-ActionEntry -Actions $Actions -OriginalPath $Source -BackupPath $report.destination
         return $true
     }
@@ -214,7 +258,7 @@ function Stop-AppFamilyProcessesAggressive {
 
         $appRemaining = @(Get-Process -Name "Devin*", "Windsurf*", "codeium" -ErrorAction SilentlyContinue)
         $helperRemaining = 0
-        foreach ($helperName in @("kilo", "cline", "roo", "blackbox")) {
+        foreach ($helperName in @("kilo", "cline", "cline-host", "roo", "blackbox")) {
             $helperRemaining += @(Get-Process -Name $helperName -ErrorAction SilentlyContinue).Count
         }
         $count = $appRemaining.Count + $helperRemaining
@@ -301,7 +345,14 @@ function Invoke-OldIdBackupsPurge {
     foreach ($dir in $toDelete) {
         Write-Host "    [PURGE] $($dir.Name) (preserved old fingerprint; deleting)" -ForegroundColor DarkGray
         Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        # Audit the TRUTH: -ErrorAction SilentlyContinue can fail on a locked
+        # dir - a Test-Path recheck decides the recorded outcome.
+        $purged = -not (Test-Path -LiteralPath $dir.FullName)
+        if (-not $purged) {
+            Write-Host "    [FAILED] could not delete (locked?): $($dir.FullName)" -ForegroundColor Red
+        }
+        $purgeAfter = if ($purged) { "deleted" } else { "delete-failed" }
+        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After $purgeAfter -Ok $purged
     }
 }
 
@@ -336,7 +387,16 @@ function Confirm-JsonValues {
     if (-not (Test-Path -LiteralPath $Path)) {
         return $false
     }
-    $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        # A parse failure must fail the probe, not crash the run AFTER all
+        # mutations (a terminating error here would abort before summary,
+        # audit write and restore script).
+        Write-Host "    [FAILED] unparseable JSON in $Path - probe failed" -ForegroundColor Red
+        return $false
+    }
     foreach ($key in $Expected.Keys) {
         $actualValue = if ($null -ne $content.PSObject.Properties[$key]) { $content.$key } else { $null }
         if ($actualValue -ne $Expected[$key]) {
@@ -509,7 +569,9 @@ function Invoke-RootReset {
         (_B64Payload @{ keys = @("os_crypt.encrypted_key") }))
     if ($null -ne $osCryptReport -and $osCryptReport.ok) {
         $osBefore = $osCryptReport.before."os_crypt.encrypted_key"
-        $osAfter = if ($osBefore -eq "missing") { "skipped" } else { "removed" }
+        # skipped=true (file absent: before={} -> $null) and "missing" (key
+        # absent) are SKIPs - only a present key that got removed is "removed".
+        $osAfter = if ($osCryptReport.skipped -or $osBefore -ne "present") { "skipped" } else { "removed" }
         Add-AuditEntry -Audit $Audit -File $localStatePath -Key "os_crypt.encrypted_key" -Before $osBefore -After $osAfter -Ok $true
         if ($osCryptReport.backed_up_to) {
             Add-ActionEntry -Actions $Actions -OriginalPath $localStatePath -BackupPath $osCryptReport.backed_up_to
@@ -840,6 +902,7 @@ function Invoke-RootReset {
 
     # --- [14/17] Old ID_Backups purge + watchdog re-verify (this root; PS) ---
     Write-Host "[14/17] [$AppName] Purging old ID_Backups + watchdog re-verify..." -ForegroundColor Cyan
+    $step14AuditStart = $Audit.Value.Count
     Invoke-OldIdBackupsPurge -BackupRoot $rootBackupRoot -IdBackupsRoot (Join-Path $root "ID_Backups") -Audit $Audit
     $watchdogCoreFiles = @(
         (Join-Path $root "Network\Cookies"),
@@ -847,7 +910,18 @@ function Invoke-RootReset {
         (Join-Path $root "SharedStorage")
     )
     Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit $Audit
-    $PassCount.Value++
+    # Pass/fail derived FROM THE AUDIT (never-silent-success): a purge that
+    # could not delete or a locked re-delete records ok=$false - the summary
+    # and exit code must mirror it instead of an unconditional pass.
+    $step14Status = Get-StepAuditStatus -Audit $Audit -StartIndex $step14AuditStart -Path $root
+    if ($step14Status.Success) {
+        Write-Host "[OK] purge + watchdog re-verify clean [$AppName]" -ForegroundColor Green
+        $PassCount.Value++
+    }
+    else {
+        Write-Host "[FAILED] purge + watchdog re-verify had failures [$AppName]" -ForegroundColor Red
+        $FailCount.Value++
+    }
 }
 
 # === Main =====================================================================
@@ -888,12 +962,22 @@ $installationIdPath = Join-Path $windsurfHome "installation_id"
 $codeiumConfigPath = Join-Path $codeiumHome "config.json"
 $audit = @()
 $actions = @()
-$ids = New-IdentitySet
+# Per-run registry of sources already backed up: Backup-ViaCore skips the
+# second same-path backup so the pristine copy + its single restore action
+# entry survive (see the function's comment).
+$script:DevinBackedUpSources = @{}
 
-# The core must be present and a functional Python 3 with it - fail fast
+# The core must be present AND a functional Python 3 with it - fail fast
 # BEFORE touching anything (v0.4 needs Python for every store mutation).
-if ((Get-GhostPythonCli) -and (-not (Get-PythonCommandInfo))) {
-    Write-Host "[FAILED] Python core present but no functional Python 3 - install it (winget install Python.Python.3.12)." -ForegroundColor Red
+# A MISSING core must fail here too: the run purges old ID_Backups and
+# re-deletes live stores - proceeding without the core would destroy the
+# user's restore points with no new backups taken.
+if (-not (Get-GhostPythonCli)) {
+    Write-Host "[FAILED] GHOST Python core not found (src\python\ghost_cli.py) - broken checkout; every store mutation needs it." -ForegroundColor Red
+    exit 1
+}
+if (-not (Get-PythonCommandInfo)) {
+    Write-Host "[FAILED] no functional Python 3 for the GHOST core - install it (winget install Python.Python.3.12)." -ForegroundColor Red
     exit 1
 }
 
@@ -914,21 +998,53 @@ $passCount = 0
 $failCount = 0
 
 $newCrashReporterId = Get-NewCrashReporterId
-$storageUpdates = @{
-    "telemetry.machineId"    = $ids.machineId
-    "telemetry.macMachineId" = $ids.macMachineId
-    "telemetry.sqmId"        = $ids.sqmId
-    "telemetry.devDeviceId"  = $ids.devDeviceId
-}
+# Independent identity set PER ROOT (AGENTS.md: "independent ID sets per
+# child - never duplicate"): one shared set across the Devin and Windsurf
+# roots leaves exactly the cross-root correlation trail ground truth #1
+# warns about. Each pass generates a fresh set and records that root's
+# expected storage.json values for the step [17] final probe.
+$rootStorageUpdates = @{}
 
 foreach ($rootEntry in $roots) {
+    $ids = New-IdentitySet
+    $storageUpdates = @{
+        "telemetry.machineId"    = $ids.machineId
+        "telemetry.macMachineId" = $ids.macMachineId
+        "telemetry.sqmId"        = $ids.sqmId
+        "telemetry.devDeviceId"  = $ids.devDeviceId
+    }
+    $rootStorageUpdates[$rootEntry.Name] = $storageUpdates
     Invoke-RootReset -AppName $rootEntry.Name -RootPath $rootEntry.Path -Ids $ids -StorageUpdates $storageUpdates -NewCrashReporterId $newCrashReporterId -Timestamp $timestamp -Audit ([ref]$audit) -Actions ([ref]$actions) -PassCount ([ref]$passCount) -FailCount ([ref]$failCount)
+
+    # Shared ~\.codeium\config.json device_id (ONE file both roots read):
+    # rotated on EVERY root pass with that root's devDeviceId - last writer
+    # wins (loop order decides which identity set the shared file ends up
+    # bound to). Backup-ViaCore's per-run dedupe keeps a single pristine
+    # pre-run copy + one restore action entry.
+    if (Test-Path -LiteralPath $codeiumConfigPath) {
+        $codeiumLabel = Get-UserProfileBackupLabel -TargetPath $codeiumConfigPath
+        $null = Backup-ViaCore -Source $codeiumConfigPath -BackupRoot $backupRoot -Label $codeiumLabel -Actions ([ref]$actions)
+        $codeiumReport = Invoke-GhostCore @("json-patch", $codeiumConfigPath, (_B64Payload @{ "device_id" = $ids.devDeviceId }))
+        if ($null -ne $codeiumReport -and $codeiumReport.ok) {
+            Add-AuditEntry -Audit ([ref]$audit) -File $codeiumConfigPath -Key "device_id" -Before $codeiumReport.before."device_id" -After $codeiumReport.after."device_id" -Ok $true
+        }
+        else {
+            Add-AuditEntry -Audit ([ref]$audit) -File $codeiumConfigPath -Key "device_id" -Before $null -After $ids.devDeviceId -Ok $false
+            Write-Host "[FAILED] Codeium config.json device_id rotation failed [$($rootEntry.Name)]" -ForegroundColor Red
+            $failCount++
+        }
+    }
+    else {
+        Write-Host "    [SKIP] Codeium config.json not present: $codeiumConfigPath" -ForegroundColor Yellow
+        Add-AuditEntry -Audit ([ref]$audit) -File $codeiumConfigPath -Key "device_id" -Before "missing" -After "skipped" -Ok $true
+    }
 }
 
 # --- [15/17] home dirs: argv.json (core: patch-argv) + .windsurf
-#     installation_id (core: machineid-file) + Codeium device_id
-#     (core: json-patch) ---
-Write-Host "`n[15/17] Updating home dirs (argv.json / installation_id / Codeium device_id)..." -ForegroundColor Cyan
+#     installation_id (core: machineid-file). The Codeium device_id rotation
+#     moved INTO the per-root loop above (ONE shared file both roots read:
+#     rotated per root pass, last writer wins).
+Write-Host "`n[15/17] Updating home dirs (argv.json / installation_id)..." -ForegroundColor Cyan
 $homeStepFailed = $false
 # Both argv.json variants carry crash-reporter-id post-rebrand (verified live
 # 2026-09-21 in .devin); the core handler SKIPs cleanly when a file is absent.
@@ -972,23 +1088,6 @@ if (Test-Path -LiteralPath $installationIdPath) {
 else {
     Write-Host "    [SKIP] installation_id not present: $installationIdPath" -ForegroundColor Yellow
     Add-AuditEntry -Audit ([ref]$audit) -File $installationIdPath -Key "installation_id" -Before "missing" -After "skipped" -Ok $true
-}
-
-if (Test-Path -LiteralPath $codeiumConfigPath) {
-    $codeiumLabel = Get-UserProfileBackupLabel -TargetPath $codeiumConfigPath
-    $null = Backup-ViaCore -Source $codeiumConfigPath -BackupRoot $backupRoot -Label $codeiumLabel -Actions ([ref]$actions)
-    $codeiumReport = Invoke-GhostCore @("json-patch", $codeiumConfigPath, (_B64Payload @{ "device_id" = $ids.devDeviceId }))
-    if ($null -ne $codeiumReport -and $codeiumReport.ok) {
-        Add-AuditEntry -Audit ([ref]$audit) -File $codeiumConfigPath -Key "device_id" -Before $codeiumReport.before."device_id" -After $codeiumReport.after."device_id" -Ok $true
-    }
-    else {
-        Add-AuditEntry -Audit ([ref]$audit) -File $codeiumConfigPath -Key "device_id" -Before $null -After $ids.devDeviceId -Ok $false
-        $homeStepFailed = $true
-    }
-}
-else {
-    Write-Host "    [SKIP] Codeium config.json not present: $codeiumConfigPath" -ForegroundColor Yellow
-    Add-AuditEntry -Audit ([ref]$audit) -File $codeiumConfigPath -Key "device_id" -Before "missing" -After "skipped" -Ok $true
 }
 
 if ($homeStepFailed) {
@@ -1050,7 +1149,9 @@ foreach ($rootEntry in $roots) {
 
     $finalJsonOk = $false
     if (Test-Path -LiteralPath $rootStoragePath) {
-        $finalJsonOk = Confirm-JsonValues -Path $rootStoragePath -Expected $storageUpdates
+        # Each root got its OWN identity set - probe against THAT root's
+        # expected values, not the loop's last write.
+        $finalJsonOk = Confirm-JsonValues -Path $rootStoragePath -Expected $rootStorageUpdates[$rootEntry.Name]
     }
 
     $finalSqliteAuditEntries = @($audit | Where-Object { $_.file -eq $rootSqlitePath -and $_.key -eq "storage.serviceMachineId" })
