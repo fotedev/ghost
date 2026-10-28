@@ -107,10 +107,14 @@ theory.
   title overrides a spurious Primary marker read. **A.** Verified
   2026-09-24 (ZCode green-clone default-icon bug).
 - **EC-C06 · P1 — The app sets its base AUMID unconditionally** → all
-  running windows share one taskbar button (AutoClaw v1). **Handling:**
-  documented degradation — shortcut AUMIDs still give distinct pins; v2
-  candidates (asar AUMID-suffix env hook or the extracted window stamp);
-  reported as degraded. **A + report.**
+  running windows share one taskbar button (AutoClaw v1 interim — historical:
+  v2 shipped 2026-10-17 as engine v11 and was live-verified 2026-10-18 on
+  engine v12, so new suites get the full fix). **Handling:** the fix = the
+  asar branding patch (per-clone process AUMID + in-app window icon) on a
+  --user-data-dir marker-file channel — env hooks die at the UAC
+  boundary for self-elevating apps — with the window-level stamp as the
+  elevation-gated fallback (spec §7.3c); shortcut AUMIDs remain the interim
+  degradation when the patch cannot ship, reported as degraded. **A + report.**
 - **EC-C07 · P2 — UIA cannot read Win10 taskbar buttons** (incl. the
   vertical taskbar) → do not build verification on UIA; trust the watcher
   logs. **A.** Verified 2026-09-26.

@@ -30,11 +30,12 @@ touches, and emits an audit log plus a self-contained restore script.
 | Reset Windsurf / Devin Desktop | `reset_devin.ps1` | `reset_windsurf.sh` |
 | Reset Trae | `reset_trae.ps1` | — (legacy only, local) |
 | Reset Qoder | `reset_qoder.ps1` | — |
-| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Both\|All`) | — |
-| ZCode clones (Primary + 3 branded instances) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth` + `Launch-ZCode-*.bat` | — |
+| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | — |
+| ZCode clones (Primary + 5 branded instances) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | — |
 | Reset QoderWork | `reset_qoderwork.ps1` | — |
 | Reset MiniMax Agent / OpenCode | `reset_minimax_opencode.ps1` | — |
 | Device fingerprint | `change_device_id.ps1` | `change_device_id.sh Fingerprint` |
+| WMI serial spoof (BIOS/motherboard/disks/RAM via WMI) | `spoof_wmi_serials.ps1` | — |
 | System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` |
 | Interactive menu | `GHOST.bat` | `ghost.sh` |
 
@@ -100,8 +101,11 @@ ghost/
 ├── ghost.sh        # Linux interactive launcher
 ├── src/
 │   ├── windows/    # .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
-│   │               #   + ZCode/AutoClaw clone launchers (launch_zcode_second_instance.ps1,
-│   │               #   launch_autoclaw_clone.ps1) + .bat wrappers
+│   │               #   + ZCode/AutoClaw/AutoClaw2/Cline/OpenCode clone launchers
+│   │               #   (launch_zcode_second_instance.ps1, launch_autoclaw_clone.ps1,
+│   │               #   launch_autoclaw2_clone.ps1 + launch_autoclaw2_clones_all.ps1,
+│   │               #   launch_cline_clone.ps1 + launch_cline_clones_all.ps1,
+│   │               #   launch_opencode_clone.ps1 + launch_opencode_clones_all.ps1)
 │   ├── linux/      # .sh resetters + id_reset_common.sh
 │   └── python/     # stdlib-only Python core (ghost/) + ghost_cli.py bootstrap —
 │                   #   owns the shared SQLite/JSON identity logic
@@ -114,11 +118,33 @@ ghost/
 │                   #   (repo self-updater), refresh_zcode_second_chats.ps1
 │                   #   (cross-instance chat refresh + -Watch error watcher),
 │                   #   diagnose_zcode_freeze.ps1 (read-only freeze diagnostic),
+│                   #   diagnose_zcode_throttle.ps1 (read-only Start-Plan throttle
+│                   #   diagnostic — CLI-only, no GHOST.bat entry),
 │                   #   patch_autoclaw_ports.ps1 + .mjs (AutoClaw app.asar MCP
 │                   #   port-array patch 4 -> 8 slots — re-run after app updates),
 │                   #   install_autoclaw_clone_shortcuts.ps1 (AutoClaw clone
 │                   #   shortcuts), make_ghost_icon.ps1 (regenerates the launcher icon),
-│                   #   zcode-{blue,yellow,green}-branding/ (icon assets)
+│                   #   make_clone_icon.ps1 (generic per-app clone-icon generator),
+│                   #   new_clone_suite.ps1 (clone-suite scaffolding generator),
+│                   #   set_zcode_bot.ps1 (per-clone Telegram bot audit/sync),
+│                   #   sync_zcode_assets.ps1 (Primary→clone MCP/skills/plugins
+│                   #   sync; -McpOnly is safe against RUNNING instances),
+│                   #   zcode_mcp_merge.ps1 (unit-tested MCP merge core),
+│                   #   watch_zcode_mcp_sync.ps1 (resident MCP sync watcher),
+│                   #   zcode-{blue,yellow,green,red,orange}-branding/ +
+│                   #   autoclaw-{blue,yellow,green,red}-branding/ (icon assets);
+│                   #   cline-{blue,yellow,green,red,orange}-branding/ (clone icons,
+│                   #   wired via install_cline_clone_shortcuts.ps1);
+│                   #   patch_opencode_clone_home.ps1 + .mjs (OpenCode desktop
+│                   #   clone-home + taskbar-identity asar patch — re-run after
+│                   #   app updates), install_opencode_clone_shortcuts.ps1
+│                   #   (OpenCode clone shortcuts);
+│                   #   opencode-{blue,yellow,green,red,orange}-branding/
+│                   #   (clone icons, wired via install_opencode_clone_shortcuts.ps1;
+│                   #   orange generated 2026-10-24 as a placeholder);
+│                   #   install_autoclaw2_clone_shortcuts.ps1 (AutoClaw2 clone
+│                   #   shortcuts) + autoclaw2-{blue,yellow,green,red,orange}-branding/
+│                   #   (clone icons)
 ├── tests/          # Pester 5 suite (PowerShell) + stdlib unittest suite (Python core)
 ├── docs/           # getting-started / architecture / cli / troubleshooting / faq
 ├── .github/        # CI workflow, issue forms, PR template, CODEOWNERS
@@ -131,19 +157,48 @@ libraries; the per-app scripts are thin target manifests on top. Details:
 
 ## Configuration
 
-- `reset_zcode.ps1 -Target Primary|Secondary|Third|Fourth|Both|All` — per-instance
+- `reset_zcode.ps1 -Target Primary|Secondary|Third|Fourth|Fifth|Sixth|Both|All` — per-instance
   resets with independent ID sets (survivors untouched in Single mode)
 - `reset_qoder.ps1` / `reset_qoderwork.ps1` — `-SkipMac`, `-SkipHostname`,
   `-DryRun`
 - `reset_minimax_opencode.ps1` — `-KeepLogin`, `-SkipVersionCheck`
-- `tools/patch_zcode_icon_override.ps1` — one-time `app.asar` patch enabling
-  `ZCODE_ICON_DIR` / `ZCODE_AUMID_SUFFIX` / `ZCODE_ACCENT_HEX` /
+- `tools/patch_zcode_icon_override.ps1` — one-time `app.asar` patch (engine
+  v8) enabling `ZCODE_ICON_DIR` / `ZCODE_AUMID_SUFFIX` / `ZCODE_ACCENT_HEX` /
   `ZCODE_INSTANCE_NAME` (per-clone icon, taskbar identity, accent color,
-  window title); re-run after every ZCode app update (`-Restore` undoes it)
+  window title) and injecting bidi auto-direction into the chat (Arabic RTL /
+  English LTR per paragraph, code blocks stay LTR; `ZCODE_BIDI_OFF=1` opts
+  out); re-run after every ZCode app update (`-Restore` undoes it)
 - `tools/install_zcode_second_shortcuts.ps1` — Desktop + Start-menu shortcuts
-  for all three clones with per-clone AppUserModel IDs (`-Remove` uninstalls,
+  for all five clones with per-clone AppUserModel IDs (`-Remove` uninstalls,
   `-RepairPrimaryAumid` fixes a collided Primary pin + restores its icon)
-- `tools/refresh_zcode_second_chats.ps1 -Target Primary|Second|Third|Fourth|All`
+- `tools/sync_zcode_assets.ps1 -Target Second|Third|Fourth|Fifth|Sixth|All` —
+  Primary→clone asset sync: merges MCP server definitions from the Primary
+  (per-clone toggles stay local), replaces stale `.zcode\skills` copies with a
+  junction on the shared `~\.agents` store, mirrors the plugin cache; runs
+  automatically before every clone launch. `-McpOnly` syncs the MCP
+  definitions only and is safe against RUNNING instances — ZCode [24] for a
+  one-shot run (ZCode [20] for the full sync)
+- `tools/watch_zcode_mcp_sync.ps1` — resident MCP sync watcher: stat-guards
+  the Primary's `~\.zcode\cli\config.json` and re-invokes
+  `sync_zcode_assets.ps1 -McpOnly -Target All` on every change, so all five
+  clones converge within seconds (`-RunOnce`, `-ApplyLive` recycles running
+  clones' app-servers idle-guarded so the open session picks the change up
+  immediately, `-InstallAutostart`). ZCode [25] (resident) / [26] (one-shot +
+  apply live). The merge invariant lives in `tools/zcode_mcp_merge.ps1`
+  (unit-tested by `tests/zcode_mcp_merge.Tests.ps1`)
+- `tools/diagnose_zcode_throttle.ps1` — read-only diagnostic for
+  "Reconnecting... x/10" / "The system is busy..." turn failures: parses the
+  shared agent JSONL logs for Start-Plan admission retries with their cause
+  chain + hourly histogram. Verified root cause (2026-10-27): server-side
+  admission control, NOT a device/IP ban. CLI-only — no GHOST.bat entry
+- `src/windows/spoof_wmi_serials.ps1` — opt-in system-level WMI serial spoof
+  (Maintenance [3], behind a confirm gate): redeclares Win32_BIOS / BaseBoard /
+  ComputerSystemProduct / SystemEnclosure / DiskDrive / PhysicalMemory serials
+  via a generated `.mof`, plus SQMClient UserId + Bluetooth LocalAddress;
+  backs the WMI repository up first and generates a `winmgmt /restore` script.
+  WMI layer only — design + honest limits:
+  [docs/WMI_SERIAL_SPOOFING.md](docs/WMI_SERIAL_SPOOFING.md)
+- `tools/refresh_zcode_second_chats.ps1 -Target Primary|Second|Third|Fourth|Fifth|Sixth|All`
   — shows another instance's chats in a running sidebar without an app
   restart; `-Watch` runs as a daemon that auto-refreshes on quota/captcha
   failures
@@ -168,6 +223,42 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   re-run after every AutoClaw app update). `tools/install_autoclaw_clone_shortcuts.ps1`
   installs Desktop + Start-menu shortcuts (`-Remove`, `-RepairPrimaryAumid`).
   Design + verified ground truth: [docs/AUTOCLAW_CLONES_SPEC.md](docs/AUTOCLAW_CLONES_SPEC.md)
+- **Cline multi-instance** — `src/windows/launch_cline_clone.ps1 -Instance
+  c1..c5` launches fully isolated Cline desktop clones beside the Primary:
+  each gets its own state tree (`CLINE_DIR`), web login profile
+  (`WEBVIEW2_USER_DATA_FOLDER`), and hub/sidecar ports
+  (`CLINE_HUB_PORT`/`CLINE_SIDECAR_PORT`); the Tauri single-instance guard
+  (fixed-key mutex + hidden window) is neutralized by renaming its hidden
+  window, and the launcher aborts a second copy on the same data. `-Status`
+  reports locks, ports and sign-in state; `launch_cline_clones_all.ps1`
+  launches all five sequentially. `tools/install_cline_clone_shortcuts.ps1`
+  installs per-color Desktop + Start-menu shortcuts with suffixed AUMIDs
+  (`-Remove`). Fresh profile per clone — one manual sign-in each.
+  Design + verified ground truth: [docs/CLINE_CLONES_SPEC.md](docs/CLINE_CLONES_SPEC.md)
+- **OpenCode desktop multi-instance** — `src/windows/launch_opencode_clone.ps1
+  -Instance c1..c5` launches fully isolated OpenCode desktop clones beside
+  the Primary: each gets its own Electron userData + sessionData
+  (`<cloneHome>\desktop`, `<cloneHome>\session`) and its own CLI state via
+  the app's own `XDG_*` redirection (`data\`, `config\`, `cache\`, `state\`).
+  Isolation needs the one-time clone-home asar patch
+  (`tools/patch_opencode_clone_home.ps1` — packaged builds hardcode
+  `ai.opencode.desktop`; `-Restore` undoes it; re-run after app updates).
+  Per-clone taskbar identity (AUMID `ai.opencode.desktop.cN` + window icon
+  + "OpenCode <Color>" title) rides the same patch; shortcuts install via
+  `tools/install_opencode_clone_shortcuts.ps1` (`-Remove`,
+  `-RepairPrimaryAumid`). Fresh state per clone — one manual sign-in each.
+  Design + verified ground truth: [docs/OPENCODE_CLONES_SPEC.md](docs/OPENCODE_CLONES_SPEC.md)
+- **AutoClaw2 multi-instance** — `src/windows/launch_autoclaw2_clone.ps1
+  -Instance c1..c5` launches isolated AutoClaw2 (v2.1.1, zwork) clones beside
+  the Primary with 100% env-based isolation and NO asar patching:
+  `ZWORK_USER_DATA` pins the whole Electron userData per clone before the
+  per-profile single-instance lock, and `AUTOCLAW_PROFILE_ROOT` relocates the
+  legacy migration source so no clone reads live Primary state; the app
+  generates a fresh device id per profile. `-Status` introspects a clone;
+  `launch_autoclaw2_clones_all.ps1` launches all five sequentially;
+  `tools/install_autoclaw2_clone_shortcuts.ps1` installs per-color shortcuts
+  (`-Remove`). CLI-only — the one suite not wired into `GHOST.bat`.
+  Design + verified ground truth: [docs/AUTOCLAW2_CLONES_SPEC.md](docs/AUTOCLAW2_CLONES_SPEC.md)
 - Telegram alerts for `tools/watch_zcode_captcha.ps1` come from
   `-TelegramBotToken`/`-TelegramChatId` params or `TELEGRAM_BOT_TOKEN` /
   `TELEGRAM_CHAT_ID` in `.envlocal` (copy [.env.example](.env.example) to
