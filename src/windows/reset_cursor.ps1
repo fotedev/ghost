@@ -50,9 +50,14 @@ if (-not $cursorIsAdmin) {
     # (not a log) is the persisted result channel - the elevated console shows
     # the full live output while the run progresses.
     $cursorArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$cursorScript`""
+    # A stale done-marker from a PREVIOUS run must never be shown as this
+    # run's result: the elevated child writes the marker only at the end of
+    # its FULL main path, so delete it before launching (an early child exit
+    # then surfaces as no result, never as the old Pass/Fail lines).
+    Remove-Item -LiteralPath "$env:TEMP\cursor_v0.3_done.txt" -Force -ErrorAction SilentlyContinue
     Start-Process powershell -Verb RunAs -ArgumentList $cursorArgs -WindowStyle Normal -Wait
     if (Test-Path -LiteralPath "$env:TEMP\cursor_v0.3_done.txt") {
-        Get-Content -LiteralPath "$env:TEMP\cursor_v0.3_done.txt"
+        Get-Content -LiteralPath "$env:TEMP\cursor_v0.3_done.txt" -Encoding UTF8
     }
     exit
 }
@@ -148,7 +153,13 @@ function Backup-ViaCore {
     )
 
     $report = Invoke-GhostCore @("backup", $Source, $BackupRoot, $Label)
-    if ($null -eq $report) { return $false }
+    if ($null -eq $report) {
+        # Core-invoke failure (core exit 1: locked/verify/io) discards the
+        # report JSON - surface the failure instead of returning silently
+        # (v0.2 warned on failed backups; "proceed anyway" contract kept).
+        Write-Host "    [WARN] backup FAILED - proceeding WITHOUT backup: $Source" -ForegroundColor Yellow
+        return $false
+    }
     if ($report.skipped) { return $false }
     if ($report.ok -and $report.destination) {
         Add-ActionEntry -Actions $Actions -OriginalPath $Source -BackupPath $report.destination
@@ -192,7 +203,7 @@ function Stop-CursorProcessesAggressive {
 
         $cursorRemaining = @(Get-Process -Name "Cursor*" -ErrorAction SilentlyContinue)
         $helperRemaining = 0
-        foreach ($helperName in @("kilo", "cline", "roo", "blackbox")) {
+        foreach ($helperName in @("kilo", "cline", "cline-host", "roo", "blackbox")) {
             $helperRemaining += @(Get-Process -Name $helperName -ErrorAction SilentlyContinue).Count
         }
         $count = $cursorRemaining.Count + $helperRemaining
@@ -214,7 +225,7 @@ function Stop-CursorProcessesAggressive {
     foreach ($p in @(Get-Process -Name "Cursor*" -ErrorAction SilentlyContinue)) {
         Write-Host ("    Cursor PID {0}: {1}" -f $p.Id, $p.Path) -ForegroundColor Red
     }
-    foreach ($helperName in @("kilo", "cline", "roo", "blackbox")) {
+    foreach ($helperName in @("kilo", "cline", "cline-host", "roo", "blackbox")) {
         foreach ($p in @(Get-Process -Name $helperName -ErrorAction SilentlyContinue)) {
             Write-Host ("    $helperName PID {0}: {1}" -f $p.Id, $p.Path) -ForegroundColor Red
         }
@@ -225,6 +236,8 @@ function Stop-CursorProcessesAggressive {
 # Post-reset watchdog probe: a slow-shutdown helper can recreate core identity
 # files within seconds of deletion. Re-delete with a WARN audit entry (the
 # v0.2 logic verbatim; the deletion itself stays PS - pure process/file op).
+# Returns $true when nothing was recreated or every re-delete verified gone,
+# $false when any re-delete failed - the caller turns this into pass/fail.
 function Test-WatchdogRecreation {
     param(
         [Parameter(Mandatory = $true)][string[]]$CoreFiles,
@@ -244,22 +257,27 @@ function Test-WatchdogRecreation {
     if ($recreated.Count -eq 0) {
         Write-Host "[OK] no identity files were recreated by a watchdog" -ForegroundColor Green
         Add-AuditEntry -Audit $Audit -File "watchdog-probe" -Key "recreation-check" -Before "none" -After "none" -Ok $true
-        return
+        return $true
     }
 
+    $allReDeleted = $true
     foreach ($path in $recreated) {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
         $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
         if ($afterValue -eq "re-delete-failed") {
             Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+            $allReDeleted = $false
         }
         Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
+    return $allReDeleted
 }
 
 # Purge every ID_Backups run EXCEPT the current one (each run re-backs-up
 # everything it touches, so old runs only preserve OLD fingerprints).
+# Returns $true when every targeted dir is verifiably gone after deletion,
+# $false when any survived (locked dir) - the caller turns this into pass/fail.
 function Invoke-OldIdBackupsPurge {
     param(
         [Parameter(Mandatory = $true)][string]$BackupRoot,
@@ -271,7 +289,7 @@ function Invoke-OldIdBackupsPurge {
     if (-not (Test-Path -LiteralPath $IdBackupsRoot)) {
         Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "missing" -After "skipped" -Ok $true
         Write-Host "    no ID_Backups directory to purge" -ForegroundColor DarkGray
-        return
+        return $true
     }
 
     $allBackups = @(Get-ChildItem -LiteralPath $IdBackupsRoot -Directory -ErrorAction SilentlyContinue |
@@ -281,14 +299,25 @@ function Invoke-OldIdBackupsPurge {
     if ($toDelete.Count -eq 0) {
         Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "none" -After "none" -Ok $true
         Write-Host "    no older ID_Backups to purge (only current run present)" -ForegroundColor DarkGray
-        return
+        return $true
     }
 
+    $purgeAllDeleted = $true
     foreach ($dir in $toDelete) {
         Write-Host "    [PURGE] $($dir.Name) (preserved old fingerprint; deleting)" -ForegroundColor DarkGray
         Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        # "Removed" is not "gone": re-check the deletion and audit the truth -
+        # a locked old backup dir must fail the step, not pass as deleted.
+        $deletedOk = -not (Test-Path -LiteralPath $dir.FullName)
+        $afterValue = "deleted"
+        if (-not $deletedOk) {
+            $afterValue = "delete-failed"
+            $purgeAllDeleted = $false
+            Write-Host "    [FAILED] old backup dir still present (locked?): $($dir.FullName)" -ForegroundColor Red
+        }
+        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After $afterValue -Ok $deletedOk
     }
+    return $purgeAllDeleted
 }
 
 # Audit entries added since $StartIndex that pertain to $Path (or children)
@@ -322,7 +351,7 @@ function Confirm-JsonValues {
     if (-not (Test-Path -LiteralPath $Path)) {
         return $false
     }
-    $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($key in $Expected.Keys) {
         $actualValue = if ($null -ne $content.PSObject.Properties[$key]) { $content.$key } else { $null }
         if ($actualValue -ne $Expected[$key]) {
@@ -358,8 +387,8 @@ if (-not (Test-Path -LiteralPath $root)) {
 # The core must be present and a functional Python 3 with it - fail fast
 # BEFORE touching anything (v0.2 could run JSON-only steps without Python;
 # v0.3 cannot run any step without it).
-if ((Get-GhostPythonCli) -and (-not (Get-PythonCommandInfo))) {
-    Write-Host "[FAILED] Python core present but no functional Python 3 - install it (winget install Python.Python.3.12)." -ForegroundColor Red
+if ((-not (Get-GhostPythonCli)) -or (-not (Get-PythonCommandInfo))) {
+    Write-Host "[FAILED] GHOST Python core (src\python\ghost_cli.py) missing or no functional Python 3 found - every Cursor reset step needs it (winget install Python.Python.3.12)." -ForegroundColor Red
     exit 1
 }
 
@@ -401,7 +430,15 @@ if ($null -ne $machReport -and $machReport.ok) {
 else {
     $beforeValue = $null
     if (Test-Path -LiteralPath $machineIdPath) {
-        $beforeValue = (Get-Content -LiteralPath $machineIdPath -Raw).Trim()
+        # Best-effort evidence read: this branch runs AFTER step [1] already
+        # failed, so a locked/0-byte file must not abort the run (EAP = Stop)
+        # before the audit log and restore script exist.
+        try {
+            $beforeValue = (Get-Content -LiteralPath $machineIdPath -Raw -Encoding UTF8).Trim()
+        }
+        catch {
+            $beforeValue = $null
+        }
     }
     Add-AuditEntry -Audit ([ref]$audit) -File $machineIdPath -Key "machineid" -Before $beforeValue -After "verify-failed" -Ok $false
     Write-Host "[FAILED] machineid verification failed" -ForegroundColor Red
@@ -431,31 +468,50 @@ else {
 # --- [3/15] state.vscdb serviceMachineId (core: sqlite-update) ---
 Write-Host "`n[3/15] Updating global state.vscdb (serviceMachineId)..." -ForegroundColor Cyan
 $sqliteLabel = Get-AppRelativeBackupLabel -RootPath $root -TargetPath $sqlitePath
-$null = Backup-ViaCore -Source $sqlitePath -BackupRoot $backupRoot -Label $sqliteLabel -Actions ([ref]$actions)
-$sqliteReport = Invoke-GhostCore @("sqlite-update", $sqlitePath, (_B64Payload @{ "storage.serviceMachineId" = $ids.devDeviceId }))
-if ($null -ne $sqliteReport -and $null -ne $sqliteReport.after) {
-    Add-AuditEntry -Audit ([ref]$audit) -File $sqlitePath -Key "storage.serviceMachineId" -Before $sqliteReport.before."storage.serviceMachineId" -After $sqliteReport.after."storage.serviceMachineId" -Ok $true
-    Write-Host "[OK] global state.vscdb verified" -ForegroundColor Green
-    $passCount++
+if (-not (Test-Path -LiteralPath $sqlitePath)) {
+    # sqlite-update would CREATE a missing DB (sqlite3.connect + CREATE TABLE
+    # IF NOT EXISTS); Set-SqliteKeys' contract fails loudly instead - match it
+    # rather than silently minting a fresh 1-row DB on a broken profile.
+    Add-AuditEntry -Audit ([ref]$audit) -File $sqlitePath -Key "storage.serviceMachineId" -Before "missing" -After "not-found" -Ok $false
+    Write-Host "[FAILED] state.vscdb not found: $sqlitePath" -ForegroundColor Red
+    $failCount++
 }
 else {
-    Add-AuditEntry -Audit ([ref]$audit) -File $sqlitePath -Key "storage.serviceMachineId" -Before $null -After $ids.devDeviceId -Ok $false
-    Write-Host "[FAILED] global state.vscdb verification failed" -ForegroundColor Red
-    $failCount++
+    $null = Backup-ViaCore -Source $sqlitePath -BackupRoot $backupRoot -Label $sqliteLabel -Actions ([ref]$actions)
+    $sqliteReport = Invoke-GhostCore @("sqlite-update", $sqlitePath, (_B64Payload @{ "storage.serviceMachineId" = $ids.devDeviceId }))
+    # [OK] only when the core's verify-after re-read returned the exact value
+    # we asked for - a non-null report alone is not verification.
+    if ($null -ne $sqliteReport -and $null -ne $sqliteReport.after -and ($sqliteReport.after."storage.serviceMachineId" -eq $ids.devDeviceId)) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $sqlitePath -Key "storage.serviceMachineId" -Before $sqliteReport.before."storage.serviceMachineId" -After $sqliteReport.after."storage.serviceMachineId" -Ok $true
+        Write-Host "[OK] global state.vscdb verified" -ForegroundColor Green
+        $passCount++
+    }
+    else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $sqlitePath -Key "storage.serviceMachineId" -Before $null -After $ids.devDeviceId -Ok $false
+        Write-Host "[FAILED] global state.vscdb verification failed" -ForegroundColor Red
+        $failCount++
+    }
 }
 
 # --- [4/15] state.vscdb auth secrets DELETE (core: delete-secrets; v0.2's
 #     inline temp-.py heredoc replaced by the shared subcommand) ---
+# NO second backup here: step [3] already backed state.vscdb up pre-mutation
+# under this label; a second call with the same label would replace that
+# pre-run copy with post-[3] content and the manifest would then "restore"
+# the mutated DB. One pre-run backup, one manifest entry.
 Write-Host "`n[4/15] Clearing global state.vscdb auth secrets..." -ForegroundColor Cyan
-$null = Backup-ViaCore -Source $sqlitePath -BackupRoot $backupRoot -Label $sqliteLabel -Actions ([ref]$actions)
-    $secretsReport = Invoke-GhostCore @("delete-secrets", $sqlitePath)
-    $secretsOk = $false
-    if ($null -ne $secretsReport -and $null -ne $secretsReport.survivors) {
-        # survivors is a LIST (one COUNT per pattern/key): PS array -eq 0
-        # FILTERS elements instead of answering "all zero" - test explicitly.
-        $nonZeroSurvivors = @($secretsReport.survivors | Where-Object { $_ -ne 0 })
-        $secretsOk = ($nonZeroSurvivors.Count -eq 0)
-        $deletedCount = @($secretsReport.deleted).Count
+$secretsReport = Invoke-GhostCore @("delete-secrets", $sqlitePath)
+$secretsOk = $false
+if ($null -eq $secretsReport -or $null -eq $secretsReport.survivors) {
+    Add-AuditEntry -Audit ([ref]$audit) -File $sqlitePath -Key "secrets-delete" -Before "present" -After "core-invoke-failed" -Ok $false
+    Write-Host "    [FAILED] delete-secrets core invocation failed" -ForegroundColor Red
+}
+else {
+    # survivors is a LIST (one COUNT per pattern/key): PS array -eq 0
+    # FILTERS elements instead of answering "all zero" - test explicitly.
+    $nonZeroSurvivors = @($secretsReport.survivors | Where-Object { $_ -ne 0 })
+    $secretsOk = ($nonZeroSurvivors.Count -eq 0)
+    $deletedCount = @($secretsReport.deleted).Count
     if ($secretsOk) {
         Add-AuditEntry -Audit ([ref]$audit) -File $sqlitePath -Key "secrets-delete" -Before "present" -After ("deleted " + $deletedCount) -Ok $true
         Write-Host "    [OK] secrets deleted: $deletedCount keys from $sqlitePath" -ForegroundColor Green
@@ -511,7 +567,9 @@ $osCryptReport = Invoke-GhostCore @("json-remove", $osCryptPath, $backupRoot, "L
     (_B64Payload @{ keys = @("os_crypt.encrypted_key") }))
 if ($null -ne $osCryptReport -and $osCryptReport.ok) {
     $osBefore = $osCryptReport.before."os_crypt.encrypted_key"
-    $osAfter = if ($osBefore -eq "missing") { "skipped" } else { "removed" }
+    # Whole file absent -> core reports skipped=True with before={} - audit
+    # the no-op as "skipped", never as "removed".
+    $osAfter = if ($osCryptReport.skipped -or $osBefore -eq "missing") { "skipped" } else { "removed" }
     Add-AuditEntry -Audit ([ref]$audit) -File $osCryptPath -Key "os_crypt.encrypted_key" -Before $osBefore -After $osAfter -Ok $true
     if ($osCryptReport.backed_up_to) {
         Add-ActionEntry -Actions ([ref]$actions) -OriginalPath $osCryptPath -BackupPath $osCryptReport.backed_up_to
@@ -754,7 +812,9 @@ else {
         $wsLabel = Get-AppRelativeBackupLabel -RootPath $root -TargetPath $workspaceDbPath
         $null = Backup-ViaCore -Source $workspaceDbPath -BackupRoot $backupRoot -Label $wsLabel -Actions ([ref]$actions)
         $wsReport = Invoke-GhostCore @("sqlite-update", $workspaceDbPath, (_B64Payload @{ "storage.serviceMachineId" = $ids.devDeviceId }))
-        if ($null -ne $wsReport -and $null -ne $wsReport.after) {
+        # [OK] only when the core's verify-after re-read returned the exact
+        # value we asked for (same gate as step [3]).
+        if ($null -ne $wsReport -and $null -ne $wsReport.after -and ($wsReport.after."storage.serviceMachineId" -eq $ids.devDeviceId)) {
             Add-AuditEntry -Audit ([ref]$audit) -File $workspaceDbPath -Key "storage.serviceMachineId" -Before $wsReport.before."storage.serviceMachineId" -After $wsReport.after."storage.serviceMachineId" -Ok $true
             Write-Host "    [OK] workspace DB updated: $workspaceDbPath" -ForegroundColor Green
         }
@@ -783,14 +843,22 @@ else {
 
 # --- [15/15] Old ID_Backups purge + watchdog re-verify (PS: pure file ops) ---
 Write-Host "`n[15/15] Purging old ID_Backups + watchdog re-verify..." -ForegroundColor Cyan
-Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit)
+$purgeOk = Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit)
 $watchdogCoreFiles = @(
     (Join-Path $root "Network\Cookies"),
     (Join-Path $root "DIPS"),
     (Join-Path $root "SharedStorage")
 )
-Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit ([ref]$audit)
-$passCount++
+# Step [15] passes only when BOTH sub-checks verified: every old backup dir
+# actually deleted AND every recreated identity file actually re-deleted -
+# never an unconditional pass.
+$watchdogOk = Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit ([ref]$audit)
+if ($purgeOk -and $watchdogOk) {
+    $passCount++
+}
+else {
+    $failCount++
+}
 
 # --- Audit + Restore ---
 $auditPath = Join-Path $backupRoot ("audit_{0}.json" -f $timestamp)
