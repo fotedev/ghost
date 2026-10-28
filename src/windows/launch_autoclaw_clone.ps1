@@ -14,6 +14,11 @@
 #     recorded, never assumed (no-silent-success).
 #   - MCP port: hardcoded 4-slot array widened to 8 by tools\patch_autoclaw_ports.ps1
 #     (marker-gated). inst4 has NO MCP slot without that patch.
+#   - Taskbar identity: patch engine v11 reads <userData>\.autoclaw-identity.json
+#     + .autoclaw-icon.ico (written fresh at step 4c) for a per-clone AUMID
+#     suffix, colored window icon and a forced "AutoClaw <Color>" title.
+#     Missing marker = stock behavior, so the Primary and any bare spawn are
+#     untouched. Colors stay in sync with install_autoclaw_clone_shortcuts.ps1.
 #   - One credential = one instance: the seed copies the Primary profile but
 #     strips every live credential (auth token, refreshToken, token-cache,
 #     paired.json never copied). Each clone needs ONE manual login on first run.
@@ -344,6 +349,14 @@ if ($Status) {
             $rec = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
             Write-Host ("  last record: mcp={0} gateway={1} (requested {2}) at {3}" -f $rec.actualMcpPort, $rec.actualGatewayPort, $rec.requestedGatewayPort, $rec.launchedAt)
         }
+        $identityMarkerPath = Join-Path $prof '.autoclaw-identity.json'
+        if (Test-Path -LiteralPath $identityMarkerPath) {
+            try {
+                $ident = Get-Content -LiteralPath $identityMarkerPath -Raw | ConvertFrom-Json
+                $iconState = $(if (Test-Path -LiteralPath (Join-Path $prof '.autoclaw-icon.ico')) { "icon present" } else { "no icon" })
+                Write-Host ("  identity: {0} ({1})" -f $ident.title, $iconState)
+            } catch { Write-Host "  identity: marker unreadable" -ForegroundColor Yellow }
+        }
     }
     exit 0
 }
@@ -571,6 +584,53 @@ if ($homeMarkerRead -ne $CloneHome) {
     throw "[launch] verify FAILED: .autoclaw-home marker holds '$homeMarkerRead', expected '$CloneHome'"
 }
 Write-Host "[launch] .autoclaw-home marker verified -> $CloneHome" -ForegroundColor Green
+
+# 4c) Taskbar identity MARKER (patch engine v11). The patched app resolves the
+#     identity from <userData>\.autoclaw-identity.json via the same
+#     --user-data-dir argv scan as .autoclaw-home (args survive the
+#     requireAdministrator self-elevation; env does not), then gives every
+#     window of this instance its own taskbar AUMID (com.zhipuai.autoclaw.<suffix>),
+#     colored icon and forced title. Missing marker = stock behavior. Write
+#     fresh on every launch + verify-after re-read. Colors MUST stay in sync
+#     with tools\install_autoclaw_clone_shortcuts.ps1 ($InstanceDefs).
+# Repo root is TWO levels up from src/windows (the tools/ scripts are one
+# level deep and need only one parent - copying their pattern here broke the
+# icon path, 2026-10-18).
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$InstanceIdentity = @{
+    'inst1' = @{ Color = 'blue';   Branding = 'autoclaw-blue-branding'   }
+    'inst2' = @{ Color = 'yellow'; Branding = 'autoclaw-yellow-branding' }
+    'inst3' = @{ Color = 'green';  Branding = 'autoclaw-green-branding'  }
+    'inst4' = @{ Color = 'red';    Branding = 'autoclaw-red-branding'    }
+}
+$idColor    = $InstanceIdentity[$Instance].Color
+$idBranding = $InstanceIdentity[$Instance].Branding
+$iconSrc    = Join-Path $RepoRoot "tools\$idBranding\tray_icon.ico"
+$iconDest   = Join-Path $CloneProfile '.autoclaw-icon.ico'
+$identity   = [ordered]@{
+    aumidSuffix = $Instance
+    title       = "AutoClaw " + $idColor.Substring(0, 1).ToUpper() + $idColor.Substring(1)
+}
+if (Test-Path -LiteralPath $iconSrc) {
+    Copy-Item -LiteralPath $iconSrc -Destination $iconDest -Force
+    if (-not (Test-Path -LiteralPath $iconDest)) { throw "[launch] verify FAILED: .autoclaw-icon.ico not copied" }
+    if ((Get-Item -LiteralPath $iconDest).Length -ne (Get-Item -LiteralPath $iconSrc).Length) {
+        throw "[launch] verify FAILED: .autoclaw-icon.ico size mismatch after copy"
+    }
+    $identity['iconPath'] = $iconDest
+} else {
+    Write-Host "[identity] WARN: icon source missing ($iconSrc) - identity ships without a window icon" -ForegroundColor Yellow
+}
+$identityMarker = Join-Path $CloneProfile '.autoclaw-identity.json'
+[System.IO.File]::WriteAllText($identityMarker, ($identity | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding $false))
+$identityRead = Get-Content -LiteralPath $identityMarker -Raw | ConvertFrom-Json
+if ($identityRead.aumidSuffix -ne $Instance -or $identityRead.title -ne $identity['title']) {
+    throw "[launch] verify FAILED: .autoclaw-identity.json re-read mismatch"
+}
+if ($identity.Contains('iconPath') -and -not $identityRead.iconPath) {
+    throw "[launch] verify FAILED: .autoclaw-identity.json lost iconPath"
+}
+Write-Host "[launch] .autoclaw-identity marker verified -> $($identity['title'])" -ForegroundColor Green
 
 # 5) Isolation proof baseline: the Primary's gateway config must not change.
 #    A Primary-profile instance appearing DURING the window (the browser
