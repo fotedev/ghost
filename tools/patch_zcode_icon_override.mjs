@@ -32,10 +32,23 @@
 //                      directly in the renderer - ZCODE_BIDI_OFF=1 opts out per
 //                      launch; no launcher/main-process changes. Inert on apps
 //                      without the patch.
+// App-update recovery note (2026-10-24): the app's auto-updater replaces
+//   app.asar wholesale, wiping every patch site while the sidecar marker file
+//   survives - so the driver script byte-probes the asar for these signature
+//   strings ('ZCODE_ICON_DIR', 'ZCODE_AUMID_SUFFIX', 'zcode-bidi-auto-style')
+//   instead of trusting the marker. Engine v7 site set unchanged; keep the
+//   probe list in sync when a future engine adds new signature strings.
+// Engine v8 patch set (updater-secondary tolerance for 3.16.3+):
+//   updater-secondary (v8) the auto-updater gate grew a second conjunction -
+//     enabled:<x>==="production"&&<flag>,onBeforeQuitAndInstall: - so the v7
+//     exact anchor found zero sites on 3.16.3 and aborted the whole patch.
+//     v8 matches both shapes (bare and &&<flag> conjunct) and appends
+//     !process.env.ZCODE_ICON_DIR as an extra && term when the conjunct is
+//     present.
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-const ENGINE_VERSION = 7;
+const ENGINE_VERSION = 8;
 const extractedDir = process.argv[2];
 if (!extractedDir) {
   console.error(JSON.stringify({ ok: false, error: "usage: patch_zcode_icon_override.mjs <extractedDir>" }));
@@ -320,12 +333,18 @@ const PATCHES = [
     apply: (src) => {
       const done = "&&!process.env.ZCODE_ICON_DIR,onBeforeQuitAndInstall:";
       if (src.includes(done)) return { src, count: -1, markers: [done] };
-      const re = /enabled:(\w+)==="production",onBeforeQuitAndInstall:/;
+      // v8: match both the bare gate (pre-3.16.3) and the conjunct gate
+      // (3.16.3+: enabled:<x>==="production"&&<flag>). Appends the env guard
+      // as an extra && term when the conjunct is present.
+      const re = /enabled:(\w+)==="production"(&&[\w.]+)?,onBeforeQuitAndInstall:/;
       const m = src.match(re);
       if (!m) return { src, count: 0, markers: [] };
+      const guard = m[2]
+        ? "&&" + m[2].slice(2) + "&&!process.env.ZCODE_ICON_DIR"
+        : "&&!process.env.ZCODE_ICON_DIR";
       const out = src.replace(
         m[0],
-        "enabled:" + m[1] + '==="production"&&!process.env.ZCODE_ICON_DIR,onBeforeQuitAndInstall:',
+        "enabled:" + m[1] + '==="production"' + guard + ",onBeforeQuitAndInstall:",
       );
       return { src: out, count: 1, markers: [done] };
     },

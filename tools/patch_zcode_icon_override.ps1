@@ -46,7 +46,22 @@ $ErrorActionPreference = "Stop"
 # English LTR; code blocks stay LTR) and stamps dir="auto" for alignment.
 # Renderer reads ZCODE_BIDI_OFF=1 to opt out; no launcher changes. Upgrades
 # v6 trees in place.
-$script:EngineVersion = 7
+# App-update recovery (2026-10-24): the app's auto-updater replaces app.asar
+# but leaves the marker file in resources, so the old "marker exists" gate
+# silently skipped re-patching after every update (taskbar icons survived
+# via shortcut IconLocation; in-app window + tray icons stayed default).
+# The script now byte-probes app.asar for the engine's signature strings
+# before the gate: marker + signatures present -> already-patched early exit;
+# signatures missing (update-wiped asar) -> automatic re-patch without -Force
+# and a FRESH backup of the new pristine asar (reusing the original backup
+# would let a later -Restore downgrade the app). Still-patched re-patches
+# keep the original-backup reuse.
+# v8 (2026-10-24): updater-secondary anchor tolerance for app 3.16.3+ - the
+#     updater gate grew a second conjunction (enabled:<x>==="production"&&<flag>),
+#     which made the v7 exact anchor find zero sites and abort the patch.
+#     Engine v8 matches both shapes; marker carries patchVersion 8 so older
+#     markers auto-upgrade on the next run.
+$script:EngineVersion = 8
 
 function Resolve-InstallDir {
   param([string]$Override)
@@ -70,8 +85,16 @@ function Assert-ZCodeClosed {
   # exe from THAT dir is what corrupts things. Same-user processes expose .Path;
   # inaccessible/null paths belong to other contexts and cannot hold this dir open.
   param([string]$InstallPath)
-  $procs = @(Get-Process -Name "ZCode" -ErrorAction SilentlyContinue |
+  $allProcs = @(Get-Process -Name "ZCode" -ErrorAction SilentlyContinue)
+  $procs = @($allProcs |
     Where-Object { $_.Path -and ($_.Path -like "$InstallPath*") })
+  # Guard-strength (bug sweep 15): a process whose .Path is unreadable cannot
+  # be classified - warn instead of silently skipping it.
+  $unclassified = @($allProcs | Where-Object { -not $_.Path })
+  if ($unclassified.Count -gt 0) {
+    Write-Warning ("{0} ZCode process(es) exposed no readable path and were NOT checked (PID(s): {1}). If the asar swap fails with the file in use, close every ZCode instance and re-run." -f
+      $unclassified.Count, (($unclassified | Select-Object -First 5 -ExpandProperty Id) -join ", "))
+  }
   if ($procs.Count -gt 0) {
     throw ("ZCode.exe from this install dir is running (PID(s): {0}). Close all its windows and try again." -f
       (($procs | Select-Object -First 5 -ExpandProperty Id) -join ", "))
@@ -113,7 +136,8 @@ function Invoke-AsarSwap {
     [string]$ResourcesDir,
     [string]$CandidateAsar,
     [string]$CandidateUnpacked,
-    [long]$MinAsarBytes
+    [long]$MinAsarBytes,
+    [string]$BackupAsar
   )
   $asar = Join-Path $ResourcesDir "app.asar"
   $unpacked = Join-Path $ResourcesDir "app.asar.unpacked"
@@ -130,8 +154,28 @@ function Invoke-AsarSwap {
     Remove-Item $asar -Force
     Move-Item $CandidateAsar $asar
   } catch {
+    # Roll the unpacked sidecar back first, then make sure app.asar itself
+    # exists again: a failed Move-Item after a successful Remove-Item used to
+    # leave the install with NO app.asar (hard brick until a manual -Restore;
+    # bug sweep 15 HIGH).
     Remove-Item $unpacked -Recurse -Force
     Rename-Item $oldUnpacked "app.asar.unpacked"
+    if (-not (Test-Path $asar)) {
+      if ($BackupAsar -and (Test-Path $BackupAsar)) {
+        try {
+          Copy-Item $BackupAsar $asar -Force
+          if (Test-Path $asar) {
+            Write-Warning ("asar swap failed after the old app.asar was deleted; it was restored from backup '{0}'. Review the error above and run -Restore for a full rollback." -f $BackupAsar)
+          } else {
+            Write-Warning ("asar swap failed and the backup restore could not be verified - {0} may be MISSING. Restore it manually from '{1}'." -f $asar, $BackupAsar)
+          }
+        } catch {
+          Write-Warning ("asar swap failed and the backup restore FAILED - {0} may be MISSING. Restore it manually from '{1}' ({2})." -f $asar, $BackupAsar, $_.Exception.Message)
+        }
+      } else {
+        Write-Warning ("asar swap failed after the old app.asar was deleted and no backup asar was passed to restore from - {0} may be MISSING. Run -Restore." -f $asar)
+      }
+    }
     throw
   }
   Remove-Item $oldUnpacked -Recurse -Force -ErrorAction SilentlyContinue
@@ -170,9 +214,23 @@ Write-Host "Install dir : $Install"
 
 if ($Restore) {
   Assert-ZCodeClosed -InstallPath $Install
-  $backup = Get-ChildItem -LiteralPath $BackupsRoot -Directory -ErrorAction SilentlyContinue |
-    Sort-Object Name -Descending | Where-Object { Test-Path (Join-Path $_.FullName "app.asar") } |
-    Select-Object -First 1
+  # Prefer the marker's backupDir (the backup the last patch run verified
+  # against); fall back to the newest folder only when the marker is absent,
+  # unreadable, or its backup no longer holds an app.asar (bug sweep 15).
+  $backup = $null
+  if (Test-Path $MarkerPath) {
+    try {
+      $restoreMarker = Get-Content -LiteralPath $MarkerPath -Raw | ConvertFrom-Json
+      if ($restoreMarker.backupDir -and (Test-Path (Join-Path $restoreMarker.backupDir "app.asar"))) {
+        $backup = Get-Item -LiteralPath $restoreMarker.backupDir
+      }
+    } catch { Write-Host "Marker unreadable - falling back to the newest backup folder." }
+  }
+  if (-not $backup) {
+    $backup = Get-ChildItem -LiteralPath $BackupsRoot -Directory -ErrorAction SilentlyContinue |
+      Sort-Object Name -Descending | Where-Object { Test-Path (Join-Path $_.FullName "app.asar") } |
+      Select-Object -First 1
+  }
   if (-not $backup) { throw "No backup found under $BackupsRoot - nothing to restore." }
   $restoreFloor = [long]([IO.File]::ReadAllBytes((Join-Path $backup.FullName "app.asar")).Length / 2)
   Write-Host "[1/2] Restoring app.asar + app.asar.unpacked from $($backup.Name) (staged copy)"
@@ -181,7 +239,8 @@ if ($Restore) {
     Invoke-AsarSwap -ResourcesDir $Resources `
       -CandidateAsar (Join-Path $stage "app.asar") `
       -CandidateUnpacked (Join-Path $stage "app.asar.unpacked") `
-      -MinAsarBytes $restoreFloor
+      -MinAsarBytes $restoreFloor `
+      -BackupAsar (Join-Path $backup.FullName "app.asar")
   } finally {
     if (Test-Path $stage) { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
   }
@@ -191,15 +250,40 @@ if ($Restore) {
   exit 0
 }
 
+# Asar content probe: the app auto-update replaces app.asar wholesale but
+# leaves the marker file alone, so a surviving marker no longer proves the
+# patch is alive. Scan the asar bytes for the engine's signature strings
+# (cheap Buffer.includes pass; every string must be present to call it
+# patched). Keep this list in sync with the engine's patch-site strings.
+$AsarPatchedProbe = $null
+if (-not $Restore) {
+  Write-Host "[0/7] Probing app.asar for patch signatures..."
+  $probeOut = & $NodeExe -e "const fs=require('fs');try{const b=fs.readFileSync(process.argv[1]);const need=['ZCODE_ICON_DIR','ZCODE_AUMID_SUFFIX','zcode-bidi-auto-style'];const missing=need.filter(s=>!b.includes(s));if(missing.length){console.log('MISSING '+missing.join(','));process.exit(1)}console.log('OK all-present');process.exit(0)}catch(e){console.error('PROBE_ERROR '+String((e&&e.message)||e));process.exit(3)}" $Asar
+  # Exit codes alone are ambiguous (node also exits 1 on uncaught exceptions),
+  # so the probe's text must corroborate the code before either branch is
+  # trusted: 0+'OK' -> patched, 1+'MISSING' -> update-wiped, anything else ->
+  # hard abort (a probe crash must never masquerade as an update-wiped asar,
+  # which would take a fresh backup of a still-patched tree and shadow the
+  # pristine one for -Restore).
+  $probeText = ($probeOut -join " ")
+  if ($LASTEXITCODE -eq 0 -and $probeText -match 'OK all-present') { $AsarPatchedProbe = $true }
+  elseif ($LASTEXITCODE -eq 1 -and $probeText -match 'MISSING') { $AsarPatchedProbe = $false }
+  else { throw ("app.asar probe failed (node exit {0}): {1}" -f $LASTEXITCODE, $probeText) }
+  Write-Host ("      probe: {0}" -f $(if ($AsarPatchedProbe) { "patch signatures present" } else { "patch signatures MISSING (fresh or update-wiped asar)" }))
+}
+
 if (Test-Path $MarkerPath) {
   $markerEngineVersion = 1
   try {
     $existing = Get-Content -LiteralPath $MarkerPath -Raw | ConvertFrom-Json
     if ($existing.patchVersion) { $markerEngineVersion = [int]$existing.patchVersion }
   } catch { Write-Host "Marker unreadable - will re-patch." }
-  if ($markerEngineVersion -ge $script:EngineVersion -and -not $Force) {
-    Write-Host "Already patched at engine v$markerEngineVersion (marker exists). Use -Force to re-patch."
+  if ($markerEngineVersion -ge $script:EngineVersion -and -not $Force -and $AsarPatchedProbe) {
+    Write-Host "Already patched at engine v$markerEngineVersion (marker + asar signatures verified). Use -Force to re-patch."
     exit 0
+  }
+  if ($markerEngineVersion -ge $script:EngineVersion -and -not $AsarPatchedProbe) {
+    Write-Host "App update detected - patched asar replaced, marker stale - re-patching."
   }
   if ($markerEngineVersion -lt $script:EngineVersion) {
     Write-Host "Marker is engine v$markerEngineVersion - upgrading to v$script:EngineVersion (re-patching)."
@@ -210,15 +294,23 @@ Assert-ZCodeClosed -InstallPath $Install
 
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $UnpackedDir = Join-Path $Resources "app.asar.unpacked"
-# On re-patch (marker upgrade), keep pointing at the ORIGINAL backup captured by
-# the first run so -Restore always returns to the pristine asar, not to an
-# intermediate patched state.
+# Backup selection. Re-patch of a STILL-PATCHED tree (engine upgrade, asar
+# probe present): keep pointing at the ORIGINAL backup captured by the first
+# run so -Restore always returns to the pristine asar, not to an intermediate
+# patched state. Update-wiped tree (probe missing): the current asar is a NEW
+# pristine version - never fold it onto the old backup (a later -Restore would
+# downgrade the app), so capture a fresh timestamped backup and point the new
+# marker at it instead.
 $BackupDir = Join-Path $BackupsRoot $Stamp
-if ($existing -and $existing.backupDir -and (Test-Path (Join-Path $existing.backupDir "app.asar"))) {
+$ReuseOriginalBackup = $false
+if ($AsarPatchedProbe -and $existing -and $existing.backupDir -and (Test-Path (Join-Path $existing.backupDir "app.asar"))) {
+  $ReuseOriginalBackup = $true
   $BackupDir = $existing.backupDir
   Write-Host "[1/7] Reusing original backup at $BackupDir"
-} else {
-  if ($existing) { Write-Host "Original backup missing - creating fresh backup of current state." }
+}
+if (-not $ReuseOriginalBackup) {
+  if ($existing -and -not $AsarPatchedProbe) { Write-Host "App-update recovery - backing up the new pristine asar." }
+  elseif ($existing) { Write-Host "Original backup missing - creating fresh backup of current state." }
   Write-Host "[1/7] Backup to $BackupDir"
   New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
   Copy-Item $Asar (Join-Path $BackupDir "app.asar")
@@ -235,8 +327,28 @@ $CandidateUnpacked = "$CandidateAsar.unpacked"
 try {
   New-Item -ItemType Directory -Path $Work -Force | Out-Null
 
-  Write-Host "[2/7] Extracting app.asar (~370 MB, takes a minute)..."
-  Invoke-AsarCli @("--yes", "@electron/asar", "extract", $Asar, $Extracted)
+  # -Force re-patch must rebuild from the PRISTINE backup, never the live
+  # asar: the engine's done-anchors treat already-patched sites as done, so
+  # extracting the live (already-patched) file ships the OLD injected code
+  # while still printing SUCCESS (2026-10-18 AutoClaw: two -Force runs shipped
+  # no changes; bug sweep 15). Only rebuild from a backup when the LIVE asar
+  # is still engine-patched; after an app update the live asar is the new
+  # pristine version and must be the extract source (the backup would roll
+  # the app back a version).
+  $extractSource = $Asar
+  if ($Force -and $AsarPatchedProbe -and $existing -and $existing.backupDir) {
+    $pristineAsar = Join-Path $existing.backupDir "app.asar"
+    if (Test-Path $pristineAsar) {
+      $extractSource = $pristineAsar
+      Write-Host "[2/7] Extracting PRISTINE backup asar (live file is already engine-patched)..."
+    } else {
+      Write-Host "WARNING: marker's original backup is missing - extracting the live (patched) asar; the engine's done-anchors will skip already-patched sites."
+    }
+  }
+  if ($extractSource -eq $Asar) {
+    Write-Host "[2/7] Extracting app.asar (~370 MB, takes a minute)..."
+  }
+  Invoke-AsarCli @("--yes", "@electron/asar", "extract", $extractSource, $Extracted)
 
   Write-Host "[3/7] Applying icon/AUMID overrides..."
   $engineOut = & $NodeExe $PatchEngine $Extracted
@@ -345,7 +457,7 @@ try {
 
   Write-Host "[6/7] Swapping patched asar into install..."
   $patchFloor = [long]((Get-Item $Asar).Length / 2)
-  Invoke-AsarSwap -ResourcesDir $Resources -CandidateAsar $CandidateAsar -CandidateUnpacked $CandidateUnpacked -MinAsarBytes $patchFloor
+  Invoke-AsarSwap -ResourcesDir $Resources -CandidateAsar $CandidateAsar -CandidateUnpacked $CandidateUnpacked -MinAsarBytes $patchFloor -BackupAsar (Join-Path $BackupDir "app.asar")
 
   Write-Host "[7/7] Writing marker..."
   $marker = [ordered]@{
