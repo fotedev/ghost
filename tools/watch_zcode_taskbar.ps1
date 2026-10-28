@@ -83,7 +83,9 @@ $Instances = @(
     @{ Name = 'Primary'; Title = 'ZCode';        Aumid = 'dev.zcode.app';   Markers = @() },
     @{ Name = 'Second';  Title = 'ZCode Blue';   Aumid = 'dev.zcode.app.2'; Markers = @('ZCode-Second', 'ZCodeSecondHome') },
     @{ Name = 'Third';   Title = 'ZCode Yellow'; Aumid = 'dev.zcode.app.3'; Markers = @('ZCode-Third',  'ZCodeThirdHome') },
-    @{ Name = 'Fourth';  Title = 'ZCode Green';  Aumid = 'dev.zcode.app.4'; Markers = @('ZCode-Fourth', 'ZCodeFourthHome') }
+    @{ Name = 'Fourth';  Title = 'ZCode Green';  Aumid = 'dev.zcode.app.4'; Markers = @('ZCode-Fourth', 'ZCodeFourthHome') },
+    @{ Name = 'Fifth';   Title = 'ZCode Red';    Aumid = 'dev.zcode.app.5'; Markers = @('ZCode-Fifth',  'ZCodeFifthHome') },
+    @{ Name = 'Sixth';   Title = 'ZCode Orange'; Aumid = 'dev.zcode.app.6'; Markers = @('ZCode-Sixth',  'ZCodeSixthHome') }
 )
 
 Add-Type -TypeDefinition @"
@@ -107,7 +109,8 @@ public class ZcodeWindowAumid {
         void Commit();
     }
     [DllImport("shell32.dll")] public static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
-    [DllImport("oleaut32.dll")] public static extern int PropVariantClear(ref PROPVARIANT pv);
+    // oleaut32 dropped this export in Win10 19041.7548 (2026-07 CU) - ole32 keeps it
+    [DllImport("ole32.dll")] public static extern int PropVariantClear(ref PROPVARIANT pv);
     public static readonly PROPERTYKEY PKEY_AUMID = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
     static Guid IID_IPropertyStore = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
     // Stamp + read back; returns what the store actually holds.
@@ -254,7 +257,12 @@ function Get-WindowInstance {
 
 function Invoke-IdentityPass {
     $wins = @(Get-Process -Name ZCode -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
-    if ($wins.Count -eq 0) { return }
+    if ($wins.Count -eq 0) {
+        # Nothing alive: drop the whole seen-map so a later window that reuses
+        # an old hwnd value is treated as first-seen again (kick restored).
+        if ($SeenHwnds.Count -gt 0) { $SeenHwnds.Clear() }
+        return
+    }
     $procMap = Get-ZcodeProcessMap
     $classified = @()
     $unknownWins = @()
@@ -292,9 +300,26 @@ function Invoke-IdentityPass {
             Write-WatchLog ("{0}: {1} windows titled '{2}' - ambiguous (app.asar patch missing?), stamping skipped" -f $inst.Name, $hits.Count, $inst.Title) 'WARN'
             continue
         }
+        # A window is only here because its pid has no WMI data. ONE window
+        # titled bare "ZCode" is exactly as ambiguous as two: it can be a
+        # splash-phase clone (the documented 2026-09-24 bug class), so the
+        # Primary row never guesses - skip loudly. Clone v6 titles are unique
+        # and keep stamping.
+        if ($inst.Name -eq 'Primary') {
+            Write-WatchLog ("{0}: lone window titled '{1}' with no WMI data for pid {2} - ambiguous (could be a splash-phase clone), stamping skipped" -f $inst.Name, $inst.Title, $hits[0].Id) 'WARN'
+            continue
+        }
         $firstSeen = -not $SeenHwnds.ContainsKey([Int64]$hits[0].MainWindowHandle)
         $SeenHwnds[[Int64]$hits[0].MainWindowHandle] = $true
         Set-WindowIdentity -Win $hits[0] -Inst $inst -FirstSeen:$firstSeen
+    }
+    # Prune seen-hwnd bookkeeping to windows that are still alive: Windows
+    # reuses hwnd values, and a stale "seen" entry would skip the one-time
+    # stale-group/stale-icon kick for the new window that reused the value.
+    $liveHwnds = @{}
+    foreach ($w in $wins) { $liveHwnds[[Int64]$w.MainWindowHandle] = $true }
+    foreach ($h in @($SeenHwnds.Keys)) {
+        if (-not $liveHwnds.ContainsKey([Int64]$h)) { $SeenHwnds.Remove($h) }
     }
 }
 
@@ -344,9 +369,13 @@ function Invoke-PrimaryHijackGuard {
         return
     }
     try {
-        $repair = Join-Path $PSScriptRoot 'install_zcode_second_shortcuts.ps1'
+        # NOT named $repair: the function's [switch]$Repair parameter IS the
+        # same variable (case-insensitive) - assigning a string to it threw
+        # "Cannot convert ... to SwitchParameter" and killed every auto-repair
+        # since 2026-09-28 (228 logged failures before the 2026-10-25 fix).
+        $repairScript = Join-Path $PSScriptRoot 'install_zcode_second_shortcuts.ps1'
         $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File $repair -RepairPrimaryAumid 2>&1 | Out-String
+        $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File $repairScript -RepairPrimaryAumid 2>&1 | Out-String
         if (-not [string]::IsNullOrWhiteSpace($out)) {
             $repairDir = Split-Path -Parent $LogFile
             if (-not (Test-Path -LiteralPath $repairDir)) { New-Item -ItemType Directory -Path $repairDir -Force | Out-Null }
@@ -419,7 +448,14 @@ function Get-OtherWatcherPids {
     $procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
     foreach ($p in $procs) {
         if ([int]$p.ProcessId -eq $PID) { continue }
-        if ($p.CommandLine -and $p.CommandLine.ToLowerInvariant().Contains($leaf)) { $found += [int]$p.ProcessId }
+        $cl = ""
+        if ($p.CommandLine) { $cl = $p.CommandLine.ToLowerInvariant() }
+        if (-not $cl.Contains($leaf)) { continue }
+        # A concurrent -RunOnce one-shot (or a -RunOnce -CheckPrimaryHijack
+        # test) is not a resident copy: excluding it stops a resident start
+        # from exiting spuriously ("already running") and leaving no watcher.
+        if ($cl.Contains("-runonce")) { continue }
+        $found += [int]$p.ProcessId
     }
     return $found
 }
