@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # ZCode Clone Instance Launcher (Second / Third / Fourth / Fifth / Sixth)
 # Launches a fully independent clone of ZCode alongside the primary instance.
 # Mechanism (reverse-engineered from resources/app.asar -> out/main/index.js):
@@ -21,7 +21,15 @@ param(
     # Which clone to launch. Defaults to Second so existing callers
     # (Launch-ZCode-Second.bat, GHOST.bat ZCode submenu [1]) stay valid unchanged.
     [ValidateSet('Second', 'Third', 'Fourth', 'Fifth', 'Sixth')]
-    [string]$Instance = 'Second'
+    [string]$Instance = 'Second',
+    # Soft RAM guard threshold: at or above this many running ZCode instances
+    # (Primary + clones), launching another one asks for confirmation.
+    [ValidateRange(1, 6)]
+    [int]$MaxConcurrent = 3,
+    # Experimental: launch the app with --disable-gpu (drops the per-instance
+    # GPU process, ~200-400 MB commit each). Off by default - rendering falls
+    # back to software, which may scroll slower.
+    [switch]$LowRam
 )
 $ErrorActionPreference = 'Stop'
 
@@ -67,6 +75,78 @@ $CloneUserData  = Join-Path $AppData $cfg.UserData
 $CloneSession   = Join-Path $CloneUserData 'session'
 # Strings that identify THIS clone's processes in any CommandLine (live-check).
 $CloneMarkers   = @("*$($cfg.UserData)*", "*$($cfg.Home)*")
+
+# 0) RAM guard (2026-10-28): four+ concurrent instances exhausted the commit
+#    limit once (renderer-OOM freeze, verified 2026-09-25) and the Start Plan
+#    provider throttles high concurrency anyway. Soft guard: count running
+#    ZCode mains; at or above -MaxConcurrent show live commit numbers and ask.
+#    Relaunching an ALREADY-RUNNING clone only focuses its window, so the guard
+#    never blocks that. A non-interactive caller (watchdog relaunch, test
+#    harness with redirected stdin) warns and continues instead of hanging.
+function Get-ZcodeMainIds {
+    @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue | Where-Object {
+        $c = ([string]$_.CommandLine).Trim()
+        # Empty CommandLine is a known WMI race on fresh mains: keep as candidate.
+        ([string]::IsNullOrWhiteSpace($c)) -or ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+    } | Select-Object -ExpandProperty ProcessId)
+}
+function Test-ThisCloneRunning {
+    # Same classification as the Telegram lock check (step 2c): walk every
+    # main's process subtree and look for this clone's markers.
+    $allProcs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)
+    if ($allProcs.Count -eq 0) { return $false }
+    $byParent = @{}
+    foreach ($p in $allProcs) {
+        $ppid = [int]$p.ParentProcessId
+        if (-not $byParent.ContainsKey($ppid)) { $byParent[$ppid] = @() }
+        $byParent[$ppid] += $p
+    }
+    foreach ($m in @($allProcs | Where-Object {
+        $c = ([string]$_.CommandLine).Trim()
+        ([string]::IsNullOrWhiteSpace($c)) -or ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+    })) {
+        $seen = @{}; $queue = New-Object System.Collections.Queue
+        $queue.Enqueue([int]$m.ProcessId) | Out-Null
+        while ($queue.Count -gt 0) {
+            $id = $queue.Dequeue()
+            if ($seen.ContainsKey($id)) { continue }
+            $seen[$id] = $true
+            if ($byParent.ContainsKey($id)) {
+                foreach ($c in $byParent[$id]) {
+                    $cmd = [string]$c.CommandLine
+                    foreach ($mk in $CloneMarkers) {
+                        if ($cmd -like $mk) { return $true }
+                    }
+                    $queue.Enqueue([int]$c.ProcessId) | Out-Null
+                }
+            }
+        }
+    }
+    return $false
+}
+$mainsNow = Get-ZcodeMainIds
+if ($mainsNow.Count -ge $MaxConcurrent) {
+    if (Test-ThisCloneRunning) {
+        Write-Host ("[ram-guard] {0} is already running - this relaunch only focuses its window." -f $Instance)
+    } else {
+        $zcodeProcs = @(Get-Process -Name ZCode -ErrorAction SilentlyContinue)
+        $zcodeCommit = ($zcodeProcs | Measure-Object -Property PrivateMemorySize64 -Sum).Sum / 1MB
+        $osCommit = Get-CimInstance Win32_OperatingSystem
+        Write-Host ("[ram-guard] {0} ZCode instance(s) already running - soft limit is {1}." -f $mainsNow.Count, $MaxConcurrent) -ForegroundColor Yellow
+        Write-Host ("[ram-guard] Live pressure: ZCode {0:N0} MB commit; OS {1:N0} / {2:N0} MB commit limit." -f $zcodeCommit, (($osCommit.TotalVirtualMemorySize - $osCommit.FreeVirtualMemory) / 1KB), ($osCommit.TotalVirtualMemorySize / 1KB)) -ForegroundColor Yellow
+        Write-Host '[ram-guard] More instances risk the renderer-OOM freeze (verified 2026-09-25) plus Start Plan throttling.'
+        Write-Host '[ram-guard] Lighter option: GHOST.bat ZCode [7] runs this account headless at about a quarter of the RAM.'
+        if ([Console]::IsInputRedirected) {
+            Write-Host '[ram-guard] Non-interactive session - continuing so watchdog/harness callers never hang.' -ForegroundColor Yellow
+        } else {
+            $guardAnswer = Read-Host '[ram-guard] Launch anyway? (y/N)'
+            if ($guardAnswer -notmatch '^[Yy]') {
+                Write-Host '[ram-guard] Launch cancelled - nothing was started.'
+                exit 0
+            }
+        }
+    }
+}
 
 # 1) Ensure directories exist
 New-Item -ItemType Directory -Path $CloneHome -Force | Out-Null
@@ -324,14 +404,14 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
 #     MCP server definitions (per-clone on/off toggles stay local), the shared
 #     .agents skills junction, and the plugin cache. The clone is not running
 #     yet, so writes are safe. A failed sync warns and continues - it must
-#     never block the launch (fix later via GHOST.bat ZCode [20]).
+#     never block the launch (fix later via GHOST.bat ZCode [17]).
 $SyncScript = Join-Path $PSScriptRoot '..\..\tools\sync_zcode_assets.ps1'
 Write-Host ''
 Write-Host 'Step 2d) Sync clone assets from Primary - MCP definitions, skills junction, plugin cache'
 if (Test-Path -LiteralPath $SyncScript) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SyncScript -Target $Instance
     if ($LASTEXITCODE -ne 0) {
-        Write-Host 'Step 2d) sync reported FAILED items - launching anyway; re-run GHOST.bat ZCode [20] after closing the clones.' -ForegroundColor Yellow
+        Write-Host 'Step 2d) sync reported FAILED items - launching anyway; re-run GHOST.bat ZCode [17] after closing the clones.' -ForegroundColor Yellow
     }
 } else {
     Write-Host 'Step 2d) tools\sync_zcode_assets.ps1 not found - skipping (clone stays as last synced).' -ForegroundColor Yellow
@@ -459,7 +539,12 @@ $beforeMains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -Error
     # Empty CommandLine is a known WMI race on fresh mains: keep as candidate.
     ([string]::IsNullOrWhiteSpace($c)) -or ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
 } | Select-Object -ExpandProperty ProcessId)
-$null = Start-Process -FilePath "$env:ComSpec" -ArgumentList '/c', 'start', '""', "`"$ZCodeExe`"" -WindowStyle Hidden
+$exeArgs = @('/c', 'start', '""', "`"$ZCodeExe`"")
+if ($LowRam) {
+    $exeArgs += '--disable-gpu'
+    Write-Host '[launch] -LowRam: --disable-gpu passed (saves the per-instance GPU process; software rendering).' -ForegroundColor Yellow
+}
+$null = Start-Process -FilePath "$env:ComSpec" -ArgumentList $exeArgs -WindowStyle Hidden
 # Best-effort PID discovery: a fresh bare-exe main appears within seconds.
 # Re-launch while already running just focuses the window and exits instead.
 $newPid = $null
