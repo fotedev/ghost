@@ -59,11 +59,11 @@
 
     # With Telegram escalation (both required):
     powershell -ExecutionPolicy Bypass -File tools\watch_zcode_captcha.ps1 `
-      -TelegramBotToken "123:ABC" -TelegramChatId "456"
+      -TelegramBotToken <your-bot-token> -TelegramChatId <your-chat-id>
 
     # ...or drop them in .envlocal at the repo root (git-ignored) and the
     # script picks them up automatically:
-    #   TELEGRAM_BOT_TOKEN=123:ABC
+    #   your Telegram bot token on one line, the chat id on the next
     #   TELEGRAM_CHAT_ID=456
     # Explicit parameters win over .envlocal values.
 
@@ -100,7 +100,7 @@ param(
     [int]$LogRetentionDays = 7,
     [string]$LogDir = "",
     [string]$StateDir = "",
-    [string]$TelegramBotToken = "",
+    [string]$TelegramBotToken,
     [string]$TelegramChatId = "",
     [switch]$DryRun,
     [switch]$RunOnce
@@ -116,7 +116,39 @@ if ([string]::IsNullOrWhiteSpace($StateDir)) {
     # LOCALAPPDATA is user-writable: no elevation needed to run the watch.
     $StateDir = Join-Path $env:LOCALAPPDATA "watch-zcode-captcha"
 }
-$ZCodeExe = Join-Path $env:LOCALAPPDATA "Programs\ZCode\ZCode.exe"
+# M2: never hardcode a single install path - the old per-user-only default
+# left machine-wide installs permanently unrelaunchable (every restart
+# FAILED, auto-continue skipped). Resolve once at startup: the live running
+# process's path first, then the launcher's 3-candidate list
+# (launch_zcode_second_instance.ps1:37-41), legacy default as last resort.
+$script:LastRunningExe = $null   # live exe path captured before each kill
+function Get-ZCodeExeCandidates {
+    return @(
+        (Join-Path $env:LOCALAPPDATA "Programs\ZCode\ZCode.exe"),
+        "C:\Program Files\ZCode\ZCode.exe",
+        "C:\Program Files (x86)\ZCode\ZCode.exe"
+    )
+}
+function Get-LiveZCodeExePath {
+    # The running instance's own exe path - the highest-fidelity relaunch
+    # source. Empty string when nothing is running or paths are unreadable.
+    foreach ($p in @(Get-Process -Name "ZCode*" -ErrorAction SilentlyContinue)) {
+        $path = ""
+        try { $path = [string]$p.Path } catch { }
+        if (-not $path) { try { $path = [string]$p.MainModule.FileName } catch { } }
+        if ($path) { return $path }
+    }
+    return ""
+}
+function Resolve-ZCodeExe {
+    $live = Get-LiveZCodeExePath
+    if ($live -and (Test-Path -LiteralPath $live)) { return $live }
+    foreach ($c in (Get-ZCodeExeCandidates)) {
+        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
+    }
+    return (Join-Path $env:LOCALAPPDATA "Programs\ZCode\ZCode.exe")
+}
+$ZCodeExe = Resolve-ZCodeExe
 $StatePath = Join-Path $StateDir "state.json"
 $WatchLogPath = Join-Path $StateDir "watch.log"
 
@@ -144,7 +176,7 @@ function Read-EnvLocalValue {
 # Explicit parameters win; .envlocal fills the gaps; empty stays disabled.
 $ToolsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($TelegramBotToken)) {
-    $TelegramBotToken = Read-EnvLocalValue -Key "TELEGRAM_BOT_TOKEN" -ToolsDir $ToolsDir
+    Set-Variable -Name TelegramBotToken -Value (Read-EnvLocalValue -Key "TELEGRAM_BOT_TOKEN" -ToolsDir $ToolsDir)
 }
 if ([string]::IsNullOrWhiteSpace($TelegramChatId)) {
     $TelegramChatId = Read-EnvLocalValue -Key "TELEGRAM_CHAT_ID" -ToolsDir $ToolsDir
@@ -233,7 +265,21 @@ function Save-WatchState {
         catch { }
     }
     $State.continues = $kept
-    Write-NoBomText -Path $StatePath -Content ($State | ConvertTo-Json -Depth 6)
+    # Atomic write (temp file + rename): a crash mid-write can never leave a
+    # truncated state.json, and the rename retries ride out a transient lock
+    # from a concurrent -RunOnce reader (Load-WatchState) or an AV scan.
+    $tmpPath = $StatePath + ".tmp"
+    Write-NoBomText -Path $tmpPath -Content ($State | ConvertTo-Json -Depth 6)
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        try {
+            Move-Item -LiteralPath $tmpPath -Destination $StatePath -Force
+            return
+        }
+        catch {
+            if ($attempt -eq 4) { throw }
+            Start-Sleep -Milliseconds (100 * $attempt)
+        }
+    }
 }
 
 function Get-TodayLogFile {
@@ -361,15 +407,21 @@ function Start-ZCodeApp {
     if (-not (Test-Path -LiteralPath $StateDir)) {
         New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
     }
-    if (-not (Test-Path -LiteralPath $ZCodeExe)) {
-        Write-WatchLog ("FAILED: ZCode exe not found: " + $ZCodeExe) -Milestone
+    # M2: prefer the exe path captured from the live process before the kill
+    # (the exact install the app ran from); $ZCodeExe is the fallback.
+    $exe = $ZCodeExe
+    if ($script:LastRunningExe -and (Test-Path -LiteralPath $script:LastRunningExe)) {
+        $exe = $script:LastRunningExe
+    }
+    if (-not (Test-Path -LiteralPath $exe)) {
+        Write-WatchLog ("FAILED: ZCode exe not found: " + $exe) -Milestone
         return $false
     }
     $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $outLog = Join-Path $StateDir ("relaunch_" + $stamp + ".out.log")
     $errLog = Join-Path $StateDir ("relaunch_" + $stamp + ".err.log")
     try {
-        Start-Process -FilePath $ZCodeExe -RedirectStandardOutput $outLog -RedirectStandardError $errLog -ErrorAction Stop
+        Start-Process -FilePath $exe -RedirectStandardOutput $outLog -RedirectStandardError $errLog -ErrorAction Stop
         Write-WatchLog ("relaunch output captured to: " + $outLog)
     }
     catch {
@@ -384,14 +436,157 @@ function Start-ZCodeApp {
     return $false
 }
 
+function Get-ZcodeInstanceSnapshot {
+    # W3 (plan F-03): classify running ZCode TREES by PROCESS MARKERS before
+    # the kill (AGENTS rule - never by window title), so the relaunch restores
+    # WHAT was running: clones via their launcher (env-var isolation), Primary
+    # via the bare exe. PER-TREE classification (2026-10-24): a clone main
+    # runs with a BARE command line too - the launcher isolates clones via
+    # env vars, not args - so the old per-process bare-exe/empty test claimed
+    # Primary for every running clone whose children carry the markers. Same
+    # shape as the taskbar watcher's Get-ZcodeProcessMap: a parent->children
+    # map over one WMI snapshot, a tree is labeled from any marker in its
+    # cmdlines, and Primary is added ONLY for a main whose WHOLE tree is
+    # unmarked. Empty CommandLine is the known WMI race: on a box where
+    # clones were found it is ambiguous - logged, never guessed as Primary.
+    $markers = @(
+        @{ Label = 'Second'; Pattern = 'ZCode-Second|ZCodeSecondHome' },
+        @{ Label = 'Third';  Pattern = 'ZCode-Third|ZCodeThirdHome' },
+        @{ Label = 'Fourth'; Pattern = 'ZCode-Fourth|ZCodeFourthHome' },
+        @{ Label = 'Fifth';  Pattern = 'ZCode-Fifth|ZCodeFifthHome' },
+        @{ Label = 'Sixth';  Pattern = 'ZCode-Sixth|ZCodeSixthHome' }
+    )
+    $mains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)
+    if ($mains.Count -eq 0) { return @() }
+    $map = @{}
+    foreach ($p in $mains) {
+        $map[[int]$p.ProcessId] = @{ Parent = [int]$p.ParentProcessId; Cmdline = [string]$p.CommandLine; Children = @() }
+    }
+    foreach ($p in $mains) {
+        $par = [int]$p.ParentProcessId
+        if ($map.ContainsKey($par)) { $map[$par].Children = @($map[$par].Children) + [int]$p.ProcessId }
+    }
+    # Tree roots: a ZCode.exe whose parent is not itself a ZCode.exe process
+    # (cycle-guarded climb - reused parent pids can form loops).
+    $roots = @()
+    foreach ($procId in @($map.Keys)) {
+        $root = $procId
+        $climbed = @{}
+        while ($true) {
+            if ($climbed.ContainsKey($root)) { break }
+            $climbed[$root] = $true
+            $par = [int]$map[$root].Parent
+            if (-not $map.ContainsKey($par)) { break }
+            $root = $par
+        }
+        if ($roots -notcontains $root) { $roots += $root }
+    }
+    # Classify every tree FIRST (an empty-cmdline root must see whether clones
+    # exist anywhere on the box before it may be called Primary), then emit
+    # the labels in the launcher's fixed clone order, Primary last.
+    $treeResults = @()
+    foreach ($root in $roots) {
+        $seen = @{}
+        $queue = New-Object System.Collections.Queue
+        $queue.Enqueue([int]$root)
+        $treeLabels = @()
+        while ($queue.Count -gt 0) {
+            $cur = [int]$queue.Dequeue()
+            if ($seen.ContainsKey($cur)) { continue }
+            $seen[$cur] = $true
+            $node = $map[$cur]
+            if (-not $node) { continue }
+            $cl = [string]$node.Cmdline
+            if ($cl) {
+                foreach ($m in $markers) {
+                    if ($cl -match $m.Pattern) { $treeLabels += $m.Label; break }
+                }
+            }
+            foreach ($child in $node.Children) { $queue.Enqueue($child) }
+        }
+        $treeResults += @{ Root = $root; Labels = @($treeLabels | Select-Object -Unique); RootCmdline = [string]$map[$root].Cmdline }
+    }
+    $clonesFound = @($treeResults | Where-Object { $_.Labels.Count -gt 0 }).Count -gt 0
+    $found = @()
+    $primaryFound = $false
+    foreach ($t in $treeResults) {
+        if ($t.Labels.Count -gt 0) {
+            foreach ($lbl in $t.Labels) { $found += $lbl }
+            continue
+        }
+        # Whole tree unmarked: the root decides. Bare-exe command line = the
+        # Primary main (AGENTS classification rule). Empty CommandLine = the
+        # WMI race: trusted as Primary only when nothing else on the box
+        # contradicts it; with clones running it is ambiguous (could be a
+        # just-spawned clone main whose children WMI has not enumerated yet).
+        if ($t.RootCmdline -match '(?i)^"?[A-Za-z]:\\[^"]*ZCode\.exe"?\s*$') {
+            $primaryFound = $true
+        }
+        elseif ($t.RootCmdline -eq '') {
+            if ($clonesFound) {
+                Write-WatchLog ("instance snapshot: ZCode pid " + $t.Root + " has an empty WMI command line while clones are running - ambiguous, not classified as Primary") -Milestone
+            }
+            else {
+                $primaryFound = $true
+            }
+        }
+    }
+    $ordered = @()
+    foreach ($m in $markers) {
+        if ($found -contains $m.Label) { $ordered += $m.Label }
+    }
+    if ($primaryFound) { $ordered += 'Primary' }
+    return @($ordered | Select-Object -Unique)
+}
+
+function Start-ZCodeInstances {
+    # W3: relaunch exactly the instance set that was running before the kill.
+    # Clones MUST go through their launcher (env-var isolation) - a bare
+    # ZCode.exe would open the PRIMARY profile and repopulate it. Primary
+    # relaunches bare (that IS the Primary profile). An empty/missing snapshot
+    # falls back to the old bare relaunch (watchdog started post-crash).
+    param([string[]]$Instances)
+    if ($null -eq $Instances) { $Instances = @() }
+    if ($Instances.Count -eq 0) { return (Start-ZCodeApp) }
+    $launcher = Join-Path (Split-Path -Parent $PSScriptRoot) "src\windows\launch_zcode_second_instance.ps1"
+    $allOk = $true
+    foreach ($inst in $Instances) {
+        if ($inst -eq 'Primary') {
+            if (-not (Start-ZCodeApp)) { $allOk = $false }
+        }
+        else {
+            Write-WatchLog ("relaunching clone via launcher: " + $inst)
+            try {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Instance $inst | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw ("launcher exit " + $LASTEXITCODE) }
+            }
+            catch {
+                Write-WatchLog ("FAILED: clone relaunch threw: " + $_.Exception.Message) -Milestone
+                $allOk = $false
+            }
+        }
+    }
+    return $allOk
+}
+
 function Restart-ZCodeApp {
     # Returns "restarted", "skipped-not-running", or "failed".
     if ((Get-ZCodeProcesses).Count -eq 0) {
         Write-WatchLog "restart skipped: ZCode not running (left alone by design)"
         return "skipped-not-running"
     }
+    # W3: classify BEFORE the kill - after Stop-ZCodeProcesses the marker
+    # evidence is gone and a bare relaunch would repopulate only the Primary.
+    $script:LastRunningInstances = Get-ZcodeInstanceSnapshot
+    Write-WatchLog ("instance snapshot before restart: " + ($script:LastRunningInstances -join ", "))
+    # M2: remember the running exe path so the relaunch uses exactly what the
+    # app ran from (a machine-wide install never matches the per-user default).
+    $script:LastRunningExe = Get-LiveZCodeExePath
+    if ($script:LastRunningExe) {
+        Write-WatchLog ("live exe captured for relaunch: " + $script:LastRunningExe)
+    }
     if (-not (Stop-ZCodeProcesses)) { return "failed" }
-    if (Start-ZCodeApp) {
+    if (Start-ZCodeInstances -Instances $script:LastRunningInstances) {
         Write-WatchLog "ZCode restarted and process verified" -Milestone
         return "restarted"
     }
@@ -433,7 +628,7 @@ function Invoke-LivenessCheck {
     $n = [int]$State.relaunchAttempts + 1
     Write-WatchLog ("liveness: relaunch attempt " + $n + " of " + $RestartAttempts)
     $State.lastAttempt = $Now.ToUniversalTime().ToString("o")
-    if (Start-ZCodeApp) {
+    if (Start-ZCodeInstances -Instances $script:LastRunningInstances) {
         $State.restarts++
         $State.relaunchAttempts = 0
         $State.lastRestart = $Now.ToUniversalTime().ToString("o")
@@ -571,7 +766,20 @@ function Invoke-SessionContinue {
         }
         $done += $p.session
         if (-not (Test-ContinueAllowed -State $State -Session $p.session -Now $Now)) {
-            Write-WatchLog ("auto-continue: hourly cap reached for " + $p.session + ", skipping (escalated)") -Milestone
+            # Requeue instead of dropping: the hourly cap must not act as a
+            # lifetime limit (the session's recovery was silently lost until a
+            # NEW failure line re-added it). The 2h stale-drop still bounds an
+            # endlessly requeued entry. No "(escalated)" claim: this path
+            # sends no escalation - an earlier one came from the separate
+            # threshold logic and cannot be attributed to a session.
+            $requeued = [pscustomobject]@{
+                session   = $p.session
+                workspace = $p.workspace
+                seen      = $p.seen
+                due       = $Now.AddMinutes(15).ToUniversalTime().ToString("o")
+            }
+            $keep += $requeued
+            Write-WatchLog ("auto-continue: hourly cap reached for " + $p.session + ", requeued until " + $requeued.due)
             continue
         }
         $argList = @("`"$cli`"", "--resume", $p.session, "--prompt", $ResumeMessage, "--surface", "desktop")
@@ -649,11 +857,16 @@ function Test-RateLimitedTurn {
         # Shape 1: flat context (provider 1305 / HTTP 529).
         $reason = ""
         $code = 0
+        $flatProviderCode = ""
         if ($o.context) {
             if ($o.context.reason) { $reason = [string]$o.context.reason }
             if ($o.context.statusCode) { $code = [int]$o.context.statusCode }
+            if ($o.context.providerCode) { $flatProviderCode = [string]$o.context.providerCode }
         }
-        if (($reason -ceq "rate_limited") -or ($code -eq 529) -or ($Line.Contains("1305"))) {
+        # 1305 is tested on PARSED fields only - the old raw
+        # $Line.Contains("1305") also fired on records whose sessionId,
+        # timestamp or durations merely contained "1305".
+        if (($reason -ceq "rate_limited") -or ($code -eq 529) -or ($code -eq 1305) -or ($flatProviderCode -ceq "1305")) {
             return $true
         }
         # Shape 2: nested error.cause chain (provider 3009 /
@@ -719,15 +932,37 @@ function Invoke-WatchPass {
     }
 
     if ($State.file -ne $logFile) {
-        # New day (or first run): never replay history, start at the tail.
+        # Day switch (or first run). First run / unreadable old file: never
+        # replay history. Day switch with a readable old file: drain it from
+        # the stored offset FIRST - lines appended after the last pre-midnight
+        # pass (a 23:59 captcha stall) would otherwise be dropped forever when
+        # we repoint at the new day's tail. Drained lines flow through the
+        # normal detection below (restart/resume/escalation apply as usual).
+        $drainedLines = @()
+        $oldFile = [string]$State.file
+        if (($oldFile -ne "") -and (Test-Path -LiteralPath $oldFile)) {
+            try {
+                $drained = Read-NewLogLines -Path $oldFile -Offset ([long]$State.offset)
+                $drainedLines = @($drained.Lines)
+            }
+            catch {
+                Write-WatchLog ("day-switch drain FAILED (old tail skipped): " + $_.Exception.Message)
+            }
+        }
         $State.file = $logFile
         $State.offset = (Get-Item -LiteralPath $logFile).Length
-        Write-WatchLog ("tracking " + $logFile + " from tail (history skipped)")
-        return $State
+        if ($drainedLines.Count -gt 0) {
+            Write-WatchLog ("day switch: drained " + $drainedLines.Count + " unread line(s) from " + $oldFile)
+        }
+        else {
+            Write-WatchLog ("tracking " + $logFile + " from tail (history skipped)")
+        }
+        $tail = @{ Lines = $drainedLines; Offset = $State.offset }
     }
-
-    $tail = Read-NewLogLines -Path $logFile -Offset ([long]$State.offset)
-    $State.offset = $tail.Offset
+    else {
+        $tail = Read-NewLogLines -Path $logFile -Offset ([long]$State.offset)
+        $State.offset = $tail.Offset
+    }
 
     $newHits = 0
     $newRateHits = 0
@@ -943,7 +1178,14 @@ function Get-OtherWatchdogPids {
     $procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
     foreach ($p in $procs) {
         if ([int]$p.ProcessId -eq $PID) { continue }
-        if ($p.CommandLine -and $p.CommandLine.ToLowerInvariant().Contains($leaf)) { $found += [int]$p.ProcessId }
+        $cl = ""
+        if ($p.CommandLine) { $cl = $p.CommandLine.ToLowerInvariant() }
+        if (-not $cl.Contains($leaf)) { continue }
+        # A concurrent -RunOnce one-shot (or a -RunOnce -DryRun test) is not a
+        # resident copy: excluding it stops a resident start from exiting
+        # spuriously ("already running") and leaving no watchdog behind.
+        if ($cl.Contains("-runonce")) { continue }
+        $found += [int]$p.ProcessId
     }
     return $found
 }
@@ -968,14 +1210,26 @@ Write-WatchLog ("watchdog started (pid {0}, poll {1}s)" -f $PID, $PollSeconds) -
 
 try {
     while ($true) {
-        $state = Invoke-WatchPass -State $state
-        Save-WatchState -State $state
-        Update-WatchTitle
+        try {
+            $state = Invoke-WatchPass -State $state
+            Save-WatchState -State $state
+            Update-WatchTitle
+        }
+        catch {
+            # One transient exception (log/state file share collision, WMI
+            # hiccup) must never end the resident watch silently: log it and
+            # keep looping - the next pass retries from the saved offsets.
+            $passErr = $_.Exception.Message
+            try { Write-WatchLog ("watch pass FAILED: " + $passErr) -Milestone }
+            catch { Write-Host ("watch pass FAILED (log write also failed): " + $passErr) -ForegroundColor Red }
+            try { Save-WatchState -State $state } catch { }
+        }
         Start-Sleep -Seconds $PollSeconds
     }
 }
 finally {
     $mutex.ReleaseMutex()
     $mutex.Close()
-    Save-WatchState -State $state
+    Write-WatchLog "watchdog stopped" -Milestone
+    try { Save-WatchState -State $state } catch { Write-Host ("final state save FAILED: " + $_.Exception.Message) -ForegroundColor Yellow }
 }

@@ -18,10 +18,12 @@ while true; do
     echo ""
     read -r -p "Select an option [0-4]: " choice
     case "$choice" in
-        1) bash "$LINUX_DIR/change_device_id.sh" Fingerprint    ;;
-        2) bash "$LINUX_DIR/reset_cursor.sh"                    ;;
-        3) bash "$LINUX_DIR/reset_windsurf.sh"                  ;;
-        4) bash "$LINUX_DIR/change_device_id.sh" ResetMachineId ;;
+        # || true: a child exiting non-zero (declined kill, non-root
+        # ResetMachineId, failed reset) must not kill the menu via set -e.
+        1) bash "$LINUX_DIR/change_device_id.sh" Fingerprint    || true ;;
+        2) bash "$LINUX_DIR/reset_cursor.sh"                    || true ;;
+        3) bash "$LINUX_DIR/reset_windsurf.sh"                  || true ;;
+        4) bash "$LINUX_DIR/change_device_id.sh" ResetMachineId || true ;;
         0) info "Goodbye."; exit 0                                     ;;
         *) err "Invalid option: $choice"                               ;;
     esac

@@ -433,7 +433,10 @@ foreach ($name in $Instance) {
     $lnk.Arguments        = ("-NoProfile -ExecutionPolicy Bypass -File `"$RepoRoot\src\windows\launch___SLUG___clone.ps1`" -Instance $name")
     $lnk.WorkingDirectory = Join-Path $RepoRoot 'src\windows'
     if ($icon) { $lnk.IconLocation = "$icon,0" }
-    $lnk.SetAppUserModelId($def.Aumid)
+    # TODO(Phase 7): WScript.Shell shortcuts have NO SetAppUserModelId method
+    # (the old skeleton called one that cannot exist). AUMIDs need the C#
+    # IPropertyStore helper - copy it from tools\install_autoclaw_clone_shortcuts.ps1
+    # and call it here with $def.Aumid before $lnk.Save().
     $lnk.Save()
     # verify-after
     $chk = $wsh.CreateShortcut((Join-Path $root $def.LnkName))
@@ -501,6 +504,12 @@ function Edit-GhostMenu {
   $batPath = Join-Path $PSScriptRoot '..\GHOST.bat'
   $batPath = [System.IO.Path]::GetFullPath($batPath)
   $bat = [System.IO.File]::ReadAllText($batPath)
+
+  # Keep the ORIGINAL launcher for rollback: the .new_clone_suite.bak staging
+  # file holds the EDITED text and is deleted after success - it was never a
+  # backup of the original (the old flow left no undo artifact at all).
+  $originalBackup = "$batPath.pre_clone_suite.bak"
+  [System.IO.File]::WriteAllText($originalBackup, $bat)
 
   if ($bat.Contains(":$($Pascal)One")) { throw "GHOST.bat already wires a $Pascal suite - refusing to double-edit" }
 
@@ -677,6 +686,21 @@ foreach ($p in $plan) {
   Write-Utf8Crlf -Path $full -Content $p.Text
   # verify-after: byte check
   if (-not (Test-Path -LiteralPath $full)) { throw "emit verify failed: $($p.Path)" }
+}
+
+# Parse-check every emitted .ps1 BEFORE the GHOST.bat edit (never silent-
+# success): a parse failure must abort while the launcher is still untouched.
+# NOTE: the skeleton wires only inst1 (two gid slots) regardless of the intake
+# instanceCount - extend Edit-GhostMenu + the gid allocation to wire more.
+foreach ($p in $plan) {
+  if ($p.Path -notlike '*.ps1') { continue }
+  $full = Join-Path $repoRoot $p.Path
+  $errs = $null
+  [System.Management.Automation.Language.Parser]::ParseFile($full, [ref]$null, [ref]$errs) | Out-Null
+  if ($errs.Count -gt 0) {
+    $errs | ForEach-Object { Write-Host ("  [FAILED] {0}: {1}" -f $p.Path, $_.Message) -ForegroundColor Red }
+    throw ("emitted file does not parse: " + $p.Path)
+  }
 }
 
 $backup = Edit-GhostMenu -It $it -Slug $slug -Pascal $pascal -SubmenuId $submenuId -GidBase $gidBase -CloneCount 2

@@ -36,6 +36,9 @@
   is lost) and prints how to reapply. Ignored files (archive/, .envlocal,
   *.lnk, ID_Backups/) are never touched by the stash or by the ZIP sync.
 
+  -CheckOnly still runs git fetch (updates remote-tracking refs only; never
+  the working tree).
+
   Verify-after is mandatory (never silent-success) on every path. A failed
   fetch (offline) is a warning, not a failure. -CheckOnly never writes: on a
   ZIP copy it reports only. -Convert answers the interactive confirmation
@@ -85,6 +88,13 @@ function Invoke-Git {
   # pre-quoted command line instead - a single string argument is used verbatim.
   $cmdLine = @()
   foreach ($arg in $GitArguments) {
+    # Pinned edge (no current caller can hit it): a whitespace arg ending in a
+    # backslash would close its quoted form as ...\" - the Windows argument
+    # parser reads that as an escaped quote and splits the argument (a
+    # backslash directly before an embedded " has the same problem). Variable
+    # args today are URLs / branch names / fixed messages; if a future caller
+    # must pass one, double the trailing backslash run first:
+    #   $arg = $arg -replace '(\\+)$', '$1$1'
     if ($arg -match '\s') { $cmdLine += ('"' + ($arg -replace '"', '\"') + '"') }
     else { $cmdLine += $arg }
   }
@@ -338,9 +348,11 @@ function Update-GhostZipCopy {
 
 function Convert-GhostZipToClone {
   # In-place conversion of a ZIP-extracted folder into a real git clone.
-  # Setup failures, a failed fetch and a declined overwrite remove the
-  # temporary .git again (only when this run created it). Returns
-  # 'converted', 'aborted' or 'failed'.
+  # Setup failures (including a failed reset --hard), a failed fetch and a
+  # declined overwrite remove the temporary .git again (only when this run
+  # created it). A failed FINAL verify keeps it: reset --hard succeeded, the
+  # folder is already aligned, and removing .git would de-clone a valid
+  # folder. Returns 'converted', 'aborted' or 'failed'.
   if ($CheckOnly) {
     Write-Host '  [warn] this folder is a Download ZIP copy, not a git clone - nothing to compare here.' -ForegroundColor Yellow
     Write-Host '  Run again without -CheckOnly to convert it into a git clone.' -ForegroundColor Yellow
@@ -477,7 +489,10 @@ function Convert-GhostZipToClone {
   #    ignored files such as .envlocal / ID_Backups / *.lnk survive)
   $r = Invoke-Git 'reset','--hard',$Target
   if ($r.ExitCode -ne 0) {
-    Write-Host '  [FAILED] git reset --hard failed - inspect the folder with git status.' -ForegroundColor Red
+    # alignment never completed -> not a verified aligned state: remove the
+    # temporary .git so the folder stays a plain ZIP copy (documented contract)
+    & $removeTempGit
+    Write-Host '  [FAILED] git reset --hard failed - the temporary .git was removed; the folder is back to a plain ZIP copy.' -ForegroundColor Red
     $r.StdErr | Select-Object -First 5 | ForEach-Object { Write-Host "         $_" }
     return 'failed'
   }
@@ -492,6 +507,7 @@ function Convert-GhostZipToClone {
   if ($headR.ExitCode -ne 0 -or $tgtR.ExitCode -ne 0 -or $headR.StdOut.Count -eq 0 -or $tgtR.StdOut.Count -eq 0 -or
     $headR.StdOut[0].Trim() -ne $tgtR.StdOut[0].Trim()) {
     Write-Host '  [FAILED] HEAD does not match origin after the conversion - inspect with git status.' -ForegroundColor Red
+    Write-Host '  The temporary .git is kept - reset --hard succeeded, so the folder is aligned; removing it would de-clone a valid folder.' -ForegroundColor Yellow
     return 'failed'
   }
   $shortR = Invoke-Git 'rev-parse','--short','HEAD'
@@ -682,7 +698,8 @@ try {
       exit 1
     }
     if ((Get-StashCount) -le $stashBefore) {
-      Write-Host '  [warn] stash count did not increase - continuing; the pull refuses if blocked.' -ForegroundColor Yellow
+      Write-Host '  [warn] stash count did not increase - this warn is NOT a guard: the tree may continue unstashed.' -ForegroundColor Yellow
+      Write-Host '         Remaining guard: git pull --ff-only refuses to overwrite conflicting dirty files - worst case the pull fails, changes untouched.' -ForegroundColor Yellow
     }
     else {
       Write-Host '  [ok] local changes stashed (ignored files were not touched)' -ForegroundColor Green

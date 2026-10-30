@@ -2,10 +2,13 @@
 
 Date: 2026-10-15. Status: **ACTIVE** — the standing process for every future
 clone request. Distilled from the two proven suites: **ZCode** (Primary +
-Second/Third/Fourth — the gold standard: full identity incl. per-clone
+Second/Third/Fourth/Fifth — the gold standard: full identity incl. per-clone
 taskbar buttons, tray icons and accent colors via the asar patch engine) and
 **AutoClaw** (Primary + inst1..inst4 — v1: full profile/credential/port
-isolation with a documented shared-taskbar-button limitation). Companions:
+isolation with shortcut-AUMID-only taskbar identity; v2 contract 2026-10-17: separate
+taskbar buttons per clone + clone icons in taskbar and in-app (spec §7.3c, REQUIRED —
+implemented 2026-10-17 as engine v11, live-verified 2026-10-18 on engine v12).
+Companions:
 [APP_CLONING_EDGE_CASES.md](APP_CLONING_EDGE_CASES.md) (the normative EC-xx
 catalog — its handling rules apply to every suite) and
 [APP_CLONING_INTAKE_TEMPLATE.md](APP_CLONING_INTAKE_TEMPLATE.md) (the
@@ -44,10 +47,10 @@ decompiled code + live probes + provenance). Applies to any future app.
 | 3 | Credential isolation (no shared tokens/keys/paired devices) | MANDATORY | seed EXCLUDES credential stores; strips tokens keeping `userInfo`; verify-after-launch own-key check |
 | 4 | Own launcher script + double-click shortcuts | MANDATORY | `launch_<app>_clone.ps1 -Instance <role>`; .lnk targets the launcher (a .lnk cannot set env vars) |
 | 5 | Own reset script (`-Target` per instance) | MANDATORY | backup → mutate → verify-after → audit → restore script; independent IDs per target |
-| 6 | Distinct window title ("App `<Color>`") | DEGRADABLE | patch hook (`ZCODE_INSTANCE_NAME` pattern) — strongly recommended: prevents the .lnk pin-collision class (EC-C01) |
-| 7 | Distinct taskbar button (AUMID + icon) | DEGRADABLE | full: window-level `System.AppUserModel.ID` stamp + kick + resident watcher (ZCode); degraded: shortcut AUMIDs only, running windows share one button (AutoClaw v1) |
-| 8 | Distinct tray icon | DEGRADABLE | patch hook reading an icon-dir env (`ZCODE_ICON_DIR` pattern) |
-| 9 | Distinct window icon | DEGRADABLE | same hook as [8] |
+| 6 | Distinct window title ("App `<Color>`") | DEGRADABLE | patch hook (`ZCODE_INSTANCE_NAME` pattern) — strongly recommended: prevents the .lnk pin-collision class (EC-C01); AutoClaw ships it since engine v11 (now v12; forced in-app via `page-title-updated` interception) |
+| 7 | Distinct taskbar button (AUMID + icon) | DEGRADABLE | full: window-level `System.AppUserModel.ID` stamp + kick + resident watcher (ZCode), or in-app creation-time stamping via the asar patch (AutoClaw engine v11, now v12: `setAppDetails` at window creation — no watcher needed); degraded: shortcut AUMIDs only, running windows share one button |
+| 8 | Distinct tray icon | DEGRADABLE | patch hook reading an icon-dir env (`ZCODE_ICON_DIR` pattern) / marker file (AutoClaw) |
+| 9 | Distinct window icon | DEGRADABLE | same hook as [8] (AutoClaw engine v11, now v12, wires it via the `window-identity` family) |
 | 10 | Per-clone accent color | DEGRADABLE | patch hook (`ZCODE_ACCENT_HEX` → renderer flags); needs in-app recolor points |
 
 **Degradation rule — never silently degrade.** A DEGRADABLE feature ships at
@@ -57,8 +60,9 @@ MANDATORY feature that is absent means the clone is NOT done.
 
 Degradation ladders:
 
-- Taskbar [7]: window stamp + watcher → shortcut-AUMID-only pins (running
-  windows merge — AutoClaw §5.8) → none.
+- Taskbar [7]: window stamp + watcher (ZCode) or in-app creation-time window stamp via
+  the asar patch (AutoClaw engine v11, now v12, spec 7.3c) → shortcut-AUMID-only pins (running
+  windows merge) → none.
 - Tray/window icon [8][9]: per-clone icon-dir hook → stock icon for all
   clones (identity still distinct via title/accent) → report absent.
 - Accent [10]: in-app recolor → accent dropped, everything else kept.
@@ -73,7 +77,8 @@ Everything else is the agent's job (§4). The Developer supplies, via
 1. App name/slug, instance count, role names.
 2. **Colors** — one accent hex per clone, Developer-specified (defaults
    offered: the ZCode palette — Second blue `#066BCB`, Third yellow
-   `#D4AA10`, Fourth green `#13826A`). The Primary is never recolored.
+   `#D4AA10`, Fourth green `#13826A`, Fifth red `#CA0607`). The Primary is
+   never recolored.
 3. **Icons** — developer-supplied files per clone (paths), or the §5
    policy applies.
 4. Credential policy (default: one credential = one instance; the seed
@@ -132,8 +137,9 @@ Decision tree when wiring clone icons:
    `IconLocation`), verify-after, report "developer icons used at `<paths>`".
 2. **Icons missing → DEFAULT branch: improvise + report.** Derive tinted
    variants from the app's stock icon via the generator pipeline (reference:
-   `generate_branding.py --mask <hue> --out-dir` — emits `icon_windows.png`
-   + multi-size `tray_icon.ico` + the measured accent hex for the env var),
+   `tools/make_clone_icon.ps1` — the generic per-app generator: `-HueRotate`
+   for extra colors, emits `icon_windows.png` + multi-size `tray_icon.ico` +
+   provenance; ZCode's `generate_branding.py` stays app-specific),
    wire them, and flag every generated file as PLACEHOLDER in the report:
    what was created, where, and that the Developer replaces them by dropping
    real files at the same paths + re-running the branding and shortcuts
@@ -279,10 +285,13 @@ Never: fail the clone over icons; silently guess; leave a broken
       classification first — EC-C05; named mutex + startup process-scan
       single-copy; ~5m hijack self-heal; autostart lnk; self-titled
       console; log at `%LOCALAPPDATA%\watch-<app>-taskbar\` with rotation).
-- [ ] Degraded (AutoClaw v1): shortcut-AUMID-only + the shared-button
-      limitation documented in the spec + report + v2 candidates listed
-      (asar AUMID-suffix env hook, or extracting the ZCode window-stamp
-      helper).
+- [ ] Degraded mode is an INTERIM state only (AutoClaw v1: shortcut-AUMID-only
+      + report — historical). The AutoClaw v2 contract (spec §7.3c, 2026-10-17)
+      requires the asar branding patch (per-clone process AUMID + in-app window
+      icon) on a --user-data-dir marker-file channel — env hooks are unreliable
+      for self-elevating apps (fresh environment after UAC) — with the
+      window-stamp helper as the elevation-gated fallback. Shipped as engine
+      v11 (2026-10-17); live-verified 2026-10-18 on engine v12.
 - [ ] Never elevated; the launcher must run at the same or higher
       integrity level than the clone (UIPI — EC-C08).
 
@@ -355,11 +364,11 @@ watcher logs under `%LOCALAPPDATA%\watch-<app>-taskbar\`.
 This playbook distills verified work, not theory:
 
 - **ZCode suite** (2026-09-23 → 09-28): env-only isolation (the CLI `~`
-  lesson), asar patch engine v7 (icon/tray/accent/title/AUMID-suffix env
+  lesson), asar patch engine v8 (icon/tray/accent/title/AUMID-suffix env
   hooks), window-level stamping + kick + resident watcher, Primary .lnk
   hijack repair, splash-phase misclassification fix, renderer-OOM
   commit-limit diagnosis, Telegram 409 routing rule. Ground truth:
-  AGENTS.md "Multi-instance conventions (ZCode: Primary + 3 clones)".
+  AGENTS.md "Multi-instance conventions (ZCode: Primary + 5 clones)".
 - **AutoClaw suite** (2026-10-08 → 10-15): the installed-app discovery
   method (quoted decompiled code + live probes), credential-free seed +
   marker guards, port-array widening + drift discovery,

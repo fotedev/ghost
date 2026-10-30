@@ -30,6 +30,9 @@ __pycache__/
 # Test scratch file
 test.txt
 
+# Test runner output
+testResults.xml
+
 # Installers
 CursorFreeVIP_1.11.03_windows.exe
 CursorFreeVIP_1.8.08_windows.exe
@@ -91,3 +94,9 @@ tools/block_qoder_domains.ps1
 # Shortcuts are per-machine binaries (paths embed the repo location) — regenerate
 # with tools\install_ghost_shortcut.ps1 instead of committing.
 *.lnk
+
+# Local analysis scratch (agent sessions) - never commit.
+_analysis/
+
+# Local bug-sweep scratch - never commit.
+_bug_sweep/

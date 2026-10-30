@@ -209,9 +209,30 @@ function Backup-FileToTimestampDir {
     }
 
     $destination = Join-Path $BackupRoot $Label
+    # Never silently overwrite an existing backup: a second backup of the same
+    # file under the same label used to destroy the pristine pre-run copy (the
+    # restore manifest then "restored" post-mutation content). Uniquify instead.
+    $suffix = 2
+    while (Test-Path -LiteralPath $destination) {
+        $destination = Join-Path $BackupRoot ("$Label-$suffix")
+        $suffix++
+        if ($suffix -gt 100) {
+            Write-Host "[WARN] backup uniquify gave up after 100 attempts: $Label" -ForegroundColor Yellow
+            return $null
+        }
+    }
+    if ($suffix -gt 2) {
+        Write-Host "[INFO] backup label already used - uniquified: $Label -> $(Split-Path -Leaf $destination)" -ForegroundColor DarkGray
+    }
     $destinationParent = Split-Path -Path $destination -Parent
     if (-not [string]::IsNullOrWhiteSpace($destinationParent)) {
-        New-Item -Path $destinationParent -ItemType Directory -Force | Out-Null
+        try {
+            New-Item -Path $destinationParent -ItemType Directory -Force | Out-Null
+        }
+        catch {
+            Write-Host "[WARN] backup skipped (cannot create backup dir): $destinationParent -- $($_.Exception.Message)" -ForegroundColor Yellow
+            return $null
+        }
     }
 
     # Retry-with-backoff for transient file-in-use errors. Extension host
@@ -237,6 +258,29 @@ function Backup-FileToTimestampDir {
     return $null
 }
 
+function Test-GhostValueEqual {
+    # PS 5.1-safe value comparison for verify-after re-reads: -eq filters
+    # arrays element-wise and is reference-equality for hashtables/objects,
+    # so a scalar -eq check silently mis-verifies non-primitive updates.
+    # Scalars (incl. $null) compare strictly; anything else falls back to a
+    # canonical JSON serialization comparison.
+    param($Expected, $Actual)
+
+    if ($null -eq $Expected) { return ($null -eq $Actual) }
+    if ($Expected -is [string] -or $Actual -is [string] -or
+        ($Expected -is [System.IFormattable]) -or ($Actual -is [System.IFormattable])) {
+        return ([string]$Expected -eq [string]$Actual)
+    }
+    try {
+        $expectedJson = ConvertTo-Json -InputObject $Expected -Depth 20 -Compress
+        $actualJson = ConvertTo-Json -InputObject $Actual -Depth 20 -Compress
+        return ($expectedJson -eq $actualJson)
+    }
+    catch {
+        return $false
+    }
+}
+
 function Set-JsonIdentity {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -244,12 +288,16 @@ function Set-JsonIdentity {
         [Parameter(Mandatory = $true)][ref]$Audit,
         [string]$BackupRoot,
         [string]$BackupLabel,
-        [ref]$Actions
+        [ref]$Actions,
+        # Keys whose before/after values must never reach the audit log
+        # (key material such as PEM bodies is logged as "<redacted>").
+        [string[]]$RedactKeys = @()
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
         foreach ($key in $Updates.Keys) {
-            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $Updates[$key] -Ok $false
+            $auditAfter = if ($RedactKeys -contains $key) { "<redacted>" } else { $Updates[$key] }
+            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $auditAfter -Ok $false
         }
         Write-Host "[FAILED] JSON file not found: $Path" -ForegroundColor Red
         return $false
@@ -270,14 +318,27 @@ function Set-JsonIdentity {
                 renamedPath  = $null
             }
         }
+        else {
+            # A requested-but-failed backup means "mutation refused" for a JSON
+            # store the restore script claims to cover - never a silent
+            # no-undo write. (Clear-BinaryIdentityStore's delete path keeps its
+            # own documented proceed-on-failed-backup contract.)
+            foreach ($key in $Updates.Keys) {
+                $auditAfter = if ($RedactKeys -contains $key) { "<redacted>" } else { "<mutation-refused: backup failed>" }
+                Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $auditAfter -Ok $false
+            }
+            Write-Host "[FAILED] backup failed - mutation refused: $Path" -ForegroundColor Red
+            return $false
+        }
     }
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         foreach ($key in $Updates.Keys) {
-            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $Updates[$key] -Ok $false
+            $auditAfter = if ($RedactKeys -contains $key) { "<redacted>" } else { $Updates[$key] }
+            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $null -After $auditAfter -Ok $false
         }
         Write-Host "[FAILED] could not parse JSON: $Path" -ForegroundColor Red
         return $false
@@ -295,14 +356,29 @@ function Set-JsonIdentity {
         }
     }
 
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+    try {
+        [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+    }
+    catch {
+        # Unguarded, this terminating error would abort the whole reset BEFORE
+        # the audit log / restore script exist (half-reset with no undo).
+        foreach ($key in $Updates.Keys) {
+            $auditBefore = if ($RedactKeys -contains $key) { "<redacted>" } else { $beforeValues[$key] }
+            $auditAfter = if ($RedactKeys -contains $key) { "<redacted>" } else { "<write-failed>" }
+            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $auditBefore -After $auditAfter -Ok $false
+        }
+        Write-Host "[FAILED] could not write JSON: $Path -- $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
 
     try {
-        $verifiedContent = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verifiedContent = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         foreach ($key in $Updates.Keys) {
-            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $beforeValues[$key] -After $Updates[$key] -Ok $false
+            $auditBefore = if ($RedactKeys -contains $key) { "<redacted>" } else { $beforeValues[$key] }
+            $auditAfter = if ($RedactKeys -contains $key) { "<redacted>" } else { $Updates[$key] }
+            Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $auditBefore -After $auditAfter -Ok $false
         }
         Write-Host "[FAILED] could not re-read JSON after write: $Path" -ForegroundColor Red
         return $false
@@ -311,8 +387,10 @@ function Set-JsonIdentity {
     $allMatched = $true
     foreach ($key in $Updates.Keys) {
         $actualValue = if (Test-ObjectProperty -Object $verifiedContent -Name $key) { $verifiedContent.$key } else { $null }
-        $ok = $actualValue -eq $Updates[$key]
-        Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $beforeValues[$key] -After $actualValue -Ok $ok
+        $ok = Test-GhostValueEqual -Expected $Updates[$key] -Actual $actualValue
+        $auditBefore = if ($RedactKeys -contains $key) { "<redacted>" } else { $beforeValues[$key] }
+        $auditAfter = if ($RedactKeys -contains $key) { "<redacted>" } else { $actualValue }
+        Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $auditBefore -After $auditAfter -Ok $ok
         if (-not $ok) {
             $allMatched = $false
         }
@@ -374,7 +452,7 @@ function Set-SqliteKeys {
         return $false
     }
 
-    $updatesBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(($Updates | ConvertTo-Json -Compress)))
+    $updatesBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(($Updates | ConvertTo-Json -Compress -Depth 20)))
 
     # Single-source Python core (src\python\ghost\sqlite_keys.py) replaces the
     # per-call temp .py: same base64-in / JSON-stdout contract, verify-after
@@ -404,7 +482,7 @@ function Set-SqliteKeys {
         $allMatched = $true
         foreach ($key in $Updates.Keys) {
             $actualValue = $result.after.$key
-            $ok = $actualValue -eq $Updates[$key]
+            $ok = Test-GhostValueEqual -Expected $Updates[$key] -Actual $actualValue
             Add-AuditEntry -Audit $Audit -File $Path -Key $key -Before $result.before.$key -After $actualValue -Ok $ok
             if (-not $ok) {
                 $allMatched = $false
@@ -438,8 +516,11 @@ function Clear-BinaryIdentityStore {
             continue
         }
 
-        $backupLabel = if ($RootPath -and $path.StartsWith($RootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $path.Substring($RootPath.Length).TrimStart('\')
+        # Trailing-separator guard: C:\Users\x must never prefix-match
+        # C:\Users\xy\store (the label would escape the intended root shape).
+        $rootPrefix = if ($RootPath) { $RootPath.TrimEnd('\') } else { $null }
+        $backupLabel = if ($rootPrefix -and ($path -ieq $rootPrefix -or $path.StartsWith($rootPrefix + '\', [System.StringComparison]::OrdinalIgnoreCase))) {
+            $path.Substring($rootPrefix.Length).TrimStart('\')
         } else {
             Get-PathBackupLabel -Path $path
         }
@@ -530,7 +611,11 @@ function Write-AuditLog {
         New-Item -Path $parent -ItemType Directory -Force | Out-Null
     }
 
-    $Audit | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding UTF8
+    # -InputObject (not the pipeline) preserves the array shape on PS 5.1 even
+    # for a single entry, and UTF8Encoding($false) writes BOM-less UTF-8 like
+    # every other JSON artifact in the toolkit (PS 5.1 -Encoding UTF8 = BOM).
+    $json = ConvertTo-Json -InputObject @($Audit) -Depth 10
+    [System.IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding $false))
 }
 
 function New-RestoreScript {
@@ -546,7 +631,9 @@ function New-RestoreScript {
     }
 
     $restorePath = Join-Path $BackupRoot ("restore_{0}_{1}.ps1" -f $App, $timestamp)
-    $manifestJson = $Actions | ConvertTo-Json -Depth 15
+    # ConvertTo-Json on an empty array emits an empty string, which would make
+    # the generated script's ConvertFrom-Json throw; emit a valid empty array.
+    $manifestJson = if (@($Actions).Count -eq 0) { '[]' } else { $Actions | ConvertTo-Json -Depth 15 }
     $scriptContent = @"
 `$ErrorActionPreference = "Stop"
 
@@ -615,7 +702,8 @@ function Get-NewHostname {
     try {
         $chars = for ($i = 0; $i -lt 7; $i++) {
             $b = New-Object byte[] 1
-            $rng.GetBytes($b)
+            # Rejection sampling: 256 % 36 = 4, so bytes >= 252 are biased.
+            do { $rng.GetBytes($b) } while ($b[0] -ge 252)
             $alphabet[$b[0] % $alphabet.Length]
         }
         return "DESKTOP-" + (-join $chars)

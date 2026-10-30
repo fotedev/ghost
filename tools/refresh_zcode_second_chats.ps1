@@ -43,7 +43,7 @@
 #>
 [CmdletBinding()]
 param(
-  [ValidateSet('Primary','Second','Third','Fourth','All')]
+  [ValidateSet('Primary','Second','Third','Fourth','Fifth','Sixth','All')]
   [string]$Target = 'Second',
   [switch]$Watch,                     # continuous: refresh running instances on quota/captcha failures
   [int]$PollSeconds = 20,             # watch: log poll cadence
@@ -73,6 +73,8 @@ $InstanceDefs = @(
   @{ Name = 'Second';  HomeRel = 'ZCodeSecondHome'; Title = 'ZCode Blue';   Markers = @('ZCode-Second', 'ZCodeSecondHome') }
   @{ Name = 'Third';   HomeRel = 'ZCodeThirdHome';  Title = 'ZCode Yellow'; Markers = @('ZCode-Third', 'ZCodeThirdHome') }
   @{ Name = 'Fourth';  HomeRel = 'ZCodeFourthHome'; Title = 'ZCode Green';  Markers = @('ZCode-Fourth', 'ZCodeFourthHome') }
+  @{ Name = 'Fifth';   HomeRel = 'ZCodeFifthHome';  Title = 'ZCode Red';    Markers = @('ZCode-Fifth', 'ZCodeFifthHome') }
+  @{ Name = 'Sixth';   HomeRel = 'ZCodeSixthHome';  Title = 'ZCode Orange'; Markers = @('ZCode-Sixth', 'ZCodeSixthHome') }
 )
 
 function Write-RunLog([string]$line) {
@@ -426,7 +428,24 @@ function Invoke-RefreshPass {
     $servers = @($desc | Where-Object { $_.CommandLine -like '*app-server*' })
     if ($servers.Count -eq 0) {
       Write-Host "  ${label}: app-server went away while waiting - nothing to recycle (seeds on next folder open)" -ForegroundColor Green
-      Write-RunLog "OK appserver-gone-after-wait target=$($w.Def.Name) missing=$($w.MissingCount)"
+      # never silent-success: the missing count was > 0 and nothing was
+      # recycled, so one re-check logs the residual instead of an
+      # unconditional OK (fine when the index was seeded elsewhere; a WARN
+      # when it is still stale -- those chats seed on the next folder open).
+      $resid = -1
+      $outR = Invoke-ChatCheck @('chat-check', 'missing', $SharedDb, $w.TasksIndex)
+      $countR = $outR | Where-Object { $_ -like 'COUNT:*' } | Select-Object -First 1
+      if ($countR -like 'COUNT:*') { $resid = [int]$countR.Substring(6) }
+      if ($resid -eq 0) {
+        Write-Host "  ${label}: re-check: nothing missing anymore (index was seeded elsewhere)" -ForegroundColor Green
+        Write-RunLog "OK appserver-gone-after-wait target=$($w.Def.Name) missing-before=$($w.MissingCount) residual=0"
+      } elseif ($resid -gt 0) {
+        Write-Host "  ${label}: re-check: $resid chat(s) still missing - they seed on the next folder open" -ForegroundColor Yellow
+        Write-RunLog "WARN appserver-gone-after-wait target=$($w.Def.Name) missing-before=$($w.MissingCount) residual=$resid"
+      } else {
+        Write-Host "  ${label}: re-check failed - residual missing count unknown" -ForegroundColor Yellow
+        Write-RunLog "WARN appserver-gone-after-wait target=$($w.Def.Name) missing-before=$($w.MissingCount) residual=unknown"
+      }
       continue
     }
     $oldIds = @($servers | ForEach-Object { [int]$_.ProcessId })
@@ -446,20 +465,40 @@ function Invoke-RefreshPass {
       continue
     }
     Write-Host "  ${label}: app-server respawned after ~$($i + 1)s"
-    # verify-after (never silent-success): missing chats must reach the index
+    # verify-after (never silent-success): the ORIGINAL missing chats must
+    # reach the index. Requiring global COUNT:0 false-FAILs whenever any
+    # other instance creates a chat during the ~45s window -- the shared
+    # store is written by every instance, and this index can only gain rows
+    # at app-server respawn (which already happened). Chats created after
+    # the recycle are expected to stay missing here; only the original set
+    # must be gone.
+    $origIds = @($w.MissingLines | ForEach-Object { $_.Substring(8).Split('|')[0] })
     $synced = $false
     $c2 = ''
+    $leftIds = @()
     for ($i = 0; $i -lt 22; $i++) {
       Start-Sleep -Seconds 2
       $out2 = Invoke-ChatCheck @('chat-check', 'missing', $SharedDb, $w.TasksIndex)
       $c2 = $out2 | Where-Object { $_ -like 'COUNT:*' } | Select-Object -First 1
-      if ($c2 -eq 'COUNT:0') { $synced = $true; break }
+      $nowMissing = @($out2 | Where-Object { $_ -like 'MISSING:*' })
+      $leftIds = @($nowMissing | Where-Object { $origIds -contains $_.Substring(8).Split('|')[0] })
+      if ($origIds.Count -gt 0) {
+        if ($leftIds.Count -eq 0) { $synced = $true; break }
+      } elseif ($c2 -eq 'COUNT:0') {
+        # defensive: the initial check gave no MISSING lines to match against
+        $synced = $true; break
+      }
     }
     if (-not $synced) {
-      $left = 'unknown'
-      if ($c2 -like 'COUNT:*') { $left = $c2.Substring(6) }
-      if ($Strict) { Stop-WithError "verify-after failed for ${label}: $left chat(s) still missing 45s after recycle" }
-      Write-Host "  ${label}: [FAIL] verify-after: $left chat(s) still missing 45s after recycle" -ForegroundColor Red
+      if ($leftIds.Count -gt 0) {
+        $left = ($leftIds | ForEach-Object { $_.Substring(8).Split('|')[0] }) -join ','
+      } elseif ($c2 -like 'COUNT:*') {
+        $left = $c2.Substring(6)
+      } else {
+        $left = 'unknown'
+      }
+      if ($Strict) { Stop-WithError "verify-after failed for ${label}: still missing 45s after recycle: $left" }
+      Write-Host "  ${label}: [FAIL] verify-after: still missing 45s after recycle: $left" -ForegroundColor Red
       Write-RunLog "FAIL verify target=$($w.Def.Name) left=$left"
       continue
     }
@@ -474,34 +513,55 @@ function Invoke-RefreshPass {
 # ---------- watch mode: error-triggered refresh across all running instances --
 
 # Incremental JSONL tail (offset-based; handles day rollover + truncation).
+# Returns @{ Lines = <complete lines>; FromOffsetZero = <bool> } -- the flag
+# marks a batch read from byte 0 (watch start, file switch, truncation) whose
+# lines' ages are unknown; Find-FreshErrors uses it to bound the unstamped
+# fallback. Consumption mirrors the proven watchdog pattern
+# (tools\watch_zcode_captcha.ps1 Read-NewLogLines): byte-buffered read, and
+# only up to the LAST complete newline BYTE is consumed -- a trailing partial
+# line (possibly cut mid multi-byte char) stays unconsumed and is re-read
+# complete on the next poll, so the offset can never drift the way a decoded
+# char-count rewind does (U+FFFD replaces the cut sequence).
 $script:TailFile = $null
 $script:TailOffset = [int64]0
 
 function Get-NewAgentLogLines {
   $f = Get-ChildItem (Join-Path $AgentLogDir 'zcode-*.jsonl') -ErrorAction SilentlyContinue |
        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if (-not $f) { return @() }
+  if (-not $f) { return @{ Lines = @(); FromOffsetZero = $false } }
   if ($script:TailFile -ne $f.FullName) { $script:TailFile = $f.FullName; $script:TailOffset = [int64]0 }
   if ($f.Length -lt $script:TailOffset) { $script:TailOffset = [int64]0 }  # rotated
-  if ($f.Length -eq $script:TailOffset) { return @() }
-  $fs = [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'ReadWrite')
+  if ($f.Length -eq $script:TailOffset) { return @{ Lines = @(); FromOffsetZero = $false } }
+  $fromZero = ($script:TailOffset -eq [int64]0)
+  $stream = [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'ReadWrite')
   try {
-    [void]$fs.Seek($script:TailOffset, 'Begin')
-    $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8)
-    $text = $sr.ReadToEnd()
-    $script:TailOffset = $fs.Position
-    $sr.Dispose()
+    $start = $script:TailOffset
+    if ($start -gt $stream.Length) { $start = [int64]0; $script:TailOffset = [int64]0; $fromZero = $true }  # truncated
+    $length = [int]($stream.Length - $start)
+    if ($length -le 0) { return @{ Lines = @(); FromOffsetZero = $fromZero } }
+    $null = $stream.Seek($start, [System.IO.SeekOrigin]::Begin)
+    $buf = New-Object byte[] $length
+    $read = $stream.Read($buf, 0, $length)
+    if ($read -le 0) { return @{ Lines = @(); FromOffsetZero = $fromZero } }
+    if ($start -eq 0 -and $read -ge 3 -and $buf[0] -eq 239 -and $buf[1] -eq 187 -and $buf[2] -eq 191) {
+      # UTF-8 BOM: skip it so the first line stays parseable JSON.
+      $start = 3
+      $read = $read - 3
+      $tail = New-Object byte[] $read
+      [Array]::Copy($buf, 3, $tail, 0, $read)
+      $buf = $tail
+    }
+    $lastNl = -1
+    for ($i = $read - 1; $i -ge 0; $i--) {
+      if ($buf[$i] -eq 10) { $lastNl = $i; break }
+    }
+    if ($lastNl -lt 0) { return @{ Lines = @(); FromOffsetZero = $fromZero } }
+    $text = [System.Text.Encoding]::UTF8.GetString($buf, 0, $lastNl + 1)
+    $script:TailOffset = $start + $lastNl + 1
   }
-  finally { $fs.Dispose() }
-  if ([string]::IsNullOrEmpty($text)) { return @() }
-  $lines = $text -split "`n"
-  if (-not $text.EndsWith("`n")) {
-    # keep the partial last line for the next poll
-    $partial = $lines[$lines.Count - 1]
-    $script:TailOffset -= [System.Text.Encoding]::UTF8.GetByteCount($partial)
-    if ($lines.Count -gt 1) { $lines = $lines[0..($lines.Count - 2)] } else { $lines = @() }
-  }
-  return @($lines | Where-Object { $_.Trim() -ne '' })
+  finally { $stream.Dispose() }
+  $lines = @($text -split "`r?`n" | Where-Object { $_.Trim() -ne '' })
+  return @{ Lines = $lines; FromOffsetZero = $fromZero }
 }
 
 # Failure signatures mirror tools\watch_zcode_captcha.ps1 (proven in production).
@@ -551,14 +611,39 @@ function Get-LogLineStampUtc([string]$line) {
   return $null
 }
 
+# Freshness rule: a matched failure line counts only when it is provably
+# newer than $sinceUtc. The agent JSONL carries a top-level ISO-8601
+# `timestamp` field (read-only probe of a live ~/.zcode/cli/log record,
+# 2026-10-24), so stamped lines are the normal path. When a stamp is missing
+# or unparseable, the line's age is unknown -- treat it as fresh ONLY within
+# a bounded window, mirroring the watchdog's no-timestamp design:
+#   - incremental poll batch: the line arrived within the last poll interval
+#     (bounded by the cadence itself) -> fresh;
+#   - batch read from byte 0 (watch start / file switch / truncation): the
+#     whole file is in view and no line can be aged -> NOT fresh. The old
+#     behavior treated every unstamped line as fresh, so a day-old failure
+#     fired a full All-refresh at every watch start. Skip + log loudly; a
+#     RECURRING failure writes new lines that arrive via incremental polls.
 function Find-FreshErrors([datetime]$sinceUtc) {
   $found = @()
-  foreach ($line in (Get-NewAgentLogLines)) {
+  $batch = Get-NewAgentLogLines
+  $unstamped = 0
+  $unstampedKinds = @()
+  foreach ($line in $batch.Lines) {
     $kind = Get-LogLineErrorKind $line
     if (-not $kind) { continue }
     $stamp = Get-LogLineStampUtc $line
     if (($null -ne $stamp) -and ($stamp -le $sinceUtc)) { continue }
+    if ($null -eq $stamp -and $batch.FromOffsetZero) {
+      $unstamped++
+      if ($unstampedKinds -notcontains $kind) { $unstampedKinds += $kind }
+      continue
+    }
     $found += @{ Kind = $kind; Stamp = $stamp }
+  }
+  if ($unstamped -gt 0) {
+    Write-Host ("  [WATCH-UNSTAMPED] {0} failure line(s) in a whole-file (byte-0) batch have no parseable timestamp - skipped so a stale event cannot fire the refresh (kinds: {1})." -f $unstamped, ($unstampedKinds -join ', ')) -ForegroundColor Yellow
+    Write-RunLog ("WATCH-UNSTAMPED count={0} kinds={1}" -f $unstamped, ($unstampedKinds -join ','))
   }
   return $found
 }
@@ -590,13 +675,17 @@ if ($Watch) {
       $elapsed = ((Get-Date).ToUniversalTime() - $lastRun).TotalSeconds
       if ($elapsed -ge $CooldownSeconds) {
         $r = Invoke-RefreshPass 'All'
+        # Stamp EVERY attempt, deferred included: $lastRun was previously
+        # only stamped on a completed run, so each retry fired on the very
+        # next poll and the watcher lived inside the ~90s hot-activity guard
+        # instead of honoring -CooldownSeconds (anti-thrash, plan doc section 4).
+        $lastRun = (Get-Date).ToUniversalTime()
         if ($r -eq 'deferred') {
-          Write-Host "  -> deferred: a turn is still streaming ($script:GuardWhy); retrying on later polls" -ForegroundColor Yellow
+          Write-Host "  -> deferred: a turn is still streaming ($script:GuardWhy); retrying after the cooldown" -ForegroundColor Yellow
           Write-RunLog "WATCH-DEFERRED $script:GuardWhy"
         }
         else {
           $pending = $false
-          $lastRun = (Get-Date).ToUniversalTime()
           if ($DryRun) { Write-Host '  -> dry-run only; no processes were touched' -ForegroundColor Cyan }
           elseif ($r -eq 'recycled') { Write-Host '  -> chats refreshed in the running instances' -ForegroundColor Green }
           else { Write-Host '  -> nothing to refresh (running instances already in sync)' }
