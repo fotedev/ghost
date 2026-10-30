@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# ZCode Clone Instance Launcher (Second / Third / Fourth)
+# ZCode Clone Instance Launcher (Second / Third / Fourth / Fifth / Sixth)
 # Launches a fully independent clone of ZCode alongside the primary instance.
 # Mechanism (reverse-engineered from resources/app.asar -> out/main/index.js):
 #   - Electron single-instance lock lives in userData dir (app.getPath('userData')).
@@ -20,7 +20,7 @@
 param(
     # Which clone to launch. Defaults to Second so existing callers
     # (Launch-ZCode-Second.bat, GHOST.bat ZCode submenu [1]) stay valid unchanged.
-    [ValidateSet('Second', 'Third', 'Fourth')]
+    [ValidateSet('Second', 'Third', 'Fourth', 'Fifth', 'Sixth')]
     [string]$Instance = 'Second'
 )
 $ErrorActionPreference = 'Stop'
@@ -54,6 +54,10 @@ $InstanceMap = @{
                   BrandingRepo = 'zcode-yellow-branding'; AccentHex = '#D4AA10'; DisplayName = 'Yellow' }
     'Fourth' = @{ Home = 'ZCodeFourthHome';  UserData = 'ZCode-Fourth'; AumidSuffix = '4'
                   BrandingRepo = 'zcode-green-branding';  AccentHex = '#13826A'; DisplayName = 'Green' }
+    'Fifth'  = @{ Home = 'ZCodeFifthHome';   UserData = 'ZCode-Fifth';  AumidSuffix = '5'
+                  BrandingRepo = 'zcode-red-branding';    AccentHex = '#CA0607'; DisplayName = 'Red' }
+    'Sixth'  = @{ Home = 'ZCodeSixthHome';   UserData = 'ZCode-Sixth';  AumidSuffix = '6'
+                  BrandingRepo = 'zcode-orange-branding'; AccentHex = '#CB5D06'; DisplayName = 'Orange' }
 }
 $cfg = $InstanceMap[$Instance]
 
@@ -316,6 +320,83 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
     }
 }
 
+# 2d) Sync user-scope assets from the Primary into this clone BEFORE launch:
+#     MCP server definitions (per-clone on/off toggles stay local), the shared
+#     .agents skills junction, and the plugin cache. The clone is not running
+#     yet, so writes are safe. A failed sync warns and continues - it must
+#     never block the launch (fix later via GHOST.bat ZCode [20]).
+$SyncScript = Join-Path $PSScriptRoot '..\..\tools\sync_zcode_assets.ps1'
+Write-Host ''
+Write-Host 'Step 2d) Sync clone assets from Primary - MCP definitions, skills junction, plugin cache'
+if (Test-Path -LiteralPath $SyncScript) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SyncScript -Target $Instance
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Step 2d) sync reported FAILED items - launching anyway; re-run GHOST.bat ZCode [20] after closing the clones.' -ForegroundColor Yellow
+    }
+} else {
+    Write-Host 'Step 2d) tools\sync_zcode_assets.ps1 not found - skipping (clone stays as last synced).' -ForegroundColor Yellow
+}
+
+# 2e) Ensure the resident watchers a fresh install needs are alive AND set to
+#     autostart: the MCP sync watcher (Primary config -> every clone, live,
+#     running instances included) and the taskbar identity watcher (anti-merge
+#     stamps). A user who only installs the clones never opens GHOST to start
+#     these manually - so every legitimate clone launch (menu, Desktop/Start
+#     shortcut, Launch ALL) heals both: start hidden when not running, and
+#     install the Startup .lnk once so future logins are covered. Running the
+#     ensure twice is harmless: the probe is a mutex test (no WMI), and each
+#     watcher's own mutex guard exits any duplicate copy silently.
+#     Best-effort by contract: any failure warns and NEVER blocks the launch.
+function Test-WatcherRunning([string]$MutexName) {
+    # initiallyOwned=$false: created=$false means someone else holds it.
+    $created = $false
+    $probe = New-Object System.Threading.Mutex($false, $MutexName, [ref]$created)
+    $probe.Close()
+    return (-not $created)
+}
+function Ensure-ResidentWatcher([string]$Name, [string]$ScriptPath, [string]$MutexName, [string]$AutostartLnk) {
+    try {
+        if (Test-WatcherRunning $MutexName) {
+            Write-Host "[watchers] $Name already running."
+            return
+        }
+        # One-time: make sure the Startup .lnk exists so future logins are
+        # covered even if this is the only clone launch of the session. The
+        # watcher script owns the .lnk spec (-InstallAutostart verifies after
+        # writing); we only re-check existence and warn, never fail the launch.
+        if (-not (Test-Path -LiteralPath $AutostartLnk)) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ScriptPath -InstallAutostart | Out-Null
+            if (-not (Test-Path -LiteralPath $AutostartLnk)) {
+                Write-Host "[watchers] $Name autostart install failed (non-fatal - the watcher still starts now)." -ForegroundColor Yellow
+            }
+        }
+        # PS 5.1 ArgumentList joins with spaces WITHOUT quoting: pre-quote the
+        # -File path so repo paths containing spaces survive.
+        $fileArg = '"{0}"' -f $ScriptPath
+        Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', $fileArg)
+        Write-Host "[watchers] started $Name (hidden, autostart ensured)." -ForegroundColor Green
+    } catch {
+        Write-Host "[watchers] $Name could not be ensured ($($_.Exception.Message)) - continuing." -ForegroundColor Yellow
+    }
+}
+$McpWatcherScript = Join-Path $PSScriptRoot '..\..\tools\watch_zcode_mcp_sync.ps1'
+$TaskbarWatcherScript = Join-Path $PSScriptRoot '..\..\tools\watch_zcode_taskbar.ps1'
+$StartupFolder = [Environment]::GetFolderPath('Startup')
+Write-Host ''
+Write-Host 'Step 2e) Ensure resident watchers - MCP sync + taskbar identity'
+if (Test-Path -LiteralPath $McpWatcherScript) {
+    Ensure-ResidentWatcher -Name 'MCP sync watcher' -ScriptPath $McpWatcherScript `
+        -MutexName 'ZcodeMcpSyncWatcher' -AutostartLnk (Join-Path $StartupFolder 'ZCode MCP sync watcher.lnk')
+} else {
+    Write-Host '[watchers] tools\watch_zcode_mcp_sync.ps1 not found - skipping.' -ForegroundColor Yellow
+}
+if (Test-Path -LiteralPath $TaskbarWatcherScript) {
+    Ensure-ResidentWatcher -Name 'Taskbar identity watcher' -ScriptPath $TaskbarWatcherScript `
+        -MutexName 'ZcodeTaskbarIdentityWatcher' -AutostartLnk (Join-Path $StartupFolder 'ZCode taskbar identity.lnk')
+} else {
+    Write-Host '[watchers] tools\watch_zcode_taskbar.ps1 not found - skipping.' -ForegroundColor Yellow
+}
+
 # 3) Launch the clone detached from THIS console.
 # Why: ZCode.exe attaches to the parent console (AttachConsole) for its stdout
 # logging. A plain Start-Process keeps this window as that console, so ZCode
@@ -428,7 +509,8 @@ public class ZcodeWindowAumid {
         void Commit();
     }
     [DllImport("shell32.dll")] public static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
-    [DllImport("oleaut32.dll")] public static extern int PropVariantClear(ref PROPVARIANT pv);
+    // oleaut32 dropped this export in Win10 19041.7548 (2026-07 CU) - ole32 keeps it
+    [DllImport("ole32.dll")] public static extern int PropVariantClear(ref PROPVARIANT pv);
     public static readonly PROPERTYKEY PKEY_AUMID = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
     static Guid IID_IPropertyStore = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
     // Stamp + read back; returns what the store actually holds.

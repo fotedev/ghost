@@ -48,8 +48,10 @@ def backup_to_timestamped_dir(source, backup_root, label, attempts=6, backoff_ms
 
     The backup root and label mirror the PS contract: the CALLER owns the
     timestamp (<app>\\ID_Backups\\<ts>\\<label>); this function only ensures
-    the destination parent exists and never clobbers semantics beyond -Force
-    (an existing destination is overwritten, matching Copy-Item -Force).
+    the destination parent exists. An existing destination is NEVER
+    overwritten: the label is uniquified with a -2/-3... suffix, so a
+    same-label re-backup can no longer destroy the pristine pre-run copy
+    (the Copy-Item -Force clobber class the sweep found in every resetter).
 
     Returns a report dict:
       {"ok": bool, "skipped": bool, "destination": str|None,
@@ -68,6 +70,20 @@ def backup_to_timestamped_dir(source, backup_root, label, attempts=6, backoff_ms
         return report
 
     destination = os.path.join(backup_root, label)
+    if os.path.exists(destination):
+        # Same-label re-backup used to overwrite (then, for trees whose stats
+        # drifted, VERIFY-DELETE) the earlier backup - destroying the only
+        # pristine copy. Uniquify instead; the caller's manifest gets the
+        # unique destination back.
+        suffix = 2
+        while os.path.exists("%s-%d" % (destination, suffix)) and suffix < 100:
+            suffix += 1
+        if os.path.exists("%s-%d" % (destination, suffix)):
+            report["error"] = "uniquify"
+            report["detail"] = "label already backed up; no free -N suffix under 100"
+            return report
+        report["detail"] = "label already backed up - uniquified destination"
+        destination = "%s-%d" % (destination, suffix)
     dest_parent = os.path.dirname(destination)
     if dest_parent:
         os.makedirs(dest_parent, exist_ok=True)

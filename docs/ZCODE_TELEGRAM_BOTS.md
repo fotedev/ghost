@@ -26,7 +26,7 @@ UI; the app mints a fresh `bot-<guid>`, encrypts to `enc:v1:`, updates
 
 ## 3. Tooling
 
-- `tools/set_zcode_bot.ps1 -VerifyOnly` — read-only audit across all 4
+- `tools/set_zcode_bot.ps1 -VerifyOnly` — read-only audit across all 6
   homes, exit 1 on v2/v3 mismatch or duplicate-while-enabled.
 - `tools/set_zcode_bot.ps1 -Target <name> -Fix` — backup-first
   (`ID_Backups\telegram_guardian_<ts>` + audit + restore script via
@@ -42,13 +42,13 @@ UI; the app mints a fresh `bot-<guid>`, encrypts to `enc:v1:`, updates
 
 ## 4. Bring-up (one bot per clone)
 
-1. `@BotFather` -> 3 new bots (keep `Zane` on Primary).
+1. `@BotFather` -> 5 new bots (keep `Zane` on Primary).
 2. For each clone: open that clone's ZCode window, paste its token in the
    Telegram integration UI, confirm it polls.
 3. Run `tools/set_zcode_bot.ps1 -VerifyOnly` — expect OK.
 4. Run `tools/set_zcode_bot.ps1 -Target <clone> -Fix` once to sync v2/v3
    and write the v2 marker.
-5. Restart the clone once. Verify 4 pollers, 4 bot usernames, zero 409.
+5. Restart the clone once. Verify 6 pollers, 6 bot usernames, zero 409.
 
 ## 5. Quota note (2026-10-16 decision: Option C)
 

@@ -47,11 +47,17 @@ if (-not $traeIsAdmin) {
     # (not a log) is the persisted result channel - the elevated console shows
     # the full live output while the run progresses.
     $traeArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$traeScript`""
-    Start-Process powershell -Verb RunAs -ArgumentList $traeArgs -WindowStyle Normal -Wait
-    if (Test-Path -LiteralPath "$env:TEMP\trae_v0.2_done.txt") {
-        Get-Content -LiteralPath "$env:TEMP\trae_v0.2_done.txt"
+    # A leftover marker from a previous run must never be relayed as this
+    # run's result: the child only overwrites the marker on its own final
+    # paths, so delete it before launching and relay the real exit code.
+    if (Test-Path -LiteralPath $traeDoneMarker) {
+        Remove-Item -LiteralPath $traeDoneMarker -Force -ErrorAction SilentlyContinue
     }
-    exit
+    $traeChild = Start-Process powershell -Verb RunAs -ArgumentList $traeArgs -WindowStyle Normal -Wait -PassThru
+    if (Test-Path -LiteralPath $traeDoneMarker) {
+        Get-Content -LiteralPath $traeDoneMarker -Encoding UTF8
+    }
+    exit $traeChild.ExitCode
 }
 
 Write-GhostBanner -Target "Trae Identity Reset" -Version "0.2"
@@ -104,7 +110,9 @@ function Set-VerifiedMachineIdFile {
 
     $beforeValue = $null
     if (Test-Path -LiteralPath $Path) {
-        $beforeValue = (Get-Content -LiteralPath $Path -Raw).Trim()
+        # ReadAllText decodes UTF-8 and returns "" for a 0-byte file;
+        # Get-Content -Raw returns $null there and $null.Trim() throws.
+        $beforeValue = "$([System.IO.File]::ReadAllText($Path))".Trim()
         $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
         if ($backupPath) {
             Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
@@ -118,7 +126,7 @@ function Set-VerifiedMachineIdFile {
 
     # No-BOM UTF-8. v0.1 used Set-Content -Encoding UTF8 (BOM on PS 5.1).
     [System.IO.File]::WriteAllText($Path, $Value, (New-Object System.Text.UTF8Encoding $false))
-    $afterValue = (Get-Content -LiteralPath $Path -Raw).Trim()
+    $afterValue = "$([System.IO.File]::ReadAllText($Path))".Trim()
     $ok = $afterValue -eq $Value
     Add-AuditEntry -Audit $Audit -File $Path -Key "machineid" -Before $beforeValue -After $afterValue -Ok $ok
     return $ok
@@ -134,7 +142,7 @@ function Confirm-JsonValues {
         return $false
     }
 
-    $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($key in $Expected.Keys) {
         $actualValue = if ($null -ne $content.PSObject.Properties[$key]) { $content.$key } else { $null }
         if ($actualValue -ne $Expected[$key]) {
@@ -218,7 +226,7 @@ function Update-TraeStorageJson {
     }
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         foreach ($key in $Telemetry.Keys) {
@@ -258,7 +266,7 @@ function Update-TraeStorageJson {
     [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         foreach ($key in $Telemetry.Keys) {
@@ -313,7 +321,7 @@ function Update-TraeLocalEnv {
     }
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "device_id" -Before $null -After $null -Ok $false
@@ -350,7 +358,7 @@ function Update-TraeLocalEnv {
     [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "device_id" -Before $deviceBefore -After $null -Ok $false
@@ -421,9 +429,38 @@ import json
 import sys
 
 db_path = sys.argv[1]
-patterns = ("%device%id%", "%machine%id%", "%telemetry%", "%auth%token%")
+# Tightened matching: single-token adjacency only. "_" is ESCAPE'd to its
+# literal self, so spaced human text ("how to auth token refresh") can never
+# match; a no-separator variant keeps camelCase identity keys (deviceId)
+# covered. Matching stays on key NAMES only -- values are never inspected.
+patterns = (
+    "%device\\_id%", "%deviceid%",
+    "%machine\\_id%", "%machineid%",
+    "%auth\\_token%", "%authtoken%",
+    "%telemetry%",
+)
+# Prefer a column literally named "key" over name/id when several key-like
+# columns exist (identity keys may live in "key" while "id" holds row
+# numbers or human labels).
+key_priority = ("key", "itemkey", "k", "id", "name")
 deleted = 0
+survivors = 0
 skipped_tables = []
+
+
+def pick_key_col(cursor, table):
+    cursor.execute("PRAGMA table_info(" + table + ")")
+    cols = cursor.fetchall()
+    # Untyped columns (declared type "") are scanned too: the common SQLite
+    # KV shape CREATE TABLE kv(key, value) declares no column types, and
+    # identity rows in such tables previously survived the scrub.
+    text_cols = [c[1] for c in cols if (c[2].upper() == "TEXT" or c[2] == "") and c[1].replace("_", "").isalnum()]
+    key_cols = [c for c in text_cols if c.lower() in key_priority]
+    if len(key_cols) == 0 or len(text_cols) < 1:
+        return None
+    key_cols.sort(key=lambda c: key_priority.index(c.lower()) if c.lower() in key_priority else len(key_priority))
+    return key_cols[0]
+
 
 conn = sqlite3.connect(db_path)
 try:
@@ -434,25 +471,33 @@ try:
         if not table.replace("_", "").isalnum():
             skipped_tables.append(table)
             continue
-        cursor.execute("PRAGMA table_info(" + table + ")")
-        cols = cursor.fetchall()
-        text_cols = [c[1] for c in cols if c[2].upper() == "TEXT" and c[1].replace("_", "").isalnum()]
-        key_cols = [c for c in text_cols if c.lower() in ("key", "name", "k", "id", "itemkey")]
-        if len(key_cols) == 0 or len(text_cols) < 1:
+        key_col = pick_key_col(cursor, table)
+        if key_col is None:
             skipped_tables.append(table)
             continue
-        key_col = key_cols[0]
         for pattern in patterns:
-            cursor.execute("SELECT COUNT(*) FROM " + table + " WHERE " + key_col + " LIKE ?", (pattern,))
+            cursor.execute("SELECT COUNT(*) FROM " + table + " WHERE " + key_col + " LIKE ? ESCAPE '\\'", (pattern,))
             n = cursor.fetchone()[0]
             if n > 0:
-                cursor.execute("DELETE FROM " + table + " WHERE " + key_col + " LIKE ?", (pattern,))
+                cursor.execute("DELETE FROM " + table + " WHERE " + key_col + " LIKE ? ESCAPE '\\'", (pattern,))
                 deleted += n
     conn.commit()
+    # Verify-after: recount matching rows post-commit. Any survivor fails
+    # the step (never-silent-success); an incomplete and a verified-clean
+    # scrub are no longer indistinguishable.
+    for table in tables:
+        if not table.replace("_", "").isalnum():
+            continue
+        key_col = pick_key_col(cursor, table)
+        if key_col is None:
+            continue
+        for pattern in patterns:
+            cursor.execute("SELECT COUNT(*) FROM " + table + " WHERE " + key_col + " LIKE ? ESCAPE '\\'", (pattern,))
+            survivors += cursor.fetchone()[0]
 finally:
     conn.close()
 
-print(json.dumps({"deleted": deleted, "skipped_tables": skipped_tables}))
+print(json.dumps({"deleted": deleted, "survivors": survivors, "skipped_tables": skipped_tables}))
 '@
 
     $allOk = $true
@@ -467,8 +512,17 @@ print(json.dumps({"deleted": deleted, "skipped_tables": skipped_tables}))
                 continue
             }
             $result = ($commandOutput -join "`n") | ConvertFrom-Json
-            Add-AuditEntry -Audit $Audit -File $dbFile.FullName -Key "ai-agent-scrub" -Before "present" -After ("identity-rows-deleted " + $result.deleted) -Ok $true
-            Write-Host "    [OK] ai-agent scrub: $($result.deleted) identity rows from $($dbFile.FullName)" -ForegroundColor Green
+            $skippedNames = @($result.skipped_tables) -join ","
+            $scrubOk = ([int]$result.survivors -eq 0)
+            $scrubAfter = "identity-rows-deleted " + $result.deleted + "; survivors=" + $result.survivors + "; skipped-tables=" + $skippedNames
+            Add-AuditEntry -Audit $Audit -File $dbFile.FullName -Key "ai-agent-scrub" -Before "present" -After $scrubAfter -Ok $scrubOk
+            if ($scrubOk) {
+                Write-Host "    [OK] ai-agent scrub: $($result.deleted) identity rows from $($dbFile.FullName) (survivors=0)" -ForegroundColor Green
+            }
+            else {
+                Write-Host "    [FAILED] ai-agent scrub: $($result.survivors) identity rows survived in $($dbFile.FullName)" -ForegroundColor Red
+                $allOk = $false
+            }
         }
     }
     catch {
@@ -531,13 +585,18 @@ function Clear-TreeFilesIndividually {
 
     $dirs = @(Get-ChildItem -LiteralPath $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue |
         Sort-Object { $_.FullName.Length } -Descending)
+    $dirsFailed = 0
     foreach ($dir in $dirs) {
-        $null = Remove-Item -LiteralPath $dir.FullName -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $dir.FullName -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $dir.FullName) { $dirsFailed++ }
     }
-    $null = Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    $rootRemoved = (-not (Test-Path -LiteralPath $Path))
 
-    $summary = "deleted=$deleted failed=$failed"
-    $ok = ($failed -eq 0)
+    # "Command issued" is not "deleted": verify the dir/root removals too,
+    # otherwise a locked root silently survives with the full old fingerprint.
+    $summary = "deleted=$deleted failed=$failed dirs-failed=$dirsFailed root-removed=$rootRemoved"
+    $ok = (($failed -eq 0) -and ($dirsFailed -eq 0) -and $rootRemoved)
     Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After $summary -Ok $ok
     if ($backupPath) {
         Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath -Action "delete"
@@ -590,7 +649,7 @@ function Remove-OsCryptEncryptedKey {
     }
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After "parse-failed" -Ok $false
@@ -610,7 +669,7 @@ function Remove-OsCryptEncryptedKey {
     [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
         $afterValue = if ($null -eq $verified.os_crypt.PSObject.Properties['encrypted_key']) { "removed" } else { "still-present" }
         $ok = $afterValue -eq "removed"
         Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before $beforeValue -After $afterValue -Ok $ok
@@ -651,7 +710,7 @@ function Set-DeviceIdSalt {
     }
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before "present" -After "parse-failed" -Ok $false
@@ -683,7 +742,7 @@ function Set-DeviceIdSalt {
     [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
         $actualValue = $verified.electron.media.device_id_salt
         $ok = $actualValue -eq $NewSalt
         Add-AuditEntry -Audit $Audit -File $Path -Key $targetKey -Before $beforeValue -After $actualValue -Ok $ok
@@ -737,7 +796,7 @@ function Stop-TraeProcessesAggressive {
 
         $traeRemaining = @(Get-Process -Name "Trae*" -ErrorAction SilentlyContinue)
         $helperRemaining = 0
-        foreach ($helperName in @("kilo", "cline", "roo", "blackbox")) {
+        foreach ($helperName in @("kilo", "cline", "cline-host", "roo", "blackbox")) {
             $helperRemaining += @(Get-Process -Name $helperName -ErrorAction SilentlyContinue).Count
         }
         $count = $traeRemaining.Count + $helperRemaining
@@ -759,7 +818,7 @@ function Stop-TraeProcessesAggressive {
     foreach ($p in @(Get-Process -Name "Trae*" -ErrorAction SilentlyContinue)) {
         Write-Host ("    Trae PID {0}: {1}" -f $p.Id, $p.Path) -ForegroundColor Red
     }
-    foreach ($helperName in @("kilo", "cline", "roo", "blackbox")) {
+    foreach ($helperName in @("kilo", "cline", "cline-host", "roo", "blackbox")) {
         foreach ($p in @(Get-Process -Name $helperName -ErrorAction SilentlyContinue)) {
             Write-Host ("    $helperName PID {0}: {1}" -f $p.Id, $p.Path) -ForegroundColor Red
         }
@@ -786,18 +845,21 @@ function Test-WatchdogRecreation {
     if ($recreated.Count -eq 0) {
         Write-Host "[OK] no identity files were recreated by a watchdog" -ForegroundColor Green
         Add-AuditEntry -Audit $Audit -File "watchdog-probe" -Key "recreation-check" -Before "none" -After "none" -Ok $true
-        return
+        return $true
     }
 
+    $allOk = $true
     foreach ($path in $recreated) {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
         $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
         if ($afterValue -eq "re-delete-failed") {
             Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+            $allOk = $false
         }
         Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
+    return $allOk
 }
 
 function Invoke-OldIdBackupsPurge {
@@ -827,7 +889,13 @@ function Invoke-OldIdBackupsPurge {
     foreach ($dir in $toDelete) {
         Write-Host "    [PURGE] $($dir.Name) (preserved old fingerprint; deleting)" -ForegroundColor DarkGray
         Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        if (Test-Path -LiteralPath $dir.FullName) {
+            Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "delete-failed" -Ok $false
+            Write-Host "    [FAILED] old backup survived the purge: $($dir.FullName)" -ForegroundColor Red
+        }
+        else {
+            Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        }
     }
 }
 
@@ -868,8 +936,27 @@ $audit = @()
 $actions = @()
 $ids = New-IdentitySet
 
+# Emergency finalize (trap): a terminating error mid-run must not lose the
+# audit trail + restore script (never-silent-success). The trap writes the
+# audit/restore/done-marker, then `break` terminates the script non-zero.
+trap {
+    Write-Host "[FAILED] terminating error: $($_.Exception.Message)" -ForegroundColor Red
+    try {
+        if ((Get-Variable -Name backupRoot -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $script:backupRoot)) {
+            $crashAuditPath = Join-Path $script:backupRoot ("audit_{0}.json" -f $script:timestamp)
+            Write-AuditLog -Audit $script:audit -Path $crashAuditPath
+            $null = New-RestoreScript -BackupRoot $script:backupRoot -App $script:app -Actions $script:actions
+            [System.IO.File]::WriteAllText($script:traeDoneMarker, ("ABORTED: {0} Audit: {1}" -f $_.Exception.Message, $crashAuditPath), (New-Object System.Text.UTF8Encoding $false))
+            Write-Host "[FAILED] emergency audit + restore written before exit: $crashAuditPath" -ForegroundColor Red
+        }
+    }
+    catch { }
+    break
+}
+
 if (-not (Test-Path -LiteralPath $root)) {
     Write-Host "Trae installation not found at: $root" -ForegroundColor Red
+    [System.IO.File]::WriteAllText($traeDoneMarker, "ABORTED: Trae installation not found at $root", (New-Object System.Text.UTF8Encoding $false))
     exit 1
 }
 
@@ -881,13 +968,25 @@ Write-Host "Backup: $backupRoot" -ForegroundColor Gray
 Write-Host "Policy: chat history + workspaces preserved; no MAC/hostname/registry steps" -ForegroundColor Gray
 
 if (-not (Stop-TraeProcessesAggressive)) {
+    [System.IO.File]::WriteAllText($traeDoneMarker, "ABORTED: Trae/helper processes could not be terminated", (New-Object System.Text.UTF8Encoding $false))
     exit 1
 }
 
 $passCount = 0
 $failCount = 0
 
-$newSalt = -join ((1..32) | ForEach-Object { "{0:X}" -f (Get-Random -Maximum 16) })
+# Crypto-RNG salt (repo convention: RandomNumberGenerator.GetBytes, like
+# New-IdentitySet / New-RandomDeviceId19 -- Get-Random is not a CSPRNG).
+# 16 bytes -> 32 lowercase hex chars, same shape as before.
+$saltRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $saltBytes = New-Object byte[] 16
+    $saltRng.GetBytes($saltBytes)
+    $newSalt = -join ($saltBytes | ForEach-Object { $_.ToString("x2") })
+}
+finally {
+    if ($saltRng) { $saltRng.Dispose() }
+}
 $telemetryUpdates = @{
     "telemetry.machineId"    = $ids.machineId
     "telemetry.macMachineId" = $ids.macMachineId
@@ -1183,15 +1282,26 @@ else {
 
 # --- [16/16] Old ID_Backups purge + watchdog re-verify ---
 Write-Host "`n[16/16] Purging old ID_Backups + watchdog re-verify..." -ForegroundColor Cyan
+$auditStart = $audit.Count
 Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit)
 $watchdogCoreFiles = @(
     (Join-Path $root "Network\Cookies"),
     (Join-Path $root "DIPS"),
     (Join-Path $root "SharedStorage"),
-    (Join-Path $root "aha")
+    (Join-Path $root "aha"),
+    (Join-Path $root "ModularData\ckg_server\env_codekg.db"),
+    (Join-Path $root "User\globalStorage\state.vscdb.backup")
 )
-Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit ([ref]$audit)
-$passCount++
+$watchdogOk = Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit ([ref]$audit)
+$purgeFailures = @($audit | Select-Object -Skip $auditStart | Where-Object { ($_.key -eq "id-backups-purge") -and (-not $_.ok) }).Count
+if ($watchdogOk -and ($purgeFailures -eq 0)) {
+    Write-Host "[OK] purge verified + no watchdog recreation" -ForegroundColor Green
+    $passCount++
+}
+else {
+    Write-Host "[FAILED] purge or watchdog re-verify had failures" -ForegroundColor Red
+    $failCount++
+}
 
 # --- Audit + Restore ---
 $auditPath = Join-Path $backupRoot ("audit_{0}.json" -f $timestamp)
@@ -1235,7 +1345,7 @@ Write-Host "NOTE: ai-agent chat DB was scrubbed for identity rows only (chat pre
 Write-Host "NOTE: workspace .backup sidecars were preserved per policy (they still embed the old device ID)." -ForegroundColor Yellow
 Write-Host "NOTE: change_device_id.ps1 remains the separate, optional system-level step." -ForegroundColor Yellow
 
-[System.IO.File]::WriteAllText("$env:TEMP\trae_v0.2_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText($traeDoneMarker, ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
 
 if ($failCount -gt 0) {
     Write-Host "Trae reset v0.2 completed with failures. Review $auditPath." -ForegroundColor Red

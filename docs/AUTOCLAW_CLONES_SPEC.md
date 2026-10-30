@@ -6,6 +6,10 @@ targets listed, expanded seed exclusions, marker-keyed seed completion).
 Decisions Q1–Q3 resolved 2026-10-08 (see §10).
 Project: GHOST (`unban-machine-id`) · Target app: `C:\Program Files\AutoClaw\AutoClaw.exe`
 Target app profile: Electron 33.4.11, `APP_VERSION 0.1.13`, `launch.json` version `1.17.8`
+Revised 2026-10-17: §7.3c rewritten from a deferred v2 limitation into a REQUIRED v2 design
+(separate taskbar identity per clone + per-clone icons in the taskbar and in the app
+window) — implemented the same day (patch engine v11) and live-verified 2026-10-18 on
+engine v12 (window-level AUMID readback on a live clone window).
 
 This is a GHOST **spec-first** document: the design was written first, then
 implemented (`src/windows/launch_autoclaw_clone.ps1`,
@@ -28,14 +32,14 @@ That second half is not a nice-to-have. A verbatim profile copy produces N insta
 
 ## 2. Relationship to the existing ZCode work
 
-GHOST already runs four instances of another app: ZCode Primary + Second/Third/Fourth, via
-`src/windows/launch_zcode_second_instance.ps1 -Instance Second|Third|Fourth`. That script is the
+GHOST already runs six instances of another app: ZCode Primary + Second/Third/Fourth/Fifth/Sixth, via
+`src/windows/launch_zcode_second_instance.ps1 -Instance Second|Third|Fourth|Fifth|Sixth`. That script is the
 direct precedent for §6b and the template for §7's design. The two problems have the same shape:
 
 | | ZCode | AutoClaw (this spec) |
 |---|---|---|
-| Instances | Primary + 3 clones | primary + 3 clones + 1 reserved |
-| Isolation lever | env vars (`ZCODE_DATA_BASE_DIR`, `HOME`, …) | env vars (`USERPROFILE`, `HOME`, `AUTOCLAW_GATEWAY_PORT`, …) |
+| Instances | Primary + 4 clones | primary + 4 clones (inst1..inst4) |
+| Isolation lever | env vars (`ZCODE_DATA_BASE_DIR`, `HOME`, …) | `--user-data-dir` + marker files (env dies at the UAC boundary, §5.3) |
 | Why not CLI flags only | app overwrites `--user-data-dir` via `app.setPath` | app honours `--user-data-dir` (§5.2) |
 | Per-clone identity | seed-scrub rotates cloned IDs after copy | same pattern, different files (§8) |
 | Ports | none needed | **hard blocker — 4-slot array (§5.1)** |
@@ -134,7 +138,7 @@ Consequences, all confirmed empirically:
 - On this host `AutoClaw.exe` PID 13336 currently holds 19681.
 
 **Resolution:** patch the installed `app.asar` to widen the array to 8 slots (§7.3). Precedent: this
-repo already ships `tools/patch_zcode_icon_override.ps1` (engine v7), which patches the *installed*
+repo already ships `tools/patch_zcode_icon_override.ps1` (engine v8), which patches the *installed*
 ZCode `app.asar` in place, writes a marker file carrying `patchVersion`, supports `-Restore`, and
 warns that an app update silently reverts it. The AutoClaw port patcher follows that shape exactly.
 
@@ -213,6 +217,12 @@ must be **read back after start** and recorded — never assumed. This is the mo
 verify-after-write rule in the spec: recording the requested port as the actual one is exactly the
 silent-success `AGENTS.md` forbids.
 
+> **CORRECTED 2026-10-16 (live-verified): the env lever does not survive launch.** AutoClaw.exe
+> self-elevates (`requireAdministrator`), and the elevated process gets a FRESH ENVIRONMENT — an
+> `AUTOCLAW_GATEWAY_PORT` set by the launcher never reaches the main process. The working lever is
+> the clone's `settings.json` `gateway.port` (file-based, survives elevation); the launcher still
+> reads the actually-bound port back either way (§6 drift rule). See AGENTS.md "ELEVATION" bullet.
+
 ### 5.6 `OPENCLAW_PROFILE` is not the lever
 
 The gateway accepts `--profile <name>`, isolating under `~/.openclaw-<name>`. Tempting, but it also
@@ -231,8 +241,13 @@ add no new network exposure.
 app.setAppUserModelId("com.zhipuai.autoclaw");
 ```
 
-Unconditional, in every instance. So all four windows share a taskbar button and pin identity out of
-the box. §7.3c records this as a known v1 limitation.
+Unconditional, in every instance — stock behavior merges all four windows into one taskbar
+button. The ports patch's taskbar-identity engine (§7.3c; v11 shipped 2026-10-17, v12
+fixes live-verified 2026-10-18) overrides this at runtime: both
+real call sites are wrapped to append `.<aumidSuffix>` from
+`<userData>\.autoclaw-identity.json`, and every window additionally gets a window-level
+AUMID via `setAppDetails`. A missing identity marker (Primary, bare spawns) resolves to
+null and the base AUMID stands.
 
 ## 6. Port plan
 
@@ -254,15 +269,23 @@ maximum and inst4 has no port at all.
 
 - Layout is **FROZEN**: `AutoClawCloneHome\inst1..inst4`, never renamed. An installed clone profile
   must keep working across an app update.
-- Isolation lever is **env vars**. `--user-data-dir` is a *second* belt-and-braces layer because this
-  app honours it (§5.2), not the primary mechanism.
+- Isolation levers are arguments + marker files, NOT env vars (env dies at the UAC boundary, §5.3
+  CORRECTED): `--user-data-dir` isolates the Electron profile (this app honours it, §5.2), the
+  patched engine's `home-override` marker (`.autoclaw-home`) redirects the whole gateway state
+  tree, and the gateway port rides `settings.json` (§5.5).
 - One `auth.json` credential = ONE instance. Never seed a clone with the primary's live
   `token`/`refreshToken`; never copy `devices/paired.json`.
 - Classify mains by **process markers** (the clone's `--user-data-dir` string appears in the child's
   command line), not by window title — the ZCode lesson applies verbatim: title-only classification
   misclassifies splash-phase windows.
 - Launch instances **sequentially**, never in parallel.
-- Never run instances elevated (AGENTS.md ZCode rule; UIPI strips drop data).
+- Elevation is NOT optional (AGENTS.md ELEVATION bullet, live-verified 2026-10-16): AutoClaw.exe's
+  manifest declares `requireAdministrator`, so every launch self-elevates, and the launcher elevates
+  its own `cmd /c start` via `-Verb RunAs` so the arguments ride a plain CreateProcess. (The ZCode
+  UIPI rule — never launch elevated — applies to ZCode only.)
+- Per-clone taskbar identity is a **v2 requirement** (§7.3c): every clone window groups and pins
+  separately with its color icon in the taskbar and in the app window itself. v1's shortcut-AUMID-only
+  pins were the interim fallback — superseded 2026-10-17 (implemented), live-verified 2026-10-18.
 
 ## 7. Proposed deliverables
 
@@ -353,20 +376,88 @@ cropped from developer renders, red for inst4 derived as a +150° hue-rotate of 
 (`tools\make_clone_icon.ps1`, the generic generator reusable by future app clones). A missing
 branding dir warns and falls back to the `AutoClaw.exe` icon (never a set-but-absent icon path —
 playbook §5 / EC-B02). The Primary `AutoClaw.lnk` keeps the stock exe icon; `-RepairPrimaryAumid`
-restores exactly that, so the two behaviors do not conflict. Running windows still share the base
-AUMID button (§7.3c) — only shortcut/pin icons are custom.
+restores exactly that, so the two behaviors do not conflict. Since patch engine v12 (§7.3c;
+v11 shipped 2026-10-17, v12 live-verified 2026-10-18) the running windows carry the same
+per-clone AUMID + icon identity — shortcut and window share one identity string.
 
-### 7.3c. Taskbar identity — known gap, deferred to v2
+### 7.3c. Taskbar identity v2 — separate taskbar buttons per clone + per-clone icons (IMPLEMENTED 2026-10-17, live-verified 2026-10-18 on engine v12)
 
-All instances declare the same AUMID (§5.8), so v1 ships a merged taskbar button and `status`
-reports it as a known limitation. `tools/watch_zcode_taskbar.ps1` is not directly reusable: it
-classifies by ZCode process markers and class names.
+> **Implementation status: IMPLEMENTED 2026-10-17 (engine v11), live-verified
+> 2026-10-18 (engine v12)** — `tools/patch_autoclaw_ports.ps1` engine v11
+> gained the `aumid-suffix` + `window-identity` families and
+> `launch_autoclaw_clone.ps1` writes the identity markers (step 4c); engine
+> v12 fixed the three findings of the first live relaunch (§12). The v1
+> shortcut-only degradation is superseded: running windows now carry per-clone AUMIDs,
+> icons and titles. An AutoClaw app update reverts the patch — re-apply via AutoClaw
+> menu [11] (the marker auto-upgrades, same rule as the ports patch).
 
-v2 candidates: (a) an `app.asar` patch adding an `AUTOCLAW_AUMID_SUFFIX` env override, mirroring
-`ZCODE_AUMID_SUFFIX`; (b) the window-level `IPropertyStore` stamp from
-`launch_zcode_second_instance.ps1` step 4. Note that (b) currently exists as inline C# inside the
-ZCode script — extracting it into `identity_utils.ps1` so both launchers share one implementation
-would touch a file `AGENTS.md` marks out of scope, so it is deliberately **not** bundled here (§11).
+**Contract (v2, unchanged):** every clone (inst1..inst4) presents its own taskbar
+identity — a separate taskbar button/window group per clone, the clone's color icon
+visible BOTH on that taskbar button (+ its pin) AND in the app window itself
+(title-bar/window icon), and a forced distinct window title "AutoClaw <Color>". The
+§5.8 ground truth (`app.setAppUserModelId("com.zhipuai.autoclaw")`, unconditional in
+every instance) is exactly what the v2 design overrides.
+
+Mechanism — the branding patch is **part of the EXISTING
+`tools/patch_autoclaw_ports.ps1`** (engine v11 at ship; v12 today), not a sibling tool: one marker, one backup, one
+`-Restore` per installed asar (a second patch owner would race the first on the swap).
+Two new families, same conventions (idempotent self-guarding passes, per-file marker
+verify, `node --check` gate, candidate re-extract):
+
+1. **`aumid-suffix` — per-clone process AUMID.** Wraps BOTH real
+   `setAppUserModelId("com.zhipuai.autoclaw")` call sites in the 0.1.13 bundle to append
+   `.<aumidSuffix>` resolved at runtime (the remaining string occurrences — the macOS
+   bundle-id const and a deep-link URL — are untouched). The resolved string equals the
+   shortcut AUMID already written by `install_autoclaw_clone_shortcuts.ps1`, so the
+   shell resolves the running button's icon from the clone shortcut's
+   `tools\autoclaw-<color>-branding\tray_icon.ico` `IconLocation`, and pins keep working
+   because shortcut and window share one identity string.
+2. **`window-identity` — window-level identity, set IN-APP.** Routes every
+   `new X.BrowserWindow(` through a cached subclass that (a) sets the window icon
+   option from `<userData>\.autoclaw-icon.ico` when the file exists (EC-B02: never a
+   set-but-absent path; fallback = the stock exe icon + report), (b) stamps the
+   WINDOW-level AppUserModelID via `win.setAppDetails({appId})` — Electron 33's option
+   key is `appId`; `appUserModelId` silently no-ops (the engine-v12 fix) — re-stamped
+   on `show` and on every title re-assert so the stamp survives HWND recreation, and (c) forces
+   the "AutoClaw <Color>" title by intercepting `page-title-updated`
+   (preventDefault + setTitle), so renderer `document.title` updates cannot fold the
+   title back to the generic "AutoClaw" — the ZCode pin-collision class, prevented at
+   the source.
+
+Config channel — **marker files, NOT env vars** (unchanged finding): the launcher writes
+`<userData>\.autoclaw-identity.json` (`{aumidSuffix, title, iconPath?}`) and copies
+`tray_icon.ico` → `<userData>\.autoclaw-icon.ico` fresh on every launch (step 4c,
+verify-after both). Colors inst1=blue, inst2=yellow, inst3=green, inst4=red — in sync
+with the shortcut installer's `$InstanceDefs`. This is forced by the elevation finding
+in §5.3 (CORRECTED note): AutoClaw.exe self-elevates (`requireAdministrator`) and the
+elevated process gets a fresh environment, so an `AUTOCLAW_AUMID_SUFFIX`-style env
+override (the old v2 candidate (a), mirroring `ZCODE_AUMID_SUFFIX`) would silently
+never fire. `--user-data-dir` is an argument and survives the UAC boundary; the patched
+identity resolver scans it exactly like the `.autoclaw-home` reader.
+
+Why NO external watcher/window-stamp is needed (better than the ZCode shape): the ZCode
+launcher/watcher had to stamp windows EXTERNALLY and LATE — after the window was
+already grouped — which is what forced the `.kick` re-stamp and a resident watcher
+(verified 2026-09-24/26). Here the window-level identity is set inside the app at
+window creation, BEFORE the window is shown/grouped, so the shell builds each group
+correctly from the start and there is no stale group to heal. The forced unique title
+also gives any future external tooling a reliable title-resolve handle (WMI omits
+AutoClaw.exe entirely — live-verified 2026-10-16, recorded in `AGENTS.md`).
+Contingency, should a merge case ever appear in the field: adapt the
+`tools/watch_zcode_taskbar.ps1` pattern (title-resolve + `IPropertyStore` stamp +
+kick); clone windows run elevated, so that watcher must run elevated too (UIPI;
+EC-C08). Extracting the inline C# helper into `identity_utils.ps1` remains out of
+scope (§11).
+
+Verification: patch-level — engine markers re-read from the patched tree AND from the
+repacked candidate asar, `node --check` on every patched file. Runtime (after relaunch
+via the launcher): a clone running alone shows its own color title-bar icon, the
+"AutoClaw <Color>" title, and a separate taskbar button resolved through
+`com.zhipuai.autoclaw.instN` (EC-C07: verify via the property store, never UIA); the
+Primary and any bare spawn (browser native host) keep stock identity — the identity
+resolver finds no marker without `--user-data-dir` + `.autoclaw-identity.json` and
+every injected site no-ops; EC-C01 hijack repair (`-RepairPrimaryAumid`) applies
+unchanged.
 
 ## 8. Identity rotation matrix (AutoClaw)
 
@@ -413,7 +504,7 @@ changes operator effort: three logins for inst1–inst3, once each.
 | A3 | Patching a shipped Electron `app.asar` is outside GHOST's normal per-IDE scope | high | Justified here; called out explicitly — without it the max is 3 clones, not 4 |
 | A4 | One manual login per clone on first run | medium | Expected and documented; one time, then independent |
 | A5 | Gateway silently shifts up to +9 ports | medium | Read the bound port back; log drift; never record requested as actual |
-| A6 | All instances share one taskbar button (§5.8) | medium | Documented v1 limitation (§7.3c); v2 via AUMID suffix patch |
+| A6 | All instances share one taskbar button (§5.8) | low (was medium) | RESOLVED 2026-10-17, live-verified 2026-10-18 (§7.3c): engine v11 (now v12) wraps both AUMID call sites + stamps the window-level AUMID from the marker-file identity; an app update reverts it — re-apply via AutoClaw menu [11] |
 | A7 | 4 Electron instances + 4 gateways is RAM/commit heavy | medium | `AGENTS.md` already records a ZCode commit-limit OOM at 4 instances (`v8-oom-last-os-error 1455`); same exposure. Monitor, and drop instance count if it recurs |
 
 ## 10. Decisions — RESOLVED 2026-10-08
@@ -442,25 +533,75 @@ changes operator effort: three logins for inst1–inst3, once each.
 
 ## 12. Definition of done
 
-- [ ] `tools/patch_autoclaw_ports.ps1` widens the port array to 8, writes its marker, supports
+> Re-baselined 2026-10-18: this v1 checklist had gone stale — the suite shipped
+> and was live-verified (AGENTS.md multi-instance section) without the boxes
+> being ticked. Static gates re-run today: Pester 36/36 incl.
+> `repo-integrity.Tests.ps1`, PSScriptAnalyzer Error-clean on src/tools/tests,
+> PS 5.1 parse-clean. The remaining open items are the multi-instance LIVE
+> verifications beyond inst1 (inst2 seeded, its one manual login pending;
+> inst3/inst4 not yet launched). The v2 taskbar live check completed
+> 2026-10-18 — see the v2 checklist below.
+
+- [x] `tools/patch_autoclaw_ports.ps1` widens the port array to 8, writes its marker, supports
       `-Restore`, and verifies the constant by re-reading the patched `app.asar`
+      (shipped as engine v11 2026-10-17 — ports + taskbar families; now engine v12)
 - [ ] `inst1`–`inst4` each hold their own `home\.openclaw-autoclaw` with own `openclaw.json`/`logs`
+      (inst1 live-verified 2026-10-16; inst2 seeded 2026-10-17, login pending; inst3/4 unlaunched)
 - [ ] each clone's `auth.json.deviceId` and `identity\device.json.deviceId` differ from the primary
-      **and** from each other
-- [ ] no clone's `paired.json` contains the primary's device key or operator token
-- [ ] all four MCP `/health` endpoints answer ok on distinct ports
+      **and** from each other (inst1 verified 2026-10-16; rest pending first launches)
+- [ ] no clone's `paired.json` contains the primary's device key or operator token (inst1 verified)
+- [ ] all four MCP `/health` endpoints answer ok on distinct ports (inst4 needs the ports patch — shipped)
 - [ ] all four gateway `/health` endpoints answer `{"ok":true,"status":"live"}`
+      (inst1 verified on :18799; inst2 waits for its manual login per §7.3 sign-in gate)
 - [ ] each clone's **actual** gateway port recorded, with drift logged when it differs from requested
-- [ ] the primary's `~/.openclaw-autoclaw\openclaw.json` hash unchanged across a full clone cycle
-- [ ] every new `.ps1` declares `#Requires -Version 5.1` within the first 3 lines (repo-integrity gate)
-- [ ] every new `.ps1` passes `[System.Management.Automation.Language.Parser]::ParseFile` with 0 errors
-- [ ] `Invoke-ScriptAnalyzer -Path src,tools,tests -Recurse -Settings ./tests/PSScriptAnalyzerSettings.psd1 -Severity Error` clean
-- [ ] `Invoke-Pester -CI -Output Detailed` green, including `repo-integrity.Tests.ps1` (README
-      documents every `src` script)
-- [ ] no `$Input` variable, no ternary `? :`, no `RandomNumberGenerator.Fill()` — PS 5.1 rules
-- [ ] instances launch and stop via `launch_autoclaw_clone.ps1` and `Launch-AutoClaw-Clone.bat`
-- [ ] `README.md` / `AGENTS.md` updated for the new scripts; `CHANGELOG.md` entry added
-- [ ] changes left uncommitted in the working tree for review (AGENTS.md: do not auto-commit)
+      (instance-record.json mechanism live for inst1)
+- [x] the primary's `~/.openclaw-autoclaw\openclaw.json` hash unchanged across a full clone cycle
+      (inst1, 2026-10-16)
+- [x] every new `.ps1` declares `#Requires -Version 5.1` within the first 3 lines (repo-integrity gate)
+      (Pester 36/36, 2026-10-18)
+- [x] every new `.ps1` passes `[System.Management.Automation.Language.Parser]::ParseFile` with 0 errors
+      (Pester 36/36, 2026-10-18)
+- [x] `Invoke-ScriptAnalyzer -Path src,tools,tests -Recurse -Settings ./tests/PSScriptAnalyzerSettings.psd1 -Severity Error` clean
+      (2026-10-18)
+- [x] `Invoke-Pester -CI -Output Detailed` green, including `repo-integrity.Tests.ps1` (README
+      documents every `src` script) (36/36, 2026-10-18)
+- [x] no `$Input` variable, no ternary `? :`, no `RandomNumberGenerator.Fill()` — PS 5.1 rules
+      (2026-10-18: PS 5.1 parser parse-clean proves no ternary; grep clean for bare `$Input` and `Fill()`)
+- [x] instances launch and stop via `launch_autoclaw_clone.ps1` and `Launch-AutoClaw-Clone.bat`
+      (inst1 launched live 2026-10-16 via the launcher)
+- [x] `README.md` / `AGENTS.md` updated for the new scripts; `CHANGELOG.md` entry added
+      (README/AGENTS updated; the CHANGELOG entry rides the next release batch, per the
+      no-auto-commit rule)
+- [x] changes left uncommitted in the working tree for review (AGENTS.md: do not auto-commit)
+
+v2 (§7.3c) — IMPLEMENTED 2026-10-17 (engine v11), live-verified 2026-10-18 (engine v12):
+
+- [x] the app.asar branding patch ships with marker/`patchVersion`, `-Restore`, and verify-by-reread
+      (families `aumid-suffix` + `window-identity` inside the existing ports patcher)
+- [x] each clone's process/window AUMID resolves to `com.zhipuai.autoclaw.instN`
+      (process-level wrapped call sites + window-level `setAppDetails`; the EC-C07 property-store
+      readback observed live at the first relaunch, 2026-10-18)
+- [x] the in-app window icon is wired with the EC-B02 guard (never a set-but-absent path)
+- [x] taskbar groups verified separate while running, each with its color icon (first live relaunch
+      2026-10-18: window-level AUMID readback `com.zhipuai.autoclaw.inst1` observed live (EC-C07),
+      title "AutoClaw Blue" live, per-clone icon wired — full multi-instance group visual check
+      pending more clones running simultaneously)
+
+Engine v12 fix-up (2026-10-18, found by the first live relaunch):
+
+- [x] `setAppDetails` was called with the WRONG option key (`appUserModelId` — Electron 33 takes
+      `appId`; binary-verified) → the window AUMID was never stamped. Fixed + verified.
+- [x] ctor-time stamping alone does not survive HWND recreation (the ZCode lesson again): the wrap
+      now re-stamps on `show` and on every title re-assert. Readback sticks after relaunch.
+- [x] `-Force` re-patch extracted the LIVE (already-patched) asar and the engine skipped its own
+      wrapped anchors — old injected code survived two re-runs with a fresh marker timestamp. The
+      tool now extracts the PRISTINE backup asar whenever the live file carries the wrap marker.
+- [x] `launch_autoclaw_clone.ps1` looked for the tray icon under `src\tools\...` (`$RepoRoot` was
+      one level short of the repo root) — identity shipped without a window icon. Fixed.
+- [x] TEMP DEBUG: `ac-aumid-debug.txt` (user TEMP) traces the window lifecycle (wrap-installed /
+      ctor / ready-to-show / shown / reassert / closed) — same removal rule as `ac-argv-debug.txt`.
+- [x] `AGENTS.md` updated at implementation time (`CHANGELOG.md` entry goes out with the next
+      release batch, per the no-auto-commit rule)
 
 ## 13. Provenance
 
@@ -484,9 +625,19 @@ Every claim in §5 came from these reads on this host:
   profile created, primary's 19681 untouched, `/health` ok on both 18789 and 19681, and
   `os.homedir()` confirmed to honour `USERPROFILE`/`HOME`
 - GHOST precedent: `src/windows/launch_zcode_second_instance.ps1` (all 459 lines),
-  `AGENTS.md` "Multi-instance conventions (ZCode: Primary + 3 clones)" and "Mandatory conventions",
-  `docs/architecture.md` "Multi-instance isolation (ZCode: Primary + 3 clones)",
+  `AGENTS.md` "Multi-instance conventions (ZCode: Primary + 5 clones)" [renamed since: Fifth/Sixth added] and "Mandatory conventions",
+  `docs/architecture.md` "Multi-instance isolation (ZCode: Primary + 5 clones)" [renamed since: Fifth/Sixth added],
   `tests/repo-integrity.Tests.ps1`, `tests/PSScriptAnalyzerSettings.psd1`
+- 2026-10-17 (§7.3c v2 implementation probes, app 0.1.13 asar at engine v10): grep —
+  `setAppUserModelId("com.zhipuai.autoclaw")` at exactly 2 real call sites (byte offsets
+  242472440 and 242488814; the other 5 `setAppUserModelId` hits are the bundled helper lib
+  definitions + TS declarations, which take the AUMID as a parameter and are untouched);
+  4 minified `new require$$1$5.BrowserWindow(` sites (240945262, 240950100, 241801925,
+  242479224); `APP_VERSION = "0.1.13"`; zero pre-existing `AUTOCLAW_AUMID_SUFFIX` /
+  `AUTOCLAW_ICON_DIR` / `AUTOCLAW_INSTANCE_NAME` hooks. Engine v11 anchors unit-tested
+  against a synthetic tree (macOS const / deep-link URL / helper definition untouched;
+  patched output passes `node --check`; re-run idempotent) and dry-run against the
+  extracted installed asar.
 
 ## 14. Hermes integration
 

@@ -60,6 +60,14 @@ not batched.
 4. A rollback note: the pre-migration script stays in `archive/` (local-only
    fallback convention) until the next suite migrates cleanly.
 
+**PILOT ACCEPTED 2026-10-18.** Criterion 3 satisfied by a live admin run
+(Cursor closed): all 15 steps `[OK]`, zero `[FAILED]`; step order and titles
+1-15 byte-identical to the archived v0.2 manifest; audit
+`audit_20261018_043515.json` + restore script written and parse-checked.
+Criterion 4 already in place (`archive/reset_cursor_windows-v0.2.ps1`).
+Generalization order stands: devin v0.4 already landed; next trae ->
+qoderwork -> minimax -> qoder -> zcode last, one script per session.
+
 ### Phase 4 — unchanged
 
 COM-heavy launchers/watchers stay PowerShell (documented 2026-09-24; the
