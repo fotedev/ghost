@@ -5,7 +5,7 @@ All notable changes to GHOST are documented here. Versions are Git tags
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.3.0] - 2026-10-30
 
 ### Added
 - **T3 bridge first live incident + hardening (2026-10-29 ~23:30)**: T3
