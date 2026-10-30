@@ -50,6 +50,15 @@ $ErrorActionPreference = 'Stop'
 
 $scriptPath = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 $RepoRoot   = Split-Path -Parent $scriptPath
+# A relative $RepoRoot (bare-filename $MyInvocation fallback) once leaked a
+# RELATIVE path into the .lnk IconLocation - Windows cannot resolve a relative
+# icon path, so every shortcut rendered BLANK (live bug found 2026-10-29 on
+# the Desktop/Start Menu/taskbar icons). Resolve against the current location
+# and refuse to continue when the root is not absolute.
+$RepoRoot = (Resolve-Path $RepoRoot).ProviderPath
+if (-not [System.IO.Path]::IsPathRooted($RepoRoot)) {
+    throw "repo root resolved non-absolute: '$RepoRoot' - run the installer against the real repo folder"
+}
 $Launcher   = Join-Path $RepoRoot 'src\windows\launch_cline_clone.ps1'
 $ExePath    = Join-Path $env:LOCALAPPDATA 'Cline\cline-app.exe'
 $Desktop    = [Environment]::GetFolderPath('Desktop')
@@ -196,10 +205,16 @@ foreach ($id in $TargetIds) {
         try { Set-ShortcutAumid -LnkPath $lnk -Aumid $aumid } catch { Write-Warning "AUMID set failed on $lnk : $($_.Exception.Message)" }
 
         $chk = $sh.CreateShortcut($lnk)
+        # Verify-after covers the icon too: "$path,index" -> the path must be
+        # ABSOLUTE and exist (a relative IconLocation renders a blank shortcut
+        # icon - the live bug this suite shipped with, fixed 2026-10-29).
+        $iconBack = ($chk.IconLocation -replace ',\d+$', '')
+        $iconOk   = ($iconBack -ieq $iconPath) -and [System.IO.Path]::IsPathRooted($iconBack) -and (Test-Path -LiteralPath $iconBack)
         $ok  = ($chk.TargetPath -eq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe') -and
-               ($chk.Arguments -match "launch_cline_clone\.ps1.*-Instance $id")
+               ($chk.Arguments -match "launch_cline_clone\.ps1.*-Instance $id") -and
+               $iconOk
         $aumidBack = Get-ShortcutAumid $lnk
-        Write-Host ("{0} : {1}  aumid={2}" -f $(if ($ok) {'OK  '} else {'FAIL'}), $lnk, $(if ($aumidBack) { $aumidBack } else { '<none>' }))
+        Write-Host ("{0} : {1}  aumid={2}  icon={3}" -f $(if ($ok) {'OK  '} else {'FAIL'}), $lnk, $(if ($aumidBack) { $aumidBack } else { '<none>' }), $(if ($iconOk) { $iconBack } else { "BAD: $($chk.IconLocation)" }))
     }
 }
 
