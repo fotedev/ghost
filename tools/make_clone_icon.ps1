@@ -16,7 +16,12 @@
   (-EdgeInsetPercent, drops the soft drop-shadow halo) -> high-quality resample to a
   1024 canvas -> optional -HueRotate (degrees; for derived clone colors such as a 4th
   color) -> anti-aliased rounded-corner alpha mask (-CornerRadiusPercent) ->
-  PNG-compressed ICO entries for every size in -Sizes (16..256).
+  32-bit BMP (BGRA DIB) ICO entries for every size below 256 plus a PNG entry
+  for 256 - the only layout the Windows shell renders reliably. PNG frames are
+  officially valid at 256 ONLY: small PNG frames decode as noise or blank in
+  Explorer and System.Drawing (live bug found 2026-10-29 in EVERY suite this
+  generator produced - blank Desktop/Start Menu/taskbar shortcut icons; the
+  zcode ICOs were always correct because make_ghost_icon.ps1 writes DIBs).
 
   Re-runs without -Source reuse the saved icon_windows.png when its corners are
   transparent (already-masked master) - regeneration never depends on Downloads.
@@ -446,11 +451,51 @@ function Convert-MasterToPngBytes {
     finally { $out.Dispose() }
 }
 
+# BMP (BGRA DIB) frame for every size below 256: BITMAPINFOHEADER + bottom-up
+# BGRA rows + an all-zero AND mask (the alpha channel in the XOR plane governs).
+# This is the frame format make_ghost_icon.ps1 has always written and the only
+# one Explorer renders at small sizes.
+function Convert-MasterToDibBytes {
+    param([System.Drawing.Bitmap]$M, [int]$S)
+    $out = New-Object System.Drawing.Bitmap ($S), ($S)
+    try {
+        $g = [System.Drawing.Graphics]::FromImage($out)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.DrawImage($M, 0, 0, $S, $S)
+        $g.Dispose()
+        $rect = New-Object System.Drawing.Rectangle 0, 0, $S, $S
+        $data = $out.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $stride = $data.Stride
+        $px = New-Object byte[] ($stride * $S)
+        [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $px, 0, $px.Length)
+        $out.UnlockBits($data)
+        $ms = New-Object System.IO.MemoryStream
+        $bw2 = New-Object System.IO.BinaryWriter($ms)
+        $bw2.Write([uint32]40); $bw2.Write([int32]$S); $bw2.Write([int32]($S * 2))
+        $bw2.Write([uint16]1); $bw2.Write([uint16]32)
+        $bw2.Write([uint32]0); $bw2.Write([uint32]($S * $S * 4))
+        $bw2.Write([int32]0); $bw2.Write([int32]0); $bw2.Write([uint32]0); $bw2.Write([uint32]0)
+        for ($y = $S - 1; $y -ge 0; $y--) { $bw2.Write($px, $y * $stride, $S * 4) }
+        $maskStride = [int]([Math]::Ceiling([Math]::Ceiling($S / 8.0) / 4.0) * 4)
+        $bw2.Write((New-Object byte[] ($maskStride * $S)))
+        $bw2.Flush()
+        return ,$ms.ToArray()
+    }
+    finally { $out.Dispose() }
+}
+
 # --------------------------------------------------------------- write the .ico
 Write-Host '[4/5] Writing ICO container...'
 $sorted = @($Sizes | Sort-Object)
-$pngs = @()
-foreach ($s in $sorted) { $pngs += ,(Convert-MasterToPngBytes -M $master -S $s) }
+$frames = @()
+foreach ($s in $sorted) {
+    # 256 is the one PNG-legal size; every smaller frame must be a BMP DIB or
+    # Explorer renders the shortcut icon blank (live bug 2026-10-29).
+    if ($s -ge 256) { $frames += ,(Convert-MasterToPngBytes -M $master -S $s) }
+    else            { $frames += ,(Convert-MasterToDibBytes -M $master -S $s) }
+}
 
 $icoMs = New-Object System.IO.MemoryStream
 $bw = New-Object System.IO.BinaryWriter($icoMs)
@@ -464,11 +509,11 @@ for ($i = 0; $i -lt $sorted.Count; $i++) {
     $bw.Write([byte]$dim); $bw.Write([byte]$dim)
     $bw.Write([byte]0); $bw.Write([byte]0)        # palette, reserved
     $bw.Write([uint16]1); $bw.Write([uint16]32)   # planes, bpp
-    $bw.Write([uint32]$pngs[$i].Length)
+    $bw.Write([uint32]$frames[$i].Length)
     $bw.Write([uint32]$offset)
-    $offset += $pngs[$i].Length
+    $offset += $frames[$i].Length
 }
-foreach ($p in $pngs) { $bw.Write($p) }
+foreach ($p in $frames) { $bw.Write($p) }
 $bw.Flush()
 [System.IO.File]::WriteAllBytes($IcoPath, $icoMs.ToArray())
 $bw.Dispose(); $icoMs.Dispose()
@@ -488,6 +533,10 @@ for ($i = 0; $i -lt $vCount; $i++) {
     $len = [BitConverter]::ToUInt32($check, 6 + 16 * $i + 8)
     $off = [BitConverter]::ToUInt32($check, 6 + 16 * $i + 12)
     if ($off + $len -gt $check.Length) { throw ("FAILED: ico entry {0} overruns file" -f $i) }
+    # frame-format gate: DIB (BITMAPINFOHEADER) below 256, PNG signature at 256
+    $sig = ('{0:X2} {1:X2} {2:X2} {3:X2}' -f $check[$off], $check[$off + 1], $check[$off + 2], $check[$off + 3])
+    $want = $(if ($sorted[$i] -ge 256) { '89 50 4E 47' } else { '28 00 00 00' })
+    if ($sig -ne $want) { throw ("FAILED: ico entry {0} (size {1}) frame sig {2}, expected {3} - shell would render it blank" -f $i, $sorted[$i], $sig, $want) }
     $total += $len
 }
 Write-Host ("      [ok] {0} ({1} KB, {2} images: {3}, {4} KB image data)" -f `
