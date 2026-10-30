@@ -586,7 +586,11 @@ class BackupToTimestampedDirTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(
             os.path.join(self.backup_root, "sub", "state.vscdb")))
 
-    def test_existing_destination_is_clobbered(self):
+    def test_existing_destination_is_uniquified_not_clobbered(self):
+        # 4f308f8 changed the contract: an existing same-label destination is
+        # NEVER overwritten (that destroyed pristine pre-run copies); the new
+        # backup uniquifies with a -2 suffix instead. The old copy must
+        # survive untouched and the report must point at the unique path.
         dst = os.path.join(self.backup_root, "state.vscdb")
         os.makedirs(self.backup_root, exist_ok=True)
         with open(dst, "wb") as f:
@@ -594,8 +598,18 @@ class BackupToTimestampedDirTests(unittest.TestCase):
         r = backup.backup_to_timestamped_dir(
             self.src_file, self.backup_root, "state.vscdb")
         self.assertTrue(r["ok"], r)
+        self.assertEqual(r["destination"], dst + "-2")
         with open(dst, "rb") as f:
+            self.assertEqual(f.read(), b"stale-backup-bytes")
+        with open(dst + "-2", "rb") as f:
             self.assertEqual(f.read(), b"sqlite-bytes" * 64)
+        # A third run keeps walking the suffix chain (-3), never touching -1.
+        r2 = backup.backup_to_timestamped_dir(
+            self.src_file, self.backup_root, "state.vscdb")
+        self.assertTrue(r2["ok"], r2)
+        self.assertEqual(r2["destination"], dst + "-3")
+        with open(dst, "rb") as f:
+            self.assertEqual(f.read(), b"stale-backup-bytes")
 
     def test_transient_lock_retries_then_succeeds(self):
         calls = []
