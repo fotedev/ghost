@@ -97,6 +97,26 @@ if (-not (Test-Path $ExePath)) {
     Write-Error "AutoClaw2.exe not found at: $ExePath"
     exit 1
 }
+
+# --- Git-identity guard ------------------------------------------------------
+# AutoClaw2 v2.1.1 injects GIT_AUTHOR_*/GIT_COMMITTER_*="zwork" into every
+# agent shell (resources/app/dist/main.cjs, safeEnvironment), which overrides
+# the user's global .gitconfig so every agent commit is authored "zwork".
+# Re-apply the de-injection patch after every AutoClaw2 update. Non-fatal by
+# design: a guard failure or an unexpected bundle layout must never block a
+# launch.
+$gitIdentityGuard = Join-Path $PSScriptRoot '..\..\tools\ensure_autoclaw2_git_identity.ps1'
+if (Test-Path -LiteralPath $gitIdentityGuard) {
+    try {
+        & $gitIdentityGuard -InstallRoot (Split-Path $ExePath)
+        if ($LASTEXITCODE -ne 0) { Write-Warning "git-identity guard exit $LASTEXITCODE (launch continues)" }
+    } catch {
+        Write-Warning "git-identity guard failed: $($_.Exception.Message)"
+    }
+} else {
+    Write-Warning "git-identity guard script not found: $gitIdentityGuard"
+}
+
 if (-not (Test-Path $ProfileDir)) {
     New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
     Write-Host "created profile dir: $ProfileDir"
