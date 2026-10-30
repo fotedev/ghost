@@ -69,6 +69,21 @@ function Invoke-Scenario([string]$Name, [string[]]$Lines) {
 
 $failures = @()
 
+# S0) static guard: every submenu renders its ids strictly ascending 1..N with
+#     a trailing [0] Back row (renumber discipline 2026-10-29 - future rows are
+#     added in display order, never a higher id out of sequence).
+$menuBlocks = [regex]::Matches($src, '(?ms)^:(RESETS|ZCODE|MAINT|AUTOCLAW|CLINE|OPENCODE)\r?$.*?(?=^:(?:RESETS|ZCODE|MAINT|AUTOCLAW|CLINE|OPENCODE|UnknownTask)\r?$)')
+if ($menuBlocks.Count -ne 6) { $failures += "S0: expected 6 submenu blocks in GHOST.bat, found $($menuBlocks.Count)" }
+foreach ($block in $menuBlocks) {
+    $name = $block.Groups[1].Value
+    $ids = @([regex]::Matches($block.Value, 'call :Opt (\d+)') | ForEach-Object { [int]$_.Groups[1].Value })
+    $rows = @($ids | Where-Object { $_ -ne 0 })
+    $bad = $false
+    for ($i = 0; $i -lt $rows.Count; $i++) { if ($rows[$i] -ne ($i + 1)) { $bad = $true } }
+    if ($ids.Count -eq 0 -or $ids[-1] -ne 0) { $bad = $true }
+    if ($bad) { $failures += "S0: $name submenu ids not ascending 1..N with trailing 0 - got $($ids -join ',')" }
+}
+
 # A) plain exit at main menu -> Done, zero Unknown task, zero literal junk
 $out = Invoke-Scenario 'A_plain_exit' @('0')
 if ($out -match 'Unknown task')            { $failures += 'A: Unknown task on plain exit' }
@@ -99,20 +114,20 @@ if ($hits -ne 1)                           { $failures += "E: expected 1 Unknown
 if ($out -match '%PENDING_CHAIN%')         { $failures += 'E: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'E: ZCode submenu not reached via sub-path' }
 
-# F) new ZCode submenu entry renders: [17] Freeze diagnostic is listed
+# F) ZCode submenu entry renders: [26] Freeze diagnostic is listed
 $out = Invoke-Scenario 'F_new_entry_render' @('2', '0', '0')
-if ($out -notmatch '\[17\].*Freeze diagnostic') { $failures += 'F: ZCode submenu [17] Freeze diagnostic not rendered' }
+if ($out -notmatch '\[26\].*Freeze diagnostic') { $failures += 'F: ZCode submenu [26] Freeze diagnostic not rendered' }
 
 # G) invalid ZCode submenu id -> exactly one legit Unknown task "42"
 $out = Invoke-Scenario 'G_invalid_zcode' @('2', '42', '0', '0')
 $hits = ([regex]::Matches($out, 'Unknown task "42"')).Count
 if ($hits -ne 1)                           { $failures += "G: expected 1 Unknown task from ZCode submenu, got $hits" }
 
-# H) open AutoClaw submenu (PENDING_CHAIN undefined), back, exit -> clean render
+# H) open AutoClaw2 submenu (PENDING_CHAIN undefined), back, exit -> clean render
 $out = Invoke-Scenario 'H_autoclaw_render' @('4', '0', '0')
-if ($out -match 'Unknown task')               { $failures += 'H: Unknown task on AutoClaw submenu render' }
-if ($out -match '%PENDING_CHAIN%')            { $failures += 'H: literal %PENDING_CHAIN% leaked' }
-if ($out -notmatch 'AutoClaw Multi-Instance') { $failures += 'H: AutoClaw submenu not shown' }
+if ($out -match 'Unknown task')                  { $failures += 'H: Unknown task on AutoClaw2 submenu render' }
+if ($out -match '%PENDING_CHAIN%')               { $failures += 'H: literal %PENDING_CHAIN% leaked' }
+if ($out -notmatch 'AutoClaw2 Multi-Instance')   { $failures += 'H: AutoClaw2 submenu not shown' }
 
 # I) invalid AutoClaw chain id "4 42" -> exactly one legit Unknown task "42"
 $out = Invoke-Scenario 'I_invalid_autoclaw' @('4 42', '0', '0')
@@ -135,14 +150,14 @@ $out = Invoke-Scenario 'L_hostile_zcode' @('2', '1 & calc', '0', '0')
 if ($out -match 'calc')               { $failures += 'L: injection attempt leaked through ZCode prompt' }
 if ($out -notmatch 'Invalid input')   { $failures += 'L: rejection hint missing' }
 
-# M) ZCode reset block renders the three high-risk entries incl. the appended
-#    Fifth reset, the all-six reset and the Primary reset copy; [6] pluralized
+# M) ZCode reset block renders the reset entries incl. the Fifth reset, the
+#    all-six reset, the Primary reset and the Sixth reset (2026-10-29 numbering)
 $out = Invoke-Scenario 'M_zcode_reset_render' @('2', '0', '0')
-if ($out -notmatch '\[19\].*Reset Fifth instance - Red')   { $failures += 'M: ZCode [19] Fifth reset not rendered' }
-if ($out -notmatch '\[10\].*Reset ALL SIX instances')      { $failures += 'M: ZCode [10] all-six reset not rendered' }
-if ($out -notmatch '\[21\].*Reset ZCode Primary instance') { $failures += 'M: ZCode [21] Primary reset not rendered' }
-if ($out -notmatch '\[23\].*Reset Sixth instance - Orange') { $failures += 'M: ZCode [23] Sixth reset not rendered' }
-if ($out -notmatch '\[ 6\].*survivors kept running')       { $failures += 'M: ZCode [6] label not pluralized' }
+if ($out -notmatch '\[12\].*Reset Fifth instance - Red')   { $failures += 'M: ZCode [12] Fifth reset not rendered' }
+if ($out -notmatch '\[16\].*Reset ALL SIX instances')      { $failures += 'M: ZCode [16] all-six reset not rendered' }
+if ($out -notmatch '\[14\].*Reset ZCode Primary instance') { $failures += 'M: ZCode [14] Primary reset not rendered' }
+if ($out -notmatch '\[13\].*Reset Sixth instance - Orange') { $failures += 'M: ZCode [13] Sixth reset not rendered' }
+if ($out -notmatch '\[ 9\].*survivors kept running')       { $failures += 'M: ZCode [9] reset tail not rendered' }
 
 # N) Cline submenu (main [5]): renders clean, entries listed, no chain leak;
 #    invalid Cline chain id -> exactly one legit Unknown task
@@ -151,7 +166,7 @@ if ($out -match 'Unknown task')               { $failures += 'N: Unknown task on
 if ($out -match '%PENDING_CHAIN%')            { $failures += 'N: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'Cline Multi-Instance')    { $failures += 'N: Cline submenu not shown' }
 if ($out -notmatch '\[ 1\].*Launch c1')       { $failures += 'N: Cline [1] Launch c1 not rendered' }
-if ($out -notmatch '\[ 5\].*Launch ALL clones') { $failures += 'N: Cline [5] Launch ALL not rendered' }
+if ($out -notmatch '\[ 6\].*Launch ALL clones') { $failures += 'N: Cline [6] Launch ALL not rendered' }
 if ($out -notmatch '\[ 8\].*Clone status')    { $failures += 'N: Cline [8] Clone status not rendered' }
 $out = Invoke-Scenario 'N_cline_invalid' @('5 77', '0', '0')
 $hits = ([regex]::Matches($out, 'Unknown task "77"')).Count
@@ -180,18 +195,23 @@ if ($out -match 'calc')                          { $failures += 'Q: injection at
 if ($out -notmatch 'Invalid input')              { $failures += 'Q: rejection hint missing' }
 
 # R) MCP sync block renders in the ZCode submenu: the live sync, the watcher
-#    and the one-shot live-apply entries (2026-10-27)
+#    and the one-shot live-apply entries (2026-10-27; 2026-10-29 numbering)
 $out = Invoke-Scenario 'R_mcp_sync_render' @('2', '0', '0')
-if ($out -notmatch '\[24\].*Sync MCPs to all clones')      { $failures += 'R: ZCode [24] Sync MCPs not rendered' }
-if ($out -notmatch '\[25\].*MCP sync watcher')             { $failures += 'R: ZCode [25] MCP sync watcher not rendered' }
-if ($out -notmatch '\[26\].*Sync MCPs \+ apply live now')  { $failures += 'R: ZCode [26] Sync + apply live not rendered' }
+if ($out -notmatch '\[18\].*Sync MCPs to all clones')      { $failures += 'R: ZCode [18] Sync MCPs not rendered' }
+if ($out -notmatch '\[19\].*MCP sync watcher')             { $failures += 'R: ZCode [19] MCP sync watcher not rendered' }
+if ($out -notmatch '\[20\].*Sync MCPs \+ apply live now')  { $failures += 'R: ZCode [20] Sync + apply live not rendered' }
+
+# S) light headless worker entry renders in the ZCode submenu (2026-10-28)
+$out = Invoke-Scenario 'S_light_worker_render' @('2', '0', '0')
+if ($out -notmatch '\[ 7\].*Launch light headless worker') { $failures += 'S: ZCode [7] light worker not rendered' }
+if ($out -notmatch '\[28\].*Login clone account')           { $failures += 'S: ZCode [28] login helper not rendered' }
 
 if ($failures.Count -gt 0) {
     Write-Output 'HARNESS FAIL:'
     $failures | ForEach-Object { Write-Output "  - $_" }
     exit 1
 }
-Write-Output 'HARNESS PASS: all 18 scenarios clean'
+Write-Output 'HARNESS PASS: all 19 scenarios clean'
 # Explicit exit: pwsh -File propagates the last native \$LASTEXITCODE, and the
 # scenarios' cmd exit code inherits GHOST.bat's `timeout` calls, which fail on
 # CI consoles (no interactive stdin) AFTER the PASS line was already printed.

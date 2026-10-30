@@ -21,6 +21,14 @@ untouched). Analysis source: five parallel read-only reviews
 `.zwork/runs/e711490b/`). Line numbers are from the current checkout and are evidence anchors,
 not contracts.
 
+> **RENUMBERED 2026-10-29** — GHOST.bat renumbered every submenu to display
+> order (gids unchanged). Menu numbers below are the PRE-renumber ZCode rows;
+> translate on read: [6] Second→[9] · [7] Both→[15] · [8] Third→[10] ·
+> [9] Fourth→[11] · [10] ALL SIX→[16] · [19] Fifth→[12] · [21] Primary→[14] ·
+> [23] Sixth→[13] · icon patch [12]→[27]. The W2-2 relaunch list
+> "[1]/[3]/[4]/[18]/[41]" mixes old locals and a gid; the current equivalents
+> are the five launch rows ZCode [1]-[5].
+
 ---
 
 ## 1. Verified baseline (works today — do not regress)

@@ -20,7 +20,9 @@ theory.
   AUMID / accent hooks, port-array widening) is silently reverted; clones
   lose their look, inst4 loses its MCP port. **Handling:** the patch marker
   carries `patchVersion`; the launcher/shortcuts warn when it is missing;
-  re-apply via the patch menu entry (ZCode [12] / AutoClaw [11]) after
+  re-apply via the patch menu entry (ZCode [27]; the AutoClaw v1.20 entry was
+  retired 2026-10-29 with the v1.20 app - run `tools\patch_autoclaw_ports.ps1`
+  directly) after
   EVERY app update. **A + R.** ZCode marker design; AutoClaw risk A2.
 - **EC-A02 · P0 — An in-clone built-in updater runs `quitAndInstall`** → it
   wipes the SHARED patched asar mid-session for all instances. **Handling:**
@@ -185,7 +187,7 @@ theory.
   `v8-oom-last-os-error 1455` = ERROR_COMMITMENT_LIMIT); the window
   "freezes" (drags dead) and the splash-then-close relaunch loop is the
   post-crash quit path — NOT a hang or a lock. **Handling:** diagnose via
-  the freeze diagnostic (ZCode [17]); mitigation = larger pagefile / fewer
+  the freeze diagnostic (ZCode [26]); mitigation = larger pagefile / fewer
   concurrent instances; relaunching after the quit is safe. **R + D.**
   Verified 2026-09-25 (Primary+Second died the same second; JS heap only
   ~478MB → OS commit starvation, not an app leak).
@@ -307,7 +309,7 @@ theory.
   docs) → **Handling:** scripts live unversioned under `src/`; README must
   not match `reset_[a-z_]+_windows-v\d`. **A.**
 - **EC-L04 · P2 — Menu-reference drift after renumbering** → **Handling:**
-  cite menu positions as `<submenu> [n]` everywhere (e.g. `ZCode [12]`);
+  cite menu positions as `<submenu> [n]` everywhere (e.g. `ZCode [27]`);
   a renumber sweep stays mechanical only if the style is followed. **A.**
 - **EC-L05 · P1 — Secrets committed** (Telegram creds, tokens) →
   **Handling:** gitignored `.envlocal` at the repo root; watchdogs read
