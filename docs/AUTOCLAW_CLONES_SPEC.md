@@ -389,7 +389,9 @@ per-clone AUMID + icon identity — shortcut and window share one identity strin
 > v12 fixed the three findings of the first live relaunch (§12). The v1
 > shortcut-only degradation is superseded: running windows now carry per-clone AUMIDs,
 > icons and titles. An AutoClaw app update reverts the patch — re-apply via AutoClaw
-> menu [11] (the marker auto-upgrades, same rule as the ports patch).
+> menu [11] (row retired 2026-10-29 with the v1.20 app — run
+> tools\patch_autoclaw_ports.ps1 directly; the marker auto-upgrades, same rule
+> as the ports patch).
 
 **Contract (v2, unchanged):** every clone (inst1..inst4) presents its own taskbar
 identity — a separate taskbar button/window group per clone, the clone's color icon
@@ -504,7 +506,7 @@ changes operator effort: three logins for inst1–inst3, once each.
 | A3 | Patching a shipped Electron `app.asar` is outside GHOST's normal per-IDE scope | high | Justified here; called out explicitly — without it the max is 3 clones, not 4 |
 | A4 | One manual login per clone on first run | medium | Expected and documented; one time, then independent |
 | A5 | Gateway silently shifts up to +9 ports | medium | Read the bound port back; log drift; never record requested as actual |
-| A6 | All instances share one taskbar button (§5.8) | low (was medium) | RESOLVED 2026-10-17, live-verified 2026-10-18 (§7.3c): engine v11 (now v12) wraps both AUMID call sites + stamps the window-level AUMID from the marker-file identity; an app update reverts it — re-apply via AutoClaw menu [11] |
+| A6 | All instances share one taskbar button (§5.8) | low (was medium) | RESOLVED 2026-10-17, live-verified 2026-10-18 (§7.3c): engine v11 (now v12) wraps both AUMID call sites + stamps the window-level AUMID from the marker-file identity; an app update reverts it — re-apply via AutoClaw menu [11] (row retired 2026-10-29; run the patch script directly) |
 | A7 | 4 Electron instances + 4 gateways is RAM/commit heavy | medium | `AGENTS.md` already records a ZCode commit-limit OOM at 4 instances (`v8-oom-last-os-error 1455`); same exposure. Monitor, and drop instance count if it recurs |
 
 ## 10. Decisions — RESOLVED 2026-10-08

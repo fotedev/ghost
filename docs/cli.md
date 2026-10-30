@@ -3,14 +3,14 @@
 Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 **`./ghost.sh`** (Linux). This page is the direct-command cheat sheet for
 scripts and CI. `GHOST.bat` groups its tasks into six submenus with
-continuous local numbering (IDE resets [1]-[9] / ZCode Multi-Instance &
-Clones [1]-[26] / System & GHOST Maintenance [1]-[3] / AutoClaw
-Multi-Instance & Clones [1]-[13] / Cline Multi-Instance & Clones
+continuous local numbering (IDE resets [1]-[8] / ZCode Multi-Instance &
+Clones [1]-[27] / System & GHOST Maintenance [1]-[3] / AutoClaw2
+Multi-Instance & Clones [1]-[9] / Cline Multi-Instance & Clones
 [1]-[9] / OpenCode Multi-Instance & Clones [1]-[10]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
 from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
 [1] [3] [4]) or a bare global id — this page cites menu positions as
-`<submenu> [n]`, e.g. `ZCode [12]` for the icon patch. `[U]` on the main menu
+`<submenu> [n]`, e.g. `ZCode [27]` for the icon patch. `[U]` on the main menu
 (and Maintenance [2]) runs the self-updater.
 
 ## Windows resets (PowerShell as Administrator, from the repo root)
@@ -40,11 +40,13 @@ powershell -ExecutionPolicy Bypass -File "src\windows\spoof_wmi_serials.ps1" -Dr
 ```
 
 Menu equivalents for the reset targets: `reset_zcode.ps1 -Target Primary` =
-IDE Resets [7] **and** ZCode [21] (the same task from both menus);
+IDE Resets [7] **and** ZCode [14] (the same task from both menus);
 `-Target Secondary` / `Both` / `Third` / `Fourth` / `Fifth` / `Sixth` / `All` = ZCode
-[6] / [7] / [8] / [9] / [19] / [23] / [10]. `reset_autoclaw.ps1 -Target Primary` =
-IDE Resets [9] **and** AutoClaw [13]; `-Target inst1..inst4` = AutoClaw
-[6]–[9]; `-Target All` = AutoClaw [10].
+[9] / [15] / [10] / [11] / [12] / [13] / [16]. `reset_autoclaw.ps1` (the v1.20
+app) has no menu entries since 2026-10-29 - the v1.20 app was uninstalled from
+the dev host and the GHOST.bat AutoClaw2 submenu replaced its items; run the
+script directly on hosts that still run v1.20. AutoClaw2 has no reset script
+by design: stop the instance and delete its `AutoClaw2ClonesHome\<cN>` folder.
 
 ## ZCode captcha watchdog (unattended; no admin needed)
 
@@ -80,9 +82,25 @@ resident watchers an install needs are alive and set to autostart (launcher
 step 2e, mutex-guarded, best-effort): the MCP sync watcher and the taskbar
 identity watcher — you never have to start them from GHOST manually.
 All instances share one install, so one update covers all — but re-run the
-icon patch (`tools\patch_zcode_icon_override.ps1`, ZCode [12]) after every app
+icon patch (`tools\patch_zcode_icon_override.ps1`, ZCode [27]) after every app
 update; it is what makes the `ZCODE_ICON_DIR` / `ZCODE_AUMID_SUFFIX` /
 `ZCODE_ACCENT_HEX` / `ZCODE_INSTANCE_NAME` branding overrides work.
+
+### ZCode light headless worker (no desktop window; ZCode [7])
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_zcode_cli_light.ps1" -Instance Second            # interactive REPL
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_zcode_cli_light.ps1" -Instance Fifth -Prompt "task" # one-shot
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_zcode_cli_light.ps1" -Instance Third -Server       # stdio worker
+```
+
+Runs a clone's account headless (`resources\glm\zcode.cjs -p` / `app-server`
+under the system node): about a quarter of the RAM of a full desktop instance,
+sessions isolated to that clone's home and shareable with its desktop app. The
+interactive TUI cannot run standalone (`@zcode/tui` lives inside app.asar) and
+a home without a standalone `zcode login zai` runs tasks on the free
+opencode-zen model, not the Start Plan — the launcher prints the one-time
+login recipe when it detects that. Full findings: [ZCODE_LIGHT_MODE.md](ZCODE_LIGHT_MODE.md).
 
 ## ZCode clone shortcuts (Desktop + Start menu; per-user, no admin needed)
 
@@ -106,8 +124,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\refresh_zcode_second_
 
 Shows chats created in another instance inside a running sidebar by recycling
 the target's app-server (auto-respawn reseeds its index; verify-after). ZCode
-[13] = Second only, ZCode [15] = all instances. A hot-activity guard waits out
-in-flight turns (`-Force` bypasses). Watcher mode (`-Watch`, ZCode [14]) tails
+[21] = Second only, ZCode [22] = all instances. A hot-activity guard waits out
+in-flight turns (`-Force` bypasses). Watcher mode (`-Watch`, ZCode [23]) tails
 the CLI JSONL logs for terminal failures (captcha stall / quota / rate-limit)
 and refreshes every RUNNING instance on a 300 s cooldown.
 
@@ -128,13 +146,13 @@ mirrors the plugin cache + marketplaces. A running instance is skipped with
 a warning (skills/plugin mirroring must not race a live app — close it
 first, or add `-McpOnly`); an unseeded home is skipped (the launcher seeds
 it on first launch). Every write is backed up and verified by re-read; audit
-trail at `<CloneHome>\.zcode\asset-sync-audit.jsonl`. ZCode [20]. The
+trail at `<CloneHome>\.zcode\asset-sync-audit.jsonl`. ZCode [17]. The
 launcher also runs it automatically before every clone launch (step 2d).
 
 With `-McpOnly` only the MCP definitions sync, and that is verified safe
 against RUNNING instances (2026-10-27: the app holds no handle on
 config.json, never rewrites it on exit, and reads `mcp.servers` at every
-app-server spawn — one per new session): ZCode [24].
+app-server spawn — one per new session): ZCode [18].
 
 ## ZCode MCP sync watcher (per-user, no admin needed)
 
@@ -151,12 +169,12 @@ seconds, running instances included. A synced definition is picked up by
 each instance's next chat automatically (every new session re-reads the
 config at app-server spawn — no restart). The first pass on start converges
 existing drift; a deep re-verify runs every ~5 min. `-ApplyLive` (ZCode
-[26]) additionally recycles running instances' app-servers after a real
+[20]) additionally recycles running instances' app-servers after a real
 change — idle-guarded, never mid-turn — so the currently open session gets
 the new MCP immediately. `-InstallAutostart` writes a hidden Startup-folder
 shortcut (like the taskbar watcher); single-instance via a named mutex plus
 a startup process scan. Log: `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`.
-ZCode [25] (resident) / [26] (one-shot + live apply). You normally never
+ZCode [19] (resident) / [20] (one-shot + live apply). You normally never
 start it yourself: every clone launch (launcher step 2e) starts it hidden
 and installs its autostart shortcut if missing — install-and-forget.
 
@@ -169,7 +187,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\diagnose_zcode_freeze
 Explains the "window drags but content is dead" freeze from the app's own
 telemetry: scans every instance's `<home>\.zcode\v2\logs` for renderer /
 child-process deaths and freeze events, reads the crash archive's dump
-annotations, and prints live RAM / commit / pagefile pressure. ZCode [17].
+annotations, and prints live RAM / commit / pagefile pressure. ZCode [26].
 Read-only. Verified root cause (2026-09-25): renderer OOM from OS
 commit-limit exhaustion with 4 instances; the splash-then-close relaunch is
 the app's post-crash quit path, not corruption — just launch again. See
@@ -257,8 +275,8 @@ Each clone gets its own state tree, web login profile and hub/sidecar
 ports; the launcher neutralizes the app's single-instance hidden window
 and aborts a second copy on the same data. First run per clone: ONE
 manual sign-in. Menu equivalents: launch c1/c2/c3/c4/c5 = Cline
-[1]/[3]/[4]/[6]/[7]; all five = Cline [5]; status = Cline [8];
-shortcuts = Cline [2] (`-Remove` = [9]).
+[1]/[2]/[3]/[4]/[5]; all five = Cline [6]; status = Cline [8];
+shortcuts = Cline [7] (`-Remove` = [9]).
 
 ## OpenCode multi-instance (5 clones + Primary; per-user, no admin needed)
 
@@ -302,8 +320,9 @@ single-instance lock (N copies coexist natively), and
 `AUTOCLAW_PROFILE_ROOT` relocates the legacy v1.x migration source so no
 clone ever reads a live Primary's state. The app generates a fresh
 `device\device-id.json` per profile (no identity seeding, no credential
-copying). NOTE: AutoClaw2 is the one suite NOT wired into `GHOST.bat` —
-run these commands directly. First run per clone: ONE manual sign-in.
+copying). First run per clone: ONE manual sign-in. Menu equivalents: launch
+c1/c2/c3/c4/c5 = AutoClaw2 [1]-[5]; all five = [6]; shortcuts = [7]
+(`-Remove` = [9]); status = [8].
 
 ## Linux
 

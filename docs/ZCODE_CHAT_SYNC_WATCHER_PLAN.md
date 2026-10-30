@@ -2,8 +2,8 @@
 
 Date: 2026-09-23. Status: **mechanism proven end-to-end; one-shot refresh
 AND error-triggered watcher IMPLEMENTED** as
-`tools/refresh_zcode_second_chats.ps1` (one-shot = ZCode submenu [13], watcher =
-`-Watch -Target All` = ZCode submenu [14]). The signature-poll watcher draft in §4 is
+`tools/refresh_zcode_second_chats.ps1` (one-shot = ZCode submenu [21], watcher =
+`-Watch -Target All` = ZCode submenu [23]). The signature-poll watcher draft in §4 is
 kept for reference; the shipped watcher triggers on failure events instead
 (see §4 note).
 
@@ -69,7 +69,7 @@ kill Secondary's workspace app-server process(es)
 ## 4. Watcher design — `tools/watch_zcode_chat_sync.ps1` (new)
 
 > **Shipped differently (2026-09-23):** the continuous watcher is the
-> `-Watch` mode of `tools/refresh_zcode_second_chats.ps1` (ZCode submenu [14],
+> `-Watch` mode of `tools/refresh_zcode_second_chats.ps1` (ZCode submenu [23],
 > `-Target All`; no separate file). It does NOT poll the store signature
 > below — per request it tails the agent runtime JSONL logs
 > (`~/.zcode/cli/log/zcode-*.jsonl`, offset-based incremental reader) and
@@ -136,7 +136,7 @@ Monotonic signature; any new/edited chat in EITHER instance bumps it.
 
 ### Launcher integration (IMPLEMENTED)
 
-- ZCode submenu `[13]` runs the one-shot variant `tools/refresh_zcode_second_chats.ps1`
+- ZCode submenu `[21]` runs the one-shot variant `tools/refresh_zcode_second_chats.ps1`
   (detect missing chats → recycle Secondary app-server(s) → verify-after).
   The hot-activity guard does **wait-and-retry** (up to ~90 s, two
   consecutive idle passes required) instead of hard-failing when a turn is
@@ -151,7 +151,7 @@ Monotonic signature; any new/edited chat in EITHER instance bumps it.
   (D) CPU delta > 0.25 s over a 3 s sample on the exact app-server PID(s)
   about to be killed (SSE token streaming burns CPU with zero db writes).
   The continuous watcher is ALSO shipped: same script with `-Watch -Target
-  All` (ZCode submenu `[14]`, launched detached via `start` per the .bat
+  All` (ZCode submenu `[23]`, launched detached via `start` per the .bat
   console-hijack rule) — error-triggered, see the note at the top of §4.
 - Not auto-started with the Secondary launcher: the app-server recycle is a
   deliberate, slightly disruptive action; user opts in per run.
@@ -167,7 +167,7 @@ Monotonic signature; any new/edited chat in EITHER instance bumps it.
 - If the branding patch is missing/reverted (app update), the Secondary window
   title falls back to `ZCode` and the watcher **cannot** distinguish instances →
   must abort with a loud error rather than guess (never recycle the wrong
-  instance). Re-run menu `[13]` patch to restore.
+  instance). Re-run menu `[27]` patch to restore.
 - Windows-only, PowerShell 5.1-compatible (no `?.`/ternary/`$Input`,
   `Get-Command python` for sqlite access exactly like `identity_utils.ps1`).
 

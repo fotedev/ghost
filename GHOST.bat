@@ -16,7 +16,7 @@ echo.
 call :Opt 1 "IDE Resets" "- device ID + 8 IDE suites"
 if defined ESC (echo %ESC%[92m[ 2] %ESC%[97mZCode Multi-Instance ^& Clones %ESC%[90m- launchers, resets, sync%ESC%[0m) else echo [ 2] ZCode Multi-Instance ^& Clones - launchers, resets, sync
 if defined ESC (echo %ESC%[92m[ 3] %ESC%[97mSystem ^& GHOST Maintenance %ESC%[90m- shortcuts, watchers, updates%ESC%[0m) else echo [ 3] System ^& GHOST Maintenance - shortcuts, watchers, updates
-if defined ESC (echo %ESC%[92m[ 4] %ESC%[97mAutoClaw Multi-Instance ^& Clones %ESC%[90m- launchers, resets, port patch%ESC%[0m) else echo [ 4] AutoClaw Multi-Instance ^& Clones - launchers, resets, port patch
+if defined ESC (echo %ESC%[92m[ 4] %ESC%[97mAutoClaw2 Multi-Instance ^& Clones %ESC%[90m- launchers, shortcuts%ESC%[0m) else echo [ 4] AutoClaw2 Multi-Instance ^& Clones - launchers, shortcuts
 if defined ESC (echo %ESC%[92m[ 5] %ESC%[97mCline Multi-Instance ^& Clones %ESC%[90m- launchers, clone status%ESC%[0m) else echo [ 5] Cline Multi-Instance ^& Clones - launchers, clone status
 if defined ESC (echo %ESC%[92m[ 6] %ESC%[97mOpenCode Multi-Instance ^& Clones %ESC%[90m- launchers, clone-home patch%ESC%[0m) else echo [ 6] OpenCode Multi-Instance ^& Clones - launchers, clone-home patch
 echo.
@@ -88,7 +88,6 @@ call :Opt 5 "Reset Qoder" ""
 call :Opt 6 "Reset QoderWork" ""
 call :Opt 7 "Reset ZCode Primary instance" ""
 call :Opt 8 "Reset MiniMax/OpenCode" ""
-call :Opt 9 "Reset AutoClaw" ""
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -114,35 +113,41 @@ if defined ESC (echo %ESC%[96mGHOST / ZCode Multi-Instance ^& Clones%ESC%[0m) el
 echo.
 call :Div "Launch Clones"
 call :Opt 1 "Launch Second instance" "- Blue branding (independent window)"
-call :Opt 2 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
-call :Opt 3 "Launch Third instance" "- Yellow branding (independent window)"
-call :Opt 4 "Launch Fourth instance" "- Green branding (independent window)"
-call :Opt 5 "Launch ALL clones" "- Second + Third + Fourth + Fifth + Sixth"
+call :Opt 2 "Launch Third instance" "- Yellow branding (independent window)"
+call :Opt 3 "Launch Fourth instance" "- Green branding (independent window)"
+call :Opt 4 "Launch Fifth instance" "- Red branding (independent window)"
+call :Opt 5 "Launch Sixth instance" "- Orange branding (independent window)"
+call :Opt 6 "Launch ALL clones" "- Second + Third + Fourth + Fifth + Sixth"
+call :Opt 7 "Launch light headless worker" "- run a clone account with no desktop window - low RAM"
+call :Opt 8 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
 echo.
 call :Div "Reset Clones"
-call :Opt 6 "Reset Second instance" "(survivors kept running)"
-call :Opt 7 "Reset Second + Primary" "(independent IDs)"
-call :Opt 8 "Reset Third instance - Yellow" "(survivors kept running)"
-call :Opt 9 "Reset Fourth instance - Green" "(survivors kept running)"
-call :Opt 10 "Reset ALL SIX instances" "(independent IDs)"
-call :Opt 19 "Reset Fifth instance - Red" "(survivors kept running)"
-call :Opt 21 "Reset ZCode Primary instance" ""
+call :Opt 9 "Reset Second instance" "(survivors kept running)"
+call :Opt 10 "Reset Third instance - Yellow" "(survivors kept running)"
+call :Opt 11 "Reset Fourth instance - Green" "(survivors kept running)"
+call :Opt 12 "Reset Fifth instance - Red" "(survivors kept running)"
+call :Opt 13 "Reset Sixth instance - Orange" "(survivors kept running)"
+call :Opt 14 "Reset ZCode Primary instance" ""
+call :Opt 15 "Reset Second + Primary" "(independent IDs)"
+call :Opt 16 "Reset ALL SIX instances" "(independent IDs)"
 echo.
-if defined ESC (echo %ESC%[90m  -- Sync ^& Watchers --%ESC%[0m) else echo   -- Sync ^& Watchers --
-call :Opt 11 "Captcha watchdog" "(unattended, separate window)"
-call :Opt 12 "Re-apply app patch - v8, icons + bidi auto" "(after app update)"
-call :Opt 13 "Refresh Second chats" "- show Primary chats without app restart"
-call :Opt 14 "Watch errors" "- auto-refresh chats on quota or captcha failure"
-call :Opt 15 "Refresh chats - ALL instances" "- re-index every running sidebar"
-call :Opt 16 "Taskbar identity watcher" "- auto-fix taskbar merges (separate window)"
-call :Opt 17 "Freeze diagnostic" "- dead windows, renderer OOM, commit pressure"
-call :Opt 18 "Launch Fifth instance" "- Red branding (independent window)"
-call :Opt 20 "Sync clone assets" "- MCPs + skills + plugins from Primary"
-call :Opt 22 "Launch Sixth instance" "- Orange branding (independent window)"
-call :Opt 23 "Reset Sixth instance - Orange" "(survivors kept running)"
-call :Opt 24 "Sync MCPs to all clones" "- live - running instances included"
-call :Opt 25 "MCP sync watcher" "- auto-sync on Primary change (separate window)"
-call :Opt 26 "Sync MCPs + apply live now" "- recycles running instances - idle-guarded"
+call :Div "Sync & Chat Refresh"
+call :Opt 17 "Sync clone assets" "- MCPs + skills + plugins from Primary"
+call :Opt 18 "Sync MCPs to all clones" "- live - running instances included"
+call :Opt 19 "MCP sync watcher" "- auto-sync on Primary change (separate window)"
+call :Opt 20 "Sync MCPs + apply live now" "- recycles running instances - idle-guarded"
+call :Opt 21 "Refresh Second chats" "- show Primary chats without app restart"
+call :Opt 22 "Refresh chats - ALL instances" "- re-index every running sidebar"
+call :Opt 23 "Watch errors" "- auto-refresh chats on quota or captcha failure"
+echo.
+call :Div "Watchers & Diagnostics"
+call :Opt 24 "Captcha watchdog" "(unattended, separate window)"
+call :Opt 25 "Taskbar identity watcher" "- auto-fix taskbar merges (separate window)"
+call :Opt 26 "Freeze diagnostic" "- dead windows, renderer OOM, commit pressure"
+echo.
+call :Div "Maintenance"
+call :Opt 27 "Re-apply app patch - v8, icons + bidi auto" "(after app update)"
+call :Opt 28 "Login clone account - one-time plan setup" "- enables the Start Plan for light workers + T3 bridge"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -190,26 +195,20 @@ goto MAINT
 
 :AUTOCLAW
 cls
-if defined ESC (echo %ESC%[96mGHOST / AutoClaw Multi-Instance ^& Clones%ESC%[0m) else echo GHOST / AutoClaw Multi-Instance ^& Clones
+if defined ESC (echo %ESC%[96mGHOST / AutoClaw2 Multi-Instance ^& Clones%ESC%[0m) else echo GHOST / AutoClaw2 Multi-Instance ^& Clones
 echo.
 call :Div "Launch Clones"
-call :Opt 1 "Launch inst1" "- first clone (own profile, identity, ports)"
-call :Opt 2 "Install clone shortcuts" "- all 4 - Desktop + Start menu"
-call :Opt 3 "Launch inst2" ""
-call :Opt 4 "Launch inst3" ""
-call :Opt 5 "Launch ALL clones" "- inst1..inst4, one after another"
+call :Opt 1 "Launch c1" "- Blue - own profile, identity, sign-in"
+call :Opt 2 "Launch c2" "- Yellow"
+call :Opt 3 "Launch c3" "- Green"
+call :Opt 4 "Launch c4" "- Red"
+call :Opt 5 "Launch c5" "- Orange"
+call :Opt 6 "Launch ALL clones" "- c1..c5, one after another"
+call :Opt 7 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
 echo.
-call :Div "Reset Clones"
-call :Opt 6 "Reset inst1" "(auto closes AutoClaw)"
-call :Opt 7 "Reset inst2" ""
-call :Opt 8 "Reset inst3" ""
-call :Opt 9 "Reset inst4" ""
-call :Opt 10 "Reset ALL instances" "- clones + Primary, independent IDs"
-call :Opt 13 "Reset AutoClaw Primary instance" ""
-echo.
-if defined ESC (echo %ESC%[90m  -- Maintenance --%ESC%[0m) else echo   -- Maintenance --
-call :Opt 11 "Re-apply app patch - v12, ports + taskbar identity" "(after app update; AutoClaw must be closed)"
-call :Opt 12 "Clone status" "- processes, actual ports, health"
+call :Div "Maintenance"
+call :Opt 8 "Clone status" "- all 5 - locks, device-id, sign-in state"
+call :Opt 9 "Remove clone shortcuts" "- Desktop + Start menu"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -235,12 +234,12 @@ if defined ESC (echo %ESC%[96mGHOST / Cline Multi-Instance ^& Clones%ESC%[0m) el
 echo.
 call :Div "Launch Clones"
 call :Opt 1 "Launch c1" "- Blue - own state, web login, ports"
-call :Opt 2 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
-call :Opt 3 "Launch c2" "- Yellow"
-call :Opt 4 "Launch c3" "- Green"
-call :Opt 5 "Launch ALL clones" "- c1..c5, one after another"
-call :Opt 6 "Launch c4" "- Red"
-call :Opt 7 "Launch c5" "- Orange"
+call :Opt 2 "Launch c2" "- Yellow"
+call :Opt 3 "Launch c3" "- Green"
+call :Opt 4 "Launch c4" "- Red"
+call :Opt 5 "Launch c5" "- Orange"
+call :Opt 6 "Launch ALL clones" "- c1..c5, one after another"
+call :Opt 7 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
 echo.
 call :Div "Maintenance"
 call :Opt 8 "Clone status" "- all 5 - locks, ports, sign-in state"
@@ -329,7 +328,8 @@ endlocal & exit /b 0
 
 :ResetsOne
 rem Resolves an IDE Resets submenu-local id to its global task id and runs it.
-rem Local ids 1-8 equal the global ids; [9] maps to gid 28 - gid 9 is the ZCode captcha watchdog.
+rem Local ids 1-8 equal the global ids. The old [9] Reset AutoClaw - gid 28 -
+rem was retired 2026-10-29 with the v1.20 app; gid 28 is the AutoClaw2 c1 launch.
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=1"
 if "%~1"=="2" set "RESOLVED=2"
@@ -339,7 +339,6 @@ if "%~1"=="5" set "RESOLVED=5"
 if "%~1"=="6" set "RESOLVED=6"
 if "%~1"=="7" set "RESOLVED=7"
 if "%~1"=="8" set "RESOLVED=8"
-if "%~1"=="9" set "RESOLVED=28"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -347,33 +346,38 @@ exit /b
 
 :ZCodeOne
 rem Resolves a ZCode submenu-local id to its global task id and runs it.
+rem Renumbered 2026-10-29: local ids follow display order (1-27 ascending,
+rem grouped Launch / Reset / Sync & Chat / Watchers & Diagnostics / Maintenance).
+rem Gids are unchanged - old local -> gid map preserved in CHANGELOG 2026-10-29.
 set "RESOLVED="
 if "%~1"=="1"  set "RESOLVED=10"
-if "%~1"=="2"  set "RESOLVED=14"
-if "%~1"=="3"  set "RESOLVED=16"
-if "%~1"=="4"  set "RESOLVED=17"
-if "%~1"=="5"  set "RESOLVED=18"
-if "%~1"=="6"  set "RESOLVED=11"
-if "%~1"=="7"  set "RESOLVED=12"
-if "%~1"=="8"  set "RESOLVED=19"
-if "%~1"=="9"  set "RESOLVED=20"
-if "%~1"=="10" set "RESOLVED=21"
-if "%~1"=="11" set "RESOLVED=9"
-if "%~1"=="12" set "RESOLVED=13"
-if "%~1"=="13" set "RESOLVED=15"
-if "%~1"=="14" set "RESOLVED=22"
-if "%~1"=="15" set "RESOLVED=23"
-if "%~1"=="16" set "RESOLVED=25"
-if "%~1"=="17" set "RESOLVED=27"
-if "%~1"=="18" set "RESOLVED=41"
-if "%~1"=="19" set "RESOLVED=42"
-if "%~1"=="20" set "RESOLVED=43"
-if "%~1"=="21" set "RESOLVED=7"
-if "%~1"=="22" set "RESOLVED=64"
-if "%~1"=="23" set "RESOLVED=65"
-if "%~1"=="24" set "RESOLVED=67"
-if "%~1"=="25" set "RESOLVED=68"
-if "%~1"=="26" set "RESOLVED=69"
+if "%~1"=="2"  set "RESOLVED=16"
+if "%~1"=="3"  set "RESOLVED=17"
+if "%~1"=="4"  set "RESOLVED=41"
+if "%~1"=="5"  set "RESOLVED=64"
+if "%~1"=="6"  set "RESOLVED=18"
+if "%~1"=="7"  set "RESOLVED=70"
+if "%~1"=="8"  set "RESOLVED=14"
+if "%~1"=="9"  set "RESOLVED=11"
+if "%~1"=="10" set "RESOLVED=19"
+if "%~1"=="11" set "RESOLVED=20"
+if "%~1"=="12" set "RESOLVED=42"
+if "%~1"=="13" set "RESOLVED=65"
+if "%~1"=="14" set "RESOLVED=7"
+if "%~1"=="15" set "RESOLVED=12"
+if "%~1"=="16" set "RESOLVED=21"
+if "%~1"=="17" set "RESOLVED=43"
+if "%~1"=="18" set "RESOLVED=67"
+if "%~1"=="19" set "RESOLVED=68"
+if "%~1"=="20" set "RESOLVED=69"
+if "%~1"=="21" set "RESOLVED=15"
+if "%~1"=="22" set "RESOLVED=23"
+if "%~1"=="23" set "RESOLVED=22"
+if "%~1"=="24" set "RESOLVED=9"
+if "%~1"=="25" set "RESOLVED=25"
+if "%~1"=="26" set "RESOLVED=27"
+if "%~1"=="27" set "RESOLVED=13"
+if "%~1"=="28" set "RESOLVED=71"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -391,21 +395,21 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :AutoClawOne
-rem Resolves an AutoClaw submenu-local id to its global task id and runs it.
+rem Resolves an AutoClaw2 submenu-local id to its global task id and runs it.
+rem Rewired 2026-10-29 to the AutoClaw2 (zwork) suite: the v1.20 app was
+rem uninstalled from the host, so its launch/reset/patch/status items left the
+rem menu and dispatch cases 37-40 + 71 were retired; local ids 1-9 map to the
+rem reused gids 28-36. Old v1.20 map: CHANGELOG 2026-10-29.
 set "RESOLVED="
-if "%~1"=="1"  set "RESOLVED=29"
-if "%~1"=="2"  set "RESOLVED=30"
-if "%~1"=="3"  set "RESOLVED=31"
-if "%~1"=="4"  set "RESOLVED=32"
-if "%~1"=="5"  set "RESOLVED=33"
-if "%~1"=="6"  set "RESOLVED=34"
-if "%~1"=="7"  set "RESOLVED=35"
-if "%~1"=="8"  set "RESOLVED=36"
-if "%~1"=="9"  set "RESOLVED=37"
-if "%~1"=="10" set "RESOLVED=38"
-if "%~1"=="11" set "RESOLVED=39"
-if "%~1"=="12" set "RESOLVED=40"
-if "%~1"=="13" set "RESOLVED=28"
+if "%~1"=="1" set "RESOLVED=28"
+if "%~1"=="2" set "RESOLVED=29"
+if "%~1"=="3" set "RESOLVED=30"
+if "%~1"=="4" set "RESOLVED=31"
+if "%~1"=="5" set "RESOLVED=32"
+if "%~1"=="6" set "RESOLVED=33"
+if "%~1"=="7" set "RESOLVED=34"
+if "%~1"=="8" set "RESOLVED=35"
+if "%~1"=="9" set "RESOLVED=36"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -413,14 +417,16 @@ exit /b
 
 :ClineOne
 rem Resolves a Cline submenu-local id to its global task id and runs it.
+rem Renumbered 2026-10-29: display order (1-9 ascending, c4/c5 before ALL +
+rem shortcuts). Gids unchanged - old local -> gid map in CHANGELOG 2026-10-29.
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=44"
-if "%~1"=="2" set "RESOLVED=45"
-if "%~1"=="3" set "RESOLVED=46"
-if "%~1"=="4" set "RESOLVED=47"
-if "%~1"=="5" set "RESOLVED=48"
-if "%~1"=="6" set "RESOLVED=49"
-if "%~1"=="7" set "RESOLVED=50"
+if "%~1"=="2" set "RESOLVED=46"
+if "%~1"=="3" set "RESOLVED=47"
+if "%~1"=="4" set "RESOLVED=49"
+if "%~1"=="5" set "RESOLVED=50"
+if "%~1"=="6" set "RESOLVED=48"
+if "%~1"=="7" set "RESOLVED=45"
 if "%~1"=="8" set "RESOLVED=51"
 if "%~1"=="9" set "RESOLVED=52"
 if not defined RESOLVED call :UnknownTask "%~1"
@@ -447,7 +453,7 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-69; 63 unused). Unknown ids print an error. Returns to caller.
+rem Runs one task by global id (1-71; 63 unused). Unknown ids print an error. Returns to caller.
 if "%~1"=="1"  (call :Run "src\windows\change_device_id.ps1" & exit /b)
 if "%~1"=="2"  (call :Run "src\windows\reset_cursor.ps1" & exit /b)
 if "%~1"=="3"  (call :Run "src\windows\reset_devin.ps1" & exit /b)
@@ -489,32 +495,23 @@ if "%~1"=="24" (call :RunWith "tools\install_ghost_shortcut.ps1" "Check your Des
 if "%~1"=="25" (call :Detached "ZCode taskbar identity" "-NoProfile" "tools\watch_zcode_taskbar.ps1" "" "Taskbar identity watcher launched in a separate window - leave it open." "It re-stamps any ZCode window that loses its taskbar identity within seconds." & exit /b)
 if "%~1"=="26" (call :Run "tools\update_ghost.ps1" & exit /b)
 if "%~1"=="27" (call :Run "tools\diagnose_zcode_freeze.ps1" & exit /b)
-if "%~1"=="28" (call :Run "src\windows\reset_autoclaw.ps1" -Target Primary & exit /b)
-if "%~1"=="29" (call :Detached "AutoClaw inst1" "-NoProfile" "src\windows\launch_autoclaw_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="30" (call :RunWith "tools\install_autoclaw_clone_shortcuts.ps1" "Look for the new AutoClaw inst1 - inst4 shortcuts on your Desktop and in the Start menu." & exit /b)
-if "%~1"=="31" (call :Detached "AutoClaw inst2" "-NoProfile" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="32" (call :Detached "AutoClaw inst3" "-NoProfile" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst3" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="33" (
-    call :StartClone "AutoClaw inst1" "src\windows\launch_autoclaw_clone.ps1"
-    timeout /t 3 /nobreak >nul
-    call :StartClone "AutoClaw inst2" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst2"
-    timeout /t 3 /nobreak >nul
-    call :StartClone "AutoClaw inst3" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst3"
-    timeout /t 3 /nobreak >nul
-    call :StartClone "AutoClaw inst4" "src\windows\launch_autoclaw_clone.ps1" "-Instance inst4"
-    echo Four launcher windows opened - each closes automatically when done.
-    echo First runs clone the Primary profile, so expect a short delay per clone.
-    echo Launch them one at a time the first time to log in once per clone.
+if "%~1"=="28" (call :Detached "AutoClaw2 c1" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="29" (call :Detached "AutoClaw2 c2" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="30" (call :Detached "AutoClaw2 c3" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c3" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="31" (call :Detached "AutoClaw2 c4" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c4" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="32" (call :Detached "AutoClaw2 c5" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c5" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="33" (call :Detached "AutoClaw2 all clones" "-NoProfile" "src\windows\launch_autoclaw2_clones_all.ps1" "" "Sequential all-five launcher opened in a separate window - it closes when done." "Clones launch one at a time with a pause between each - do not launch them in parallel." & exit /b)
+if "%~1"=="34" (call :RunWith "tools\install_autoclaw2_clone_shortcuts.ps1" "Look for the new AutoClaw2 c1 - c5 shortcuts on your Desktop and in the Start menu." & exit /b)
+if "%~1"=="35" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_autoclaw2_clone.ps1" -Instance c1 -Status
+    powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_autoclaw2_clone.ps1" -Instance c2 -Status
+    powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_autoclaw2_clone.ps1" -Instance c3 -Status
+    powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_autoclaw2_clone.ps1" -Instance c4 -Status
+    powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_autoclaw2_clone.ps1" -Instance c5 -Status
     pause
     exit /b
 )
-if "%~1"=="34" (call :Run "src\windows\reset_autoclaw.ps1" -Target inst1 & exit /b)
-if "%~1"=="35" (call :Run "src\windows\reset_autoclaw.ps1" -Target inst2 & exit /b)
-if "%~1"=="36" (call :Run "src\windows\reset_autoclaw.ps1" -Target inst3 & exit /b)
-if "%~1"=="37" (call :Run "src\windows\reset_autoclaw.ps1" -Target inst4 & exit /b)
-if "%~1"=="38" (call :Run "src\windows\reset_autoclaw.ps1" -Target All & exit /b)
-if "%~1"=="39" (call :RunWith "tools\patch_autoclaw_ports.ps1" "Patch finished - if it reported AutoClaw.exe running, close ALL AutoClaw windows and run this option again." & exit /b)
-if "%~1"=="40" (call :Run "src\windows\launch_autoclaw_clone.ps1" -Status & exit /b)
+if "%~1"=="36" (call :Run "tools\install_autoclaw2_clone_shortcuts.ps1" -Remove & exit /b)
 if "%~1"=="41" (call :Detached "ZCode Fifth Instance" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fifth" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="42" (call :RunZcodeReset "src\windows\reset_zcode.ps1" -Target Fifth & exit /b)
 if "%~1"=="43" (call :Run "tools\sync_zcode_assets.ps1" & exit /b)
@@ -523,6 +520,8 @@ if "%~1"=="65" (call :RunZcodeReset "src\windows\reset_zcode.ps1" -Target Sixth 
 if "%~1"=="67" (call :Run "tools\sync_zcode_assets.ps1" -McpOnly -Target All & exit /b)
 if "%~1"=="68" (call :Detached "ZCode MCP Sync Watcher" "-NoProfile" "tools\watch_zcode_mcp_sync.ps1" "" "Watcher launched in a separate window - leave it open. It syncs MCPs from the Primary on every change - running instances included; a synced definition lands on each instance's next chat." "Log: %LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log" & exit /b)
 if "%~1"=="69" (call :Run "tools\watch_zcode_mcp_sync.ps1" -RunOnce -ApplyLive -Target All & exit /b)
+if "%~1"=="70" (call :Detached "ZCode Light Worker" "-NoProfile" "src\windows\launch_zcode_cli_light.ps1" "" "Light worker opened in a separate window - type tasks there, empty input exits." "Headless: about a quarter of the RAM of a full instance. Read the model note it prints on first run." & exit /b)
+if "%~1"=="71" (call :Detached "ZCode Clone Login" "-NoProfile" "src\windows\launch_zcode_cli_light.ps1" "-Login" "Login window opened - a browser will ask you to sign in with THIS clone's account." "One-time per clone home: it routes light workers and the T3 bridge to the Start Plan instead of the free model." & exit /b)
 if "%~1"=="44" (call :Detached "Cline c1" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline c1 - c5 shortcuts on your Desktop and in the Start menu." & exit /b)
 if "%~1"=="46" (call :Detached "Cline c2" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)

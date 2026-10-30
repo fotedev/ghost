@@ -109,7 +109,7 @@ see [docs/ZCODE_TELEGRAM_BOTS.md](ZCODE_TELEGRAM_BOTS.md).
 
 The per-clone branding rides on an `app.asar` patch (`ZCODE_ICON_DIR`,
 `ZCODE_AUMID_SUFFIX`, `ZCODE_ACCENT_HEX`, `ZCODE_INSTANCE_NAME`) that a ZCode
-app update silently reverts. Re-apply it once — `GHOST.bat` → ZCode [12], or
+app update silently reverts. Re-apply it once — `GHOST.bat` → ZCode [27], or
 `tools\patch_zcode_icon_override.ps1` — and every clone restores its icon,
 accent color, taskbar button and "ZCode <Color>" window title.
 
@@ -128,7 +128,7 @@ exhaustion, not an app leak, a GPU problem, or a GHOST-side fault.
 
 What to do:
 
-- Run the diagnostic: `GHOST.bat` → ZCode [17]
+- Run the diagnostic: `GHOST.bat` → ZCode [26]
   (`tools\diagnose_zcode_freeze.ps1`) — prints the per-instance crash
   timeline, dump annotations and live commit pressure.
 - After the splash-then-close, just launch the instance again. The quit path
@@ -172,7 +172,7 @@ The sync chain is: Primary `~\.zcode\cli\config.json` →
 `tools\sync_zcode_assets.ps1 -McpOnly -Target All` → each clone's OWN
 `<CloneHome>\.zcode\cli\config.json`. Debug order:
 
-- One-shot convergence: `GHOST.bat` → ZCode [26] (sync + apply live) or [24]
+- One-shot convergence: `GHOST.bat` → ZCode [20] (sync + apply live) or [18]
   (sync only). Both are safe against RUNNING instances — verified 2026-10-27:
   the app holds no handle on `config.json`, never rewrites it on exit, and
   re-reads `mcp.servers` at every app-server spawn, so a synced definition
@@ -181,21 +181,21 @@ The sync chain is: Primary `~\.zcode\cli\config.json` →
   second copy. A silent log is normal while stores are correct. Log:
   `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`.
 - The FULL asset sync (skills junction + plugin cache mirror) still requires
-  the target clones closed first (ZCode [20]) — only `-McpOnly` is live-safe.
+  the target clones closed first (ZCode [17]) — only `-McpOnly` is live-safe.
 
 ## Chats from one ZCode instance don't appear in another instance's sidebar
 
 All instances share one session store, but each sidebar index is seeded at
 app-server spawn with no snapshot backfill — the data is there, the index is
-stale. Refresh without restarting the app: `GHOST.bat` → ZCode [13] (Second
-only) or [15] (all instances), or keep the detached watcher running (ZCode [14],
+stale. Refresh without restarting the app: `GHOST.bat` → ZCode [21] (Second
+only) or [22] (all instances), or keep the detached watcher running (ZCode [23],
 `-Watch -Target All`) to auto-refresh every running instance on quota/captcha
 failures. The hot-activity guard may defer the refresh while a turn streams;
 `-Force` bypasses it.
 
 ## ZCode windows stay merged in one taskbar button even though identities are stamped
 
-The watcher (ZCode [16]) stamps every window's `System.AppUserModel.ID`, but a
+The watcher (ZCode [25]) stamps every window's `System.AppUserModel.ID`, but a
 taskbar group that was formed while identities were still missing can PERSIST
 after the stamps land — the shell does not always re-evaluate an existing
 group, and a stale group can even keep the WRONG ICON (verified 2026-09-26:
@@ -221,7 +221,7 @@ If the watcher is running it re-stamps the final value within one interval
 even if the kick script dies mid-toggle, so this is safe. A silent watcher
 log does NOT mean the watcher is dead — check the mutex first (a second
 instance logs "watcher already running"). A watcher process started BEFORE
-a script edit keeps the old code — close its window and relaunch ZCode [16].
+a script edit keeps the old code — close its window and relaunch ZCode [25].
 
 ## A clone launched with the Primary's profile or taskbar icon
 
@@ -235,7 +235,7 @@ A pin rewrite can also empty that shortcut icon field (verified 2026-09-28:
 the hijacked Start-menu ZCode.lnk carried dev.zcode.app.4 with an empty icon,
 so a green clone running alone showed the Primary icon even though its window
 identity was correct). -RepairPrimaryAumid now restores the Primary shortcut
-icon to <ZCode.exe>,0 too. The resident watcher (ZCode [16]) self-heals a hijack
+icon to <ZCode.exe>,0 too. The resident watcher (ZCode [25]) self-heals a hijack
 every ~5 min (REPAIR/FAIL logged to taskbar.log); -RunOnce -CheckPrimaryHijack
 repairs once without starting the resident loop. Restart the resident watcher
 after any watcher-script edit: an old copy keeps the old code.
