@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Sync user-scope assets (MCP server definitions, skills, plugin cache) from
@@ -65,7 +65,7 @@
   instances (see Guards). It is also invoked on every Primary config change
   by tools\watch_zcode_mcp_sync.ps1.
 
-  GHOST.bat ZCode submenu [20] (all areas, stopped instances) and [24]
+  GHOST.bat ZCode submenu [17] (all areas, stopped instances) and [18]
   (MCP-only, live); also invoked per-launch by
   src\windows\launch_zcode_second_instance.ps1 (step 2d, pre-launch).
 #>

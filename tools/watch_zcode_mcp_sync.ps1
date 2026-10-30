@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Resident watcher: whenever the Primary ZCode MCP config changes
@@ -26,7 +26,7 @@
   - Sync pass: first pass on start converges the drift; afterwards only on
     Primary signature change (mtime+size, debounced ~1s); a deep re-verify
     runs every 60 passes (~5 min at the default interval).
-  - -ApplyLive (opt-in; GHOST.bat ZCode [26] uses it one-shot): after a
+  - -ApplyLive (opt-in; GHOST.bat ZCode [20] uses it one-shot): after a
     sync, recycle the app-server(s) of every RUNNING target instance so the
     new definitions load immediately. Same mechanics as
     refresh_zcode_second_chats.ps1: idle-guarded (never mid-turn, never
@@ -39,7 +39,7 @@
         [-Target Second|Third|Fourth|Fifth|Sixth|All]
         [-InstallAutostart | -RemoveAutostart]
 
-  GHOST.bat ZCode submenu [25] (resident) and [26] (one-shot sync + live
+  GHOST.bat ZCode submenu [19] (resident) and [20] (one-shot sync + live
   apply). Log: %LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log
 
 .Notes

@@ -7,6 +7,176 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **T3 bridge first live incident + hardening (2026-10-29 ~23:30)**: T3
+  threads on unlogged clone homes hung ~4 minutes ("Failed to open provider
+  session") — diagnosed from T3's own provider event logs
+  (`~/.t3/userdata/logs/provider/events.<threadId>.log`): initialize +
+  session/new succeeded, the PROMPT hung in the free-model 11-attempt retry
+  loop. The bridge now (1) passes the home's known default model to
+  `session/create`, so an unmaterialized provider fails FAST with
+  `login_required` guidance pointing at GHOST.bat ZCode [28] (non-registry
+  failures fall back to the server default with a loud warning), and (2)
+  carries a 180 s turn watchdog (`session/stop` + `turn_watchdog` error
+  instead of an endless hang). Fake client gains the fast-fail branch
+  (unlogged home passes in seconds); Pester 56/56.
+- **T3 bridge phases D-E + login helper (2026-10-29 evening)**: the bridge now
+  advertises models on the `session/new` response (T3's generic acpRegistry
+  provider reads the TOP-LEVEL `models` field — the initialize
+  `_meta.modelState` path is Grok-only, per `compat.ts`/`runtimeModel.ts` in
+  the study clone), sourced from the home's `v2\config.json` enabled
+  providers (plan families also registered under their `account:<family>`
+  runtime namespace) + live `state.updated` patches; `session/set_model`
+  (v1 name verified) unpacks `"providerId/modelId[/level]"` into ZCode's
+  `session/setModel`; usage-limit classification keys on the structured
+  `errorCode`. `launch_zcode_cli_light.ps1 -Login` (GHOST.bat ZCode **[28]**,
+  gid 71) runs the one-time `zcode login zai` per clone home with
+  defaultModelSelection verify-after. **T3 Code v0.1.4 installed**
+  (`winget install T3Tools.T3Code`) and the five accounts pre-seeded into
+  `~/.t3/userdata/settings.json` (`providerInstances`, driver `acpRegistry`,
+  `source: "local"`, node.exe + bridge + `--Instance <name>`, displayName
+  "ZCode <Color>" + accent) — backup + verify-after, confirmed loaded in the
+  server trace. Spec §9 carries the user-supervised live-acceptance runbook
+  (its step 2 needs the [28] login or an upstream model recovery). Pester
+  56/56; harness 19/19.
+- **T3 ZCode bridge implemented (phases A-B, 2026-10-29)**: `tools/t3_bridge_lib.mjs`
+  (shared: instance map, four env levers, wire-version gate following the
+  minified export chain, NDJSON connection), `tools/t3_bridge_probe.mjs`
+  (phase-A live protocol probe with transcript + event-catalogue artifacts),
+  `tools/t3_zcode_bridge.mjs` (the ACP v1 ⇄ ZCode Protocol bridge: v1-shaped
+  initialize that pins T3's generation detection, session/new with the five
+  permission modes advertised, async session/send + event streaming
+  (part.delta text/reasoning chunks, tool_call updates, permission forwarding
+  via the per-option MF decision objects), cancel-before-terminal forced to
+  `cancelled`, -32009 revision self-healing via session/read, mandatory
+  `session/requestRuntimePreferences` answered minimally, default-decline
+  elsewhere, optional `--model provider/modelId[/level]`), and
+  `tools/t3_bridge_fake_client.mjs` (the phase-B acceptance harness). Live
+  findings recorded as spec §8 addendum: workspace is an object
+  (`{workspacePath, workspaceKey}`), session/send is async (terminal arrives
+  via `v4/telemetry/event turn.terminal` + `turn.completed/failed` events),
+  `session/subscribe` is REQUIRED before events flow, `state.updated` patches
+  carry the authoritative revision, the plan provider only materializes via
+  standalone `zcode login zai` (`provider/refreshRegistry` does not), and
+  every free zen model rejected upstream that day (one retried 11× for
+  >150 s) so text-delta paths are bundle-schema-derived. Hard gates verified
+  live: v1-shape initialize, five modes, prompt round-trip, cancel→stop,
+  clean exit, stdout purity. `tests/t3_bridge.Tests.ps1` (Pester 56/56 incl.
+  the live-gated fake-client run; CI skips it — no clone home there).
+- **T3 Code local support: study clone + two specs** (2026-10-28): cloned
+  pingdotgg/t3code (MIT, 1016 MB on disk at `C:\programming\github\t3code`,
+  HEAD 9826dbb990, read-only reference — no pnpm install, never committed
+  here) so GHOST can support its own apps in T3 Code locally without waiting
+  for upstream PR merges. `docs/T3_LOCAL_SUPPORT.md` = support matrix (ZCode →
+  bridge; OpenCode → T3-native provider; AutoClaw/Cline/desktop IDEs → not
+  agent CLIs, documented rationale) + local-vs-upstream split.
+  `docs/T3_ZCODE_BRIDGE_SPEC.md` = the ACP v1 ⇄ ZCode Protocol NDJSON bridge
+  spec with provenance tables on both sides (ACP transports/negotiation from
+  the official docs AND the clone's own source: `AcpSessionRuntime.ts`
+  initialize `{protocolVersion:2, clientCapabilities, clientInfo}`,
+  `effect-acp/client.ts` response-SHAPE-based v1/v2 generation detection,
+  `AcpRegistrySupport.ts` local-command spawn `{command, args, cwd, env,
+  shell:false}`; ZCode Protocol from bundle probes: NDJSON envelope without a
+  jsonrpc member, `startup/*` + `runtime/capabilities` handshake,
+  session method map, server→client requests incl.
+  `interaction/requestPermission`, error codes, `session/setModel`/`setMode`)
+  — architecture (one bridge process per clone account, four env levers,
+  no fs/terminal capabilities since ZCode runs its own tools), full mapping
+  tables, seven edge cases (stdout purity, same-home db contention, wire-
+  version signature gate, standalone-login prerequisite, revision
+  discipline), a phased A-E implementation plan with acceptance criteria, and
+  the upstream strategy (ACP Registry entry first; a full
+  `packages/provider-zcode` driver only if the generic ACP surface loses
+  features — replay-fixture bar per the clone's adding-a-provider.md;
+  CONTRIBUTING.md policy noted). Bridge implementation = next task.
+- **ZCode light mode: headless per-account workers + desktop RAM guard**
+  (2026-10-28; spike-verified — docs/ZCODE_LIGHT_MODE.md): the 16 GB box
+  cannot hold all six desktop instances (the 2026-09-25 renderer-OOM freeze
+  was commit-limit exhaustion), so the fleet now has a light path and a guard.
+  `src/windows/launch_zcode_cli_light.ps1` (GHOST.bat ZCode [27], gid 70)
+  runs a clone's account headless via `resources\glm\zcode.cjs` under the
+  system node — interactive REPL, `-Prompt` one-shot or `-Server` stdio worker
+  — with full per-home isolation (HOME+USERPROFILE+ZCODE_DATA_BASE_DIR+
+  ZCODE_STORAGE_DIR), ~0.9 GB commit vs ~1.6 GB+ per desktop instance, and
+  sessions shared with that clone's desktop app. Verified limits are recorded
+  in the launcher header and the doc: the interactive TUI cannot run
+  standalone (@zcode/tui is asar-locked; ELECTRON_RUN_AS_NODE disables asar),
+  and a home without a one-time standalone `zcode login zai` runs tasks on the
+  free opencode-zen model instead of the Start Plan (the launcher detects this
+  and prints the login recipe; the working plan provider namespace
+  `account:zai-start-plan` was discovered from the Primary db's model_usage).
+  `launch_zcode_second_instance.ps1` gains a soft `-MaxConcurrent 3` RAM guard
+  (live commit numbers + confirm; non-interactive callers warn+continue so
+  watchdog/harness callers never hang; focus-relaunches never prompt) and an
+  experimental `-LowRam` (`--disable-gpu`). T3 Code (pingdotgg) was evaluated
+  as a "merge all accounts into one window" target and DEFERRED: no ZCode/Z.ai
+  provider, single-provider multi-account is still an open feature request
+  there, and an ACP ↔ app-server bridge would be permanent maintenance against
+  an early-stage third-party app (its one zero-effort win: the OpenCode fleet
+  is natively supported). Docs: ZCODE_LIGHT_MODE.md, cli.md ZCode [27],
+  README table + layout, AGENTS.md conventions. Harness scenario S covers the
+  new menu row (19 scenarios); repo-integrity auto-derives the 1-70 range.
+
+### Changed
+- **GHOST.bat AutoClaw submenu rewired to the AutoClaw2 (zwork) suite**
+  (2026-10-29): the v1.20 app was uninstalled from the dev host and its
+  ~2.2 GB of remnants (gateway state, clone homes, a 769 MB staged updater,
+  dead shortcuts, Temp diagnostics) cleaned, so main menu [4] is now
+  "AutoClaw2 Multi-Instance & Clones" - items [1]-[9] = launch c1..c5 /
+  launch all-five / install clone shortcuts / clone status / remove clone
+  shortcuts, mapping to the reused gids 28-36. The v1.20 items (launch/reset
+  inst1..4 + Primary, ports-patch v12 re-apply, status) left the menu and
+  dispatch cases 37-40 + 71 were retired; the underlying v1.20 scripts stay
+  in the repo for hosts that still run v1.20 (run them directly). IDE Resets
+  [9] "Reset AutoClaw" was removed with it (Resets is [1]-[8]; no
+  renumbering). AutoClaw2 needs no reset script (stop the instance + delete
+  its clone home) and no ports patch (in-process engine). Docs: cli.md,
+  APP_CLONING_EDGE_CASES EC-A01, AGENTS.md. Harness: scenario H retargeted
+  to the AutoClaw2 render (19 scenarios).
+- **GHOST.bat submenu ids renumbered to display order** (2026-10-29): every
+  submenu's local ids now run strictly ascending 1..N in visual order,
+  grouped by `:Div` sections — the old ZCode submenu carried out-of-sequence
+  rows (19/21 inside the reset block, launchers 18/22 inside the sync block)
+  and Cline appended c4/c5 after Launch ALL. ZCode: Launch Clones [1]-[8]
+  (Second/Third/Fourth/Fifth/Sixth, ALL [6], light worker [7], shortcuts
+  [8]) / Reset Clones [9]-[16] (Second..Sixth, Primary [14], Both [15],
+  ALL SIX [16]) / Sync & Chat Refresh [17]-[23] / Watchers & Diagnostics
+  [24]-[26] / Maintenance [27] (icon patch [27]); Cline: Launch [1]-[7]
+  (c1..c5, ALL [6], shortcuts [7]) / Maintenance [8]-[9]; the two
+  hand-inlined separator lines became `call :Div`. **Gids are unchanged** —
+  a renumber touches only the echo blocks + resolver ladders, so every gid
+  citation in specs, wiring history and repo-integrity stays valid (the
+  AutoClaw2 rewiring above reused 28-36 on its own). Docs synced: cli.md,
+  getting-started, troubleshooting, README, AGENTS.md (+ a display-order
+  rule bullet in the .bat rules), ZCODE_CHAT_SYNC_WATCHER_PLAN,
+  ZCODE_LIGHT_MODE, ZCODE_RESET_EDGE_CASES (renumber translation note),
+  APP_CLONING_EDGE_CASES, AUTOCLAW_CLONES_SPEC; script headers
+  (launch_zcode_second_instance, launch_zcode_cli_light, sync_zcode_assets,
+  watch_zcode_mcp_sync). Harness: rows F/M/N/R/S retargeted to the new
+  numbers + a static ascending-ids guard per submenu (scenario count
+  unchanged at 19).
+
+### Fixed
+- **Blank clone shortcut icons on Desktop/Start Menu/taskbar (AutoClaw2 +
+  Cline suites) - two stacked root causes** (2026-10-29): (1) the installed
+  .lnk files carried a RELATIVE IconLocation (`tools\<suite>-branding\
+  tray_icon.ico`) that Windows can never resolve - a bare-filename
+  `$MyInvocation` fallback could yield a relative repo root at install time;
+  both shortcut installers now resolve `$RepoRoot` through `Resolve-Path`,
+  refuse non-absolute roots, and their verify-after additionally re-reads the
+  IconLocation (must be absolute + exist) alongside target/AUMID; all 20
+  shortcuts reinstalled with absolute icon paths. (2) `tools/make_clone_icon.ps1`
+  wrote PNG-compressed frames for EVERY ICO size, but PNG frames are
+  shell-legal at 256 only - small PNG frames decode as noise/blank in
+  Explorer and System.Drawing (every suite the generator produced was
+  affected: autoclaw v1, autoclaw2, cline, opencode; the zcode ICOs were
+  always correct DIBs). The generator now writes 32-bit BGRA DIB frames below
+  256 + a PNG frame at 256 with a frame-magic verify gate, and all 19
+  branding ICOs were regenerated from their existing masters. Verified
+  through the real shell pipeline (SHGetFileInfo on the .lnk): colored logos
+  render. Housekeeping: removed the dead v1.20 AutoClaw implicit taskbar pin
+  left behind by the app uninstall.
+
 ## [1.2.0] — 2026-10-28
 
 ### Added

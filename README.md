@@ -32,6 +32,7 @@ touches, and emits an audit log plus a self-contained restore script.
 | Reset Qoder | `reset_qoder.ps1` | — |
 | Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | — |
 | ZCode clones (Primary + 5 branded instances) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | — |
+| ZCode light headless worker (no desktop window) | `launch_zcode_cli_light.ps1 -Instance Second\|...\|Sixth` (`-Prompt` / `-Server`) | — |
 | Reset QoderWork | `reset_qoderwork.ps1` | — |
 | Reset MiniMax Agent / OpenCode | `reset_minimax_opencode.ps1` | — |
 | Device fingerprint | `change_device_id.ps1` | `change_device_id.sh Fingerprint` |
@@ -86,6 +87,7 @@ Or run a script directly — full examples in
 .\src\windows\reset_devin.ps1                        # Windsurf + Devin Desktop roots, one pass
 .\src\windows\reset_zcode.ps1 -Target Secondary      # survivor instances keep running
 .\src\windows\launch_zcode_second_instance.ps1 -Instance Third   # yellow-branded clone
+.\src\windows\launch_zcode_cli_light.ps1 -Instance Second        # headless account worker - low RAM
 ```
 
 ```bash
@@ -176,14 +178,14 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   (per-clone toggles stay local), replaces stale `.zcode\skills` copies with a
   junction on the shared `~\.agents` store, mirrors the plugin cache; runs
   automatically before every clone launch. `-McpOnly` syncs the MCP
-  definitions only and is safe against RUNNING instances — ZCode [24] for a
-  one-shot run (ZCode [20] for the full sync)
+  definitions only and is safe against RUNNING instances — ZCode [18] for a
+  one-shot run (ZCode [17] for the full sync)
 - `tools/watch_zcode_mcp_sync.ps1` — resident MCP sync watcher: stat-guards
   the Primary's `~\.zcode\cli\config.json` and re-invokes
   `sync_zcode_assets.ps1 -McpOnly -Target All` on every change, so all five
   clones converge within seconds (`-RunOnce`, `-ApplyLive` recycles running
   clones' app-servers idle-guarded so the open session picks the change up
-  immediately, `-InstallAutostart`). ZCode [25] (resident) / [26] (one-shot +
+  immediately, `-InstallAutostart`). ZCode [19] (resident) / [20] (one-shot +
   apply live). The merge invariant lives in `tools/zcode_mcp_merge.ps1`
   (unit-tested by `tests/zcode_mcp_merge.Tests.ps1`)
 - `tools/diagnose_zcode_throttle.ps1` — read-only diagnostic for
