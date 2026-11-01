@@ -66,12 +66,16 @@ $StartMenu  = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 
 if (-not (Test-Path $Launcher)) { Write-Error "launcher not found: $Launcher" }
 
+# 2026-11-01 display-name unification: the shortcut FILE names use the color
+# vocabulary shared by all four suites ("<Suite> <Color>.lnk"); the cN names
+# are legacy and are cleaned up on every install/remove run. Instance keys,
+# clone dirs and AUMIDs stay frozen.
 $InstanceDefs = @{
-    'c1' = @{ ShortcutName = 'Cline c1.lnk'; BrandingRepo = 'cline-blue-branding';   DisplayName = 'Blue' }
-    'c2' = @{ ShortcutName = 'Cline c2.lnk'; BrandingRepo = 'cline-yellow-branding'; DisplayName = 'Yellow' }
-    'c3' = @{ ShortcutName = 'Cline c3.lnk'; BrandingRepo = 'cline-green-branding';  DisplayName = 'Green' }
-    'c4' = @{ ShortcutName = 'Cline c4.lnk'; BrandingRepo = 'cline-red-branding';    DisplayName = 'Red' }
-    'c5' = @{ ShortcutName = 'Cline c5.lnk'; BrandingRepo = 'cline-orange-branding'; DisplayName = 'Orange' }
+    'c1' = @{ ShortcutName = 'Cline Blue.lnk';   LegacyShortcutName = 'Cline c1.lnk'; BrandingRepo = 'cline-blue-branding';   DisplayName = 'Blue' }
+    'c2' = @{ ShortcutName = 'Cline Yellow.lnk'; LegacyShortcutName = 'Cline c2.lnk'; BrandingRepo = 'cline-yellow-branding'; DisplayName = 'Yellow' }
+    'c3' = @{ ShortcutName = 'Cline Green.lnk';  LegacyShortcutName = 'Cline c3.lnk'; BrandingRepo = 'cline-green-branding';  DisplayName = 'Green' }
+    'c4' = @{ ShortcutName = 'Cline Red.lnk';    LegacyShortcutName = 'Cline c4.lnk'; BrandingRepo = 'cline-red-branding';    DisplayName = 'Red' }
+    'c5' = @{ ShortcutName = 'Cline Orange.lnk'; LegacyShortcutName = 'Cline c5.lnk'; BrandingRepo = 'cline-orange-branding'; DisplayName = 'Orange' }
 }
 
 $TargetIds = if ($Instance) { @($Instance) } else { @('c1','c2','c3','c4','c5') }
@@ -186,9 +190,18 @@ foreach ($id in $TargetIds) {
 
     foreach ($root in @($Desktop, $StartMenu)) {
         $lnk = Join-Path $root $def.ShortcutName
+        $legacyLnk = Join-Path $root $def.LegacyShortcutName
         if ($Remove) {
-            if (Test-Path $lnk) { Remove-Item $lnk -Force; Write-Host "removed: $lnk" }
+            foreach ($candidate in @($lnk, $legacyLnk)) {
+                if (Test-Path $candidate) { Remove-Item $candidate -Force; Write-Host "removed: $candidate" }
+            }
             continue
+        }
+        if ((Test-Path $legacyLnk) -and ($legacyLnk -ine $lnk)) {
+            # 2026-11-01 display-name unification: drop the pre-rename shortcut
+            # so the Desktop/Start menu keeps exactly one entry per clone.
+            Remove-Item $legacyLnk -Force
+            Write-Host "removed legacy: $legacyLnk"
         }
         if (-not (Test-Path $iconPath)) {
             Write-Warning "icon missing ($iconPath) - falling back to exe icon"

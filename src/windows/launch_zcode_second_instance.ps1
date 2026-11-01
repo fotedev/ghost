@@ -19,7 +19,7 @@
 #     Without that one-time patch the app ignores all four -> default look, no harm.
 param(
     # Which clone to launch. Defaults to Second so existing callers
-    # (Launch-ZCode-Second.bat, GHOST.bat ZCode submenu [1]) stay valid unchanged.
+    # (Launch-ZCode-Blue.bat, GHOST.bat ZCode submenu [1]) stay valid unchanged.
     [ValidateSet('Second', 'Third', 'Fourth', 'Fifth', 'Sixth')]
     [string]$Instance = 'Second',
     # Soft RAM guard threshold: at or above this many running ZCode instances

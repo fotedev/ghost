@@ -1,5 +1,5 @@
 @echo off
 chcp 65001 >nul
-title ZCode Sixth Instance Launcher
+title ZCode Orange Launcher
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch_zcode_second_instance.ps1" -Instance Sixth
 pause

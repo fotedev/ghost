@@ -468,24 +468,24 @@ if "%~1"=="6"  (call :Run "src\windows\reset_qoderwork.ps1" & exit /b)
 if "%~1"=="7"  (call :RunZcodeReset "src\windows\reset_zcode.ps1" -Target Primary & exit /b)
 if "%~1"=="8"  (call :Run "src\windows\reset_minimax_opencode.ps1" & exit /b)
 if "%~1"=="9"  (call :Detached "ZCode captcha watch" "-NoExit -NoProfile" "tools\watch_zcode_captcha.ps1" "" "Watchdog launched in a separate window - leave it open." "To verify it runs: check %LOCALAPPDATA%\watch-zcode-captcha\watch.log" & exit /b)
-if "%~1"=="10" (call :Detached "ZCode Second Instance" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="10" (call :Detached "ZCode Blue" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="11" (call :RunZcodeReset "src\windows\reset_zcode.ps1" -Target Secondary & exit /b)
 if "%~1"=="12" (call :ConfirmReset "Reset Second + Primary - independent IDs" "src\windows\reset_zcode.ps1" "-Target Both" & exit /b)
 if "%~1"=="13" (call :RunWith "tools\patch_zcode_icon_override.ps1" "Patch finished - relaunch instances via their ZCode shortcuts - a bare ZCode.exe opens the PRIMARY profile." -WaitForClose & exit /b)
-if "%~1"=="14" (call :RunWith "tools\install_zcode_second_shortcuts.ps1" "Look for the new ZCode Second, ZCode Third, ZCode Fourth, ZCode Fifth and ZCode Sixth shortcuts on your Desktop and in the Start menu." & exit /b)
+if "%~1"=="14" (call :RunWith "tools\install_zcode_second_shortcuts.ps1" "Look for the new ZCode Blue, ZCode Yellow, ZCode Green, ZCode Red and ZCode Orange shortcuts on your Desktop and in the Start menu." & exit /b)
 if "%~1"=="15" (call :RunWith "tools\refresh_zcode_second_chats.ps1" "The blue Secondary window refreshes its chat list by itself in a few seconds." & exit /b)
-if "%~1"=="16" (call :Detached "ZCode Third Instance" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Third" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="17" (call :Detached "ZCode Fourth Instance" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fourth" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="16" (call :Detached "ZCode Yellow" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Third" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="17" (call :Detached "ZCode Green" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fourth" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="18" (
-    call :StartClone "ZCode Second Instance" "src\windows\launch_zcode_second_instance.ps1"
+    call :StartClone "ZCode Blue" "src\windows\launch_zcode_second_instance.ps1"
     timeout /t 3 /nobreak >nul
-    call :StartClone "ZCode Third Instance" "src\windows\launch_zcode_second_instance.ps1" "-Instance Third"
+    call :StartClone "ZCode Yellow" "src\windows\launch_zcode_second_instance.ps1" "-Instance Third"
     timeout /t 3 /nobreak >nul
-    call :StartClone "ZCode Fourth Instance" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fourth"
+    call :StartClone "ZCode Green" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fourth"
     timeout /t 3 /nobreak >nul
-    call :StartClone "ZCode Fifth Instance" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fifth"
+    call :StartClone "ZCode Red" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fifth"
     timeout /t 3 /nobreak >nul
-    call :StartClone "ZCode Sixth Instance" "src\windows\launch_zcode_second_instance.ps1" "-Instance Sixth"
+    call :StartClone "ZCode Orange" "src\windows\launch_zcode_second_instance.ps1" "-Instance Sixth"
     echo Five launcher windows opened - each closes automatically when done.
     echo First runs clone the Primary profile, so expect a short delay per clone.
     pause
@@ -500,13 +500,13 @@ if "%~1"=="24" (call :RunWith "tools\install_ghost_shortcut.ps1" "Check your Des
 if "%~1"=="25" (call :Detached "ZCode taskbar identity" "-NoProfile" "tools\watch_zcode_taskbar.ps1" "" "Taskbar identity watcher launched in a separate window - leave it open." "It re-stamps any ZCode window that loses its taskbar identity within seconds." & exit /b)
 if "%~1"=="26" (call :Run "tools\update_ghost.ps1" & exit /b)
 if "%~1"=="27" (call :Run "tools\diagnose_zcode_freeze.ps1" & exit /b)
-if "%~1"=="28" (call :Detached "AutoClaw2 c1" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="29" (call :Detached "AutoClaw2 c2" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="30" (call :Detached "AutoClaw2 c3" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c3" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="31" (call :Detached "AutoClaw2 c4" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c4" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="32" (call :Detached "AutoClaw2 c5" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c5" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="28" (call :Detached "AutoClaw2 Blue" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="29" (call :Detached "AutoClaw2 Yellow" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="30" (call :Detached "AutoClaw2 Green" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c3" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="31" (call :Detached "AutoClaw2 Red" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c4" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="32" (call :Detached "AutoClaw2 Orange" "-NoProfile" "src\windows\launch_autoclaw2_clone.ps1" "-Instance c5" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="33" (call :Detached "AutoClaw2 all clones" "-NoProfile" "src\windows\launch_autoclaw2_clones_all.ps1" "" "Sequential all-five launcher opened in a separate window - it closes when done." "Clones launch one at a time with a pause between each - do not launch them in parallel." & exit /b)
-if "%~1"=="34" (call :RunWith "tools\install_autoclaw2_clone_shortcuts.ps1" "Look for the new AutoClaw2 c1 - c5 shortcuts on your Desktop and in the Start menu." & exit /b)
+if "%~1"=="34" (call :RunWith "tools\install_autoclaw2_clone_shortcuts.ps1" "Look for the new AutoClaw2 Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
 if "%~1"=="35" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_autoclaw2_clone.ps1" -Instance c1 -Status
     powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_autoclaw2_clone.ps1" -Instance c2 -Status
@@ -517,10 +517,10 @@ if "%~1"=="35" (
     exit /b
 )
 if "%~1"=="36" (call :Run "tools\install_autoclaw2_clone_shortcuts.ps1" -Remove & exit /b)
-if "%~1"=="41" (call :Detached "ZCode Fifth Instance" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fifth" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="41" (call :Detached "ZCode Red" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fifth" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="42" (call :RunZcodeReset "src\windows\reset_zcode.ps1" -Target Fifth & exit /b)
 if "%~1"=="43" (call :Run "tools\sync_zcode_assets.ps1" & exit /b)
-if "%~1"=="64" (call :Detached "ZCode Sixth Instance" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Sixth" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="64" (call :Detached "ZCode Orange" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Sixth" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="65" (call :RunZcodeReset "src\windows\reset_zcode.ps1" -Target Sixth & exit /b)
 if "%~1"=="67" (call :Run "tools\sync_zcode_assets.ps1" -McpOnly -Target All & exit /b)
 if "%~1"=="68" (call :Detached "ZCode MCP Sync Watcher" "-NoProfile" "tools\watch_zcode_mcp_sync.ps1" "" "Watcher launched in a separate window - leave it open. It syncs MCPs from the Primary on every change - running instances included; a synced definition lands on each instance's next chat." "Log: %LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log" & exit /b)
@@ -528,13 +528,13 @@ if "%~1"=="69" (call :Run "tools\watch_zcode_mcp_sync.ps1" -RunOnce -ApplyLive -
 if "%~1"=="70" (call :Detached "ZCode Light Worker" "-NoProfile" "src\windows\launch_zcode_cli_light.ps1" "" "Light worker opened in a separate window - type tasks there, empty input exits." "Headless: about a quarter of the RAM of a full instance. Read the model note it prints on first run." & exit /b)
 if "%~1"=="71" (call :Detached "ZCode Clone Login" "-NoProfile" "src\windows\launch_zcode_cli_light.ps1" "-Login" "Login window opened - a browser will ask you to sign in with THIS clone's account." "One-time per clone home: it routes light workers and the T3 bridge to the Start Plan instead of the free model." & exit /b)
 if "%~1"=="72" (call :Run "tools\install_zcode_second_shortcuts.ps1" -Remove & exit /b)
-if "%~1"=="44" (call :Detached "Cline c1" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline c1 - c5 shortcuts on your Desktop and in the Start menu." & exit /b)
-if "%~1"=="46" (call :Detached "Cline c2" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="47" (call :Detached "Cline c3" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c3" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
+if "%~1"=="46" (call :Detached "Cline Yellow" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="47" (call :Detached "Cline Green" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c3" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="48" (call :Detached "Cline all clones" "-NoProfile" "src\windows\launch_cline_clones_all.ps1" "" "Sequential all-five launcher opened in a separate window - it closes when done." "Clones launch one at a time with a pause between each - do not launch them in parallel." & exit /b)
-if "%~1"=="49" (call :Detached "Cline c4" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c4" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="50" (call :Detached "Cline c5" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c5" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="49" (call :Detached "Cline Red" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c4" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="50" (call :Detached "Cline Orange" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c5" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="51" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_cline_clone.ps1" -Instance c1 -Status
     powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_cline_clone.ps1" -Instance c2 -Status
@@ -545,14 +545,14 @@ if "%~1"=="51" (
     exit /b
 )
 if "%~1"=="52" (call :Run "tools\install_cline_clone_shortcuts.ps1" -Remove & exit /b)
-if "%~1"=="53" (call :Detached "OpenCode c1" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="54" (call :Detached "OpenCode c2" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="55" (call :Detached "OpenCode c3" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "-Instance c3" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="56" (call :Detached "OpenCode c4" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "-Instance c4" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
-if "%~1"=="57" (call :Detached "OpenCode c5" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "-Instance c5" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="53" (call :Detached "OpenCode Blue" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="54" (call :Detached "OpenCode Yellow" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="55" (call :Detached "OpenCode Green" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "-Instance c3" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="56" (call :Detached "OpenCode Red" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "-Instance c4" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
+if "%~1"=="57" (call :Detached "OpenCode Orange" "-NoProfile" "src\windows\launch_opencode_clone.ps1" "-Instance c5" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="58" (call :Detached "OpenCode all clones" "-NoProfile" "src\windows\launch_opencode_clones_all.ps1" "" "Sequential all-five launcher opened in a separate window - it closes when done." "Clones launch one at a time with a pause between each - do not launch them in parallel." & exit /b)
 if "%~1"=="59" (call :RunWith "tools\patch_opencode_clone_home.ps1" "Patch finished - relaunch clones via their OpenCode shortcuts - a bare OpenCode.exe opens the PRIMARY profile." -WaitForClose & exit /b)
-if "%~1"=="60" (call :RunWith "tools\install_opencode_clone_shortcuts.ps1" "Look for the new OpenCode c1 - c5 shortcuts on your Desktop and in the Start menu." & exit /b)
+if "%~1"=="60" (call :RunWith "tools\install_opencode_clone_shortcuts.ps1" "Look for the new OpenCode Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
 if "%~1"=="61" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1 -Status
     powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c2 -Status
@@ -653,7 +653,7 @@ rem next to the summary instead of inside the script.
 rem Usage: call :RunZcodeReset <script> [args...]
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~1" %2 %3 %4
 echo.
-echo NOTE: relaunch clones via their ZCode Second/Third/Fourth/Fifth/Sixth shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile.
+echo NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile.
 pause
 exit /b
 
