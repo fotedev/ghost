@@ -1,18 +1,22 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Patches the installed OpenCode desktop app.asar (engine v1): clone-home
+  Patches the installed OpenCode desktop app.asar (engine v3): clone-home
   multi-instance isolation + per-clone taskbar identity.
 
 .DESCRIPTION
-  One-time app.asar patch (marker + -Restore + backup), mirroring
-  patch_autoclaw_ports.ps1 machinery. See docs/OPENCODE_CLONES_SPEC.md:
+  One-time app.asar patch (marker + -Restore + backup), mirroring the
+  earlier AutoClaw v1.20 asar-patch machinery (removed 2026-10-31 with the
+  v1.20 sunset — git history / archive/autoclaw-v1.20/). See
+  docs/OPENCODE_CLONES_SPEC.md:
     clone-home      the app's packaged bootstrap hardcodes
                     userData = %APPDATA%\ai.opencode.desktop; the patch gives
                     it the TEST_ROOT-equivalent via an argv scan of
-                    --opencode-clone-home=<dir> at the app's own ye() branch,
-                    so userData/sessionData + the XDG_* CLI-state homes all
-                    become per-clone. No flag = bit-for-bit stock behavior.
+                    --opencode-clone-home=<dir> at the app's own test-root
+                    read (the `ue()` bootstrap fn in 2.2.5.0 - was the `ye()`
+                    ternary tail in 2.0.32), so userData/sessionData + the
+                    XDG_* CLI-state homes all become per-clone. No flag =
+                    bit-for-bit stock behavior.
     clone-identity  the single setAppUserModelId site is wrapped to append
                     ".<aumidSuffix>" and an app-level browser-window-created
                     listener stamps every window's AUMID/icon/title from
@@ -24,6 +28,11 @@
   BEFORE the marker gate and re-patches automatically (fresh backup of the
   new pristine asar) when they are missing.
 
+  With -WaitForClose (GHOST.bat OpenCode [8] passes it) a running OpenCode no
+  longer aborts the run: the script prints which processes are up and polls
+  until every OpenCode.exe from the install dir has exited, then continues
+  into the patch.
+
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\patch_opencode_clone_home.ps1
 #>
@@ -31,13 +40,18 @@
 param(
   [switch]$Restore,
   [switch]$Force,
+  [switch]$WaitForClose,
+  [int]$WaitTimeoutMinutes = 30,
   [string]$InstallDir
 )
 
 $ErrorActionPreference = "Stop"
 
 # Must match ENGINE_VERSION in patch_opencode_clone_home.mjs.
-$script:EngineVersion = 2
+# v3 (2026-11-01): re-derived for the 2.2.5.0 bundle (the updater replaced
+# app.asar wholesale on 2026-10-31; the v2 clone-home byte anchor - the 2.0.32
+# `isPackaged?void 0:...` ternary tail - has zero sites in the new bundle).
+$script:EngineVersion = 3
 $script:NpxExe = $null
 function Resolve-OpenCodeInstallDir {
   param([string]$Override)
@@ -56,12 +70,62 @@ function Resolve-OpenCodeInstallDir {
 }
 
 function Assert-OpenCodeClosed {
+  # Scoped to the install dir being patched: replacing app.asar under a running
+  # exe from THAT dir is what corrupts things. Same-user processes expose .Path;
+  # inaccessible/null paths belong to other contexts and cannot hold this dir open.
   param([string]$InstallPath)
-  $procs = @(Get-Process -Name "OpenCode" -ErrorAction SilentlyContinue |
+  $allProcs = @(Get-Process -Name "OpenCode" -ErrorAction SilentlyContinue)
+  $procs = @($allProcs |
     Where-Object { $_.Path -and ($_.Path -like "$InstallPath*") })
-  if ($procs.Count -gt 0) {
-    throw ("OpenCode.exe from this install dir is running (PID(s): {0}). Close all its windows and try again." -f
-      (($procs | Select-Object -First 5 -ExpandProperty Id) -join ", "))
+  # Guard-strength (bug sweep 15): a process whose .Path is unreadable cannot
+  # be classified - warn instead of silently skipping it.
+  $unclassified = @($allProcs | Where-Object { -not $_.Path })
+  if ($unclassified.Count -gt 0) {
+    Write-Warning ("{0} OpenCode process(es) exposed no readable path and were NOT checked (PID(s): {1}). If the asar swap fails with the file in use, close every OpenCode instance and re-run." -f
+      $unclassified.Count, (($unclassified | Select-Object -First 5 -ExpandProperty Id) -join ", "))
+  }
+  if ($procs.Count -eq 0) { return }
+
+  $pidList = (($procs | Select-Object -First 5 -ExpandProperty Id) -join ", ")
+  if (-not $script:WaitForClose) {
+    throw ("OpenCode.exe from this install dir is running (PID(s): {0}). Close all its windows and try again." -f $pidList)
+  }
+
+  # -WaitForClose (GHOST.bat OpenCode [8]): the operator is routinely working
+  # INSIDE an OpenCode instance, so refuse-and-rerun blocks the patch indefinitely.
+  # Instruct once, poll until every instance has exited, then continue straight
+  # into the patch. Two consecutive clear probes defeat an exit-time helper
+  # respawn race; the deadline keeps an abandoned console from waiting forever.
+  # No per-iteration unclassified warnings - .Path is transiently unreadable
+  # while a process exits.
+  Write-Host ""
+  Write-Host ("OpenCode.exe from this install dir is running (PID(s): {0})." -f $pidList)
+  Write-Host "Close ALL OpenCode windows and instances now - the patch starts automatically once every one has exited."
+  Write-Host ("Waiting up to {0} minutes - Ctrl+C to abort." -f $script:WaitTimeoutMinutes)
+  $deadline = (Get-Date).AddMinutes($script:WaitTimeoutMinutes)
+  $clearStreak = 0
+  $lastStatus = Get-Date
+  while ($true) {
+    Start-Sleep -Seconds 2
+    $remaining = @(Get-Process -Name "OpenCode" -ErrorAction SilentlyContinue |
+      Where-Object { $_.Path -and ($_.Path -like "$InstallPath*") })
+    if ($remaining.Count -eq 0) {
+      $clearStreak++
+      if ($clearStreak -ge 2) {
+        Write-Host "All OpenCode instances closed - continuing."
+        return
+      }
+    } else {
+      $clearStreak = 0
+      if (((Get-Date) - $lastStatus).TotalSeconds -ge 30) {
+        $lastStatus = Get-Date
+        Write-Host ("      still waiting - {0} OpenCode.exe process(es) from this install dir (PID(s): {1})" -f
+          $remaining.Count, (($remaining | Select-Object -First 5 -ExpandProperty Id) -join ", "))
+      }
+    }
+    if ((Get-Date) -gt $deadline) {
+      throw ("Timed out after {0} minutes waiting for OpenCode.exe to exit. Close all OpenCode instances and run this again." -f $script:WaitTimeoutMinutes)
+    }
   }
 }
 
@@ -321,7 +385,7 @@ try {
     }
   }
   if ($extractSource -eq $OcAsar) {
-    Write-Host "[2/7] Extracting app.asar (176 MB - takes a minute)..."
+    Write-Host "[2/7] Extracting app.asar (large file - takes a minute)..."
   }
   Invoke-OpenCodeAsar @("--yes", "@electron/asar", "extract", $extractSource, $OcExtracted)
   Write-Host "[3/7] Running patch engine (clone-home + clone-identity)..."

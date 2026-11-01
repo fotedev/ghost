@@ -12,6 +12,9 @@
   So each shortcut points at src\windows\launch_zcode_second_instance.ps1 with
   -Instance <name>, which sets the isolation env and launches ZCode detached
   (cmd /c start) - any future launcher fix automatically applies to the shortcuts.
+  The shortcut's powershell runs with -WindowStyle Hidden on purpose (no console
+  flash): the launcher's RAM guard detects the hidden console and asks via a
+  Yes/No dialog when the soft instance limit is hit, so the guard is not lost.
 
   Per-user locations only -> NO admin rights needed:
     Desktop    : [Environment]::GetFolderPath('Desktop')

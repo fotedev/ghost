@@ -73,8 +73,13 @@ T3 Code server (ACP client, Effect-TS)
 tools/t3_zcode_bridge.mjs   (Node ≥ 18, stdlib only; ONE process per T3 provider instance)
    │  -- speaks ACP v1 on its own stdio (NDJSON) toward T3                 [A1/A5]
    │  -- resolves the account: --Instance Second..Sixth (GHOST map) or --home <dir>
-   │  -- sets the four env levers: HOME, USERPROFILE -> <CloneHome>;
-   │     ZCODE_DATA_BASE_DIR -> <CloneHome>; ZCODE_STORAGE_DIR -> <CloneHome>\.zcode
+   │  -- sets the five env levers: HOME, USERPROFILE -> <CloneHome>;
+   │     ZCODE_DATA_BASE_DIR -> <CloneHome>; ZCODE_STORAGE_DIR -> <CloneHome>\.zcode;
+   │     ZCODE_BUILTIN_PROVIDER_CONFIG_FILE -> the bundled
+   │     resources\config\provider\zcode-builtin.json (0.17.1 plain-node
+   │     regression 2026-10-31 — resolveBuiltinProviderConfig in
+   │     t3_bridge_lib.mjs, newest runtime-cache copy as fallback, fail-fast
+   │     when neither exists; the desktop app injects the same env)   [Z1-lever]
    │  -- spawns: node <ZCode>\resources\glm\zcode.cjs app-server  (child)   [Z1]
    ▼
 zcode app-server  (ZCode Protocol NDJSON; per-home db/config/credentials)  [Z2-Z6]

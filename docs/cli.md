@@ -3,8 +3,8 @@
 Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 **`./ghost.sh`** (Linux). This page is the direct-command cheat sheet for
 scripts and CI. `GHOST.bat` groups its tasks into six submenus with
-continuous local numbering (IDE resets [1]-[8] / ZCode Multi-Instance &
-Clones [1]-[27] / System & GHOST Maintenance [1]-[3] / AutoClaw2
+continuous local numbering (IDE Resets [1]-[8] / ZCode Multi-Instance &
+Clones [1]-[29] / System & GHOST Maintenance [1]-[3] / AutoClaw2
 Multi-Instance & Clones [1]-[9] / Cline Multi-Instance & Clones
 [1]-[9] / OpenCode Multi-Instance & Clones [1]-[10]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
@@ -42,10 +42,10 @@ powershell -ExecutionPolicy Bypass -File "src\windows\spoof_wmi_serials.ps1" -Dr
 Menu equivalents for the reset targets: `reset_zcode.ps1 -Target Primary` =
 IDE Resets [7] **and** ZCode [14] (the same task from both menus);
 `-Target Secondary` / `Both` / `Third` / `Fourth` / `Fifth` / `Sixth` / `All` = ZCode
-[9] / [15] / [10] / [11] / [12] / [13] / [16]. `reset_autoclaw.ps1` (the v1.20
-app) has no menu entries since 2026-10-29 - the v1.20 app was uninstalled from
-the dev host and the GHOST.bat AutoClaw2 submenu replaced its items; run the
-script directly on hosts that still run v1.20. AutoClaw2 has no reset script
+[9] / [15] / [10] / [11] / [12] / [13] / [16]. The AutoClaw v1.20 suite
+(`reset_autoclaw.ps1` and friends) was REMOVED 2026-10-31 with the v1.20 app
+(uninstalled from the dev host 2026-10-29) — recover it from git history or
+`archive/autoclaw-v1.20/` for a v1.20 host. AutoClaw2 has no reset script
 by design: stop the instance and delete its `AutoClaw2ClonesHome\<cN>` folder.
 
 ## ZCode captcha watchdog (unattended; no admin needed)
@@ -111,7 +111,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\install_zcode_second_
 Creates `ZCode Second` / `ZCode Third` / `ZCode Fourth` / `ZCode Fifth` /
 `ZCode Sixth` shortcuts (blue /
 yellow / green / red / orange icons) that run the launcher above; a taskbar pin groups with
-that clone's running window. Remove with `-Remove`; scope with `-Instance`.
+that clone's running window. Remove with `-Remove` (ZCode [29]); install /
+scope with `-Instance` (ZCode [8]).
 Repair a hijacked Primary pin (clone AUMID + wiped icon) with
 `-RepairPrimaryAumid` — the taskbar watcher also self-heals it every ~5 min
 (`-RunOnce -CheckPrimaryHijack` for a one-shot repair).
@@ -281,7 +282,7 @@ shortcuts = Cline [7] (`-Remove` = [9]).
 ## OpenCode multi-instance (5 clones + Primary; per-user, no admin needed)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "tools\patch_opencode_clone_home.ps1"   # once; close ALL OpenCode windows
+powershell -ExecutionPolicy Bypass -File "tools\patch_opencode_clone_home.ps1"   # once; close ALL OpenCode windows (or pass -WaitForClose like menu row [8])
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c2   # ... c5
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1 -Status
@@ -294,14 +295,14 @@ powershell -ExecutionPolicy Bypass -File "tools\install_opencode_clone_shortcuts
 Isolation needs the ONE-TIME clone-home asar patch (packaged builds
 hardcode the Electron userData): the launcher aborts loudly when it is
 missing, and an app update reverts it — the byte-probe re-patches
-automatically on the next run (re-run OpenCode [7] after any manual
+automatically on the next run (re-run OpenCode [8] after any manual
 update). Each clone gets its own userData/sessionData plus its own
 `XDG_*` CLI-state home, its own single-instance lock, and per-clone
 taskbar identity (AUMID + window icon + "OpenCode <Color>" title).
 Service ports are ephemeral per instance (no port plan). First run per
 clone: ONE manual sign-in. Menu equivalents: launch
-c1/c2/c3/c4/c5 = OpenCode [1]-[5]; all five = [6]; patch = [7];
-shortcuts = [8] (`-Remove` = [10]); status = [9].
+c1/c2/c3/c4/c5 = OpenCode [1]-[5]; all five = [6]; shortcuts = [7]
+(`-Remove` = [10]); patch = [8]; status = [9].
 
 ## AutoClaw2 multi-instance (5 clones + Primary; per-user, no admin needed)
 

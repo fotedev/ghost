@@ -8,10 +8,11 @@
 //     {method, params} notifications - NO "jsonrpc" member (spec Z2).
 //   - No initialize handshake: server emits startup/* notifications, then the
 //     client may call runtime/capabilities (spec Z4).
-//   - The four clone-home env levers isolate each account end-to-end (spec Z8,
+//   - The five clone-home env levers isolate each account end-to-end (spec Z8,
 //     verified live in ZCODE_LIGHT_MODE.md): HOME + USERPROFILE redirect
 //     os.homedir()-resolved stores, ZCODE_DATA_BASE_DIR the v2 tree,
-//     ZCODE_STORAGE_DIR the cli caches.
+//     ZCODE_STORAGE_DIR the cli caches, ZCODE_BUILTIN_PROVIDER_CONFIG_FILE the
+//     bundled provider config (0.17.1 plain-node regression, 2026-10-31).
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -95,22 +96,83 @@ export function readWireVersion(zcodeCli) {
     return { ok: protocolVersion === 1, protocolVersion, v4WireVersion };
 }
 
-export function buildChildEnv(cloneHome) {
-    return {
+// Newest file named `name` under `root` (recursive, stdlib-only; Node >= 18 so
+// no readdirSync recursive option). Returns null when the tree is missing.
+function newestFileRecursive(root, name) {
+    let newest = null;
+    let newestMtime = -1;
+    const visit = (dir) => {
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const entry of entries) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                visit(full);
+            } else if (entry.isFile() && entry.name === name) {
+                let mtime = 0;
+                try { mtime = fs.statSync(full).mtimeMs; } catch { continue; }
+                if (mtime > newestMtime) { newestMtime = mtime; newest = full; }
+            }
+        }
+    };
+    visit(root);
+    return newest;
+}
+
+// FIFTH env lever source (0.17.1 plain-node regression, found 2026-10-31): the
+// bundle's resolveBundledZCodeBuiltinProviderConfig derives both fallback
+// candidates from process.argv[1] via a dev-monorepo climb (glm\provider\
+// zcode-builtin.json, then 5x ..\ -> AppData\config\provider\) and never
+// reaches the packaged file at resources\config\provider\zcode-builtin.json.
+// The desktop app injects ZCODE_BUILTIN_PROVIDER_CONFIG_FILE into its own CLI
+// children; plain-node spawners must hand the same override. Bundled install
+// copy first, newest runtime-cache copy under the clone home as fallback.
+export function resolveBuiltinProviderConfig(zcodeCli, cloneHome) {
+    const cliDir = path.dirname(path.resolve(zcodeCli)); // ...\resources\glm
+    const bundled = path.join(path.dirname(cliDir), 'config', 'provider', 'zcode-builtin.json');
+    if (fs.existsSync(bundled)) return bundled;
+    const runtimeRoot = path.join(cloneHome, '.zcode', 'v2', 'runtime', 'provider');
+    return newestFileRecursive(runtimeRoot, 'zcode-builtin.json');
+}
+
+export function buildChildEnv(cloneHome, builtinProviderConfig) {
+    const env = {
         ...process.env,
         HOME: cloneHome,
         USERPROFILE: cloneHome,
         ZCODE_DATA_BASE_DIR: cloneHome,
         ZCODE_STORAGE_DIR: path.join(cloneHome, '.zcode'),
     };
+    if (builtinProviderConfig) {
+        env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = builtinProviderConfig;
+    } else {
+        // Never inherit a stale parent value: shells spawned by a ZCode desktop
+        // instance carry the app-injected var (pointing at THAT instance's
+        // runtime cache) — the spawn must use exactly what the caller resolved.
+        delete env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE;
+    }
+    return env;
 }
 
 // Spawn `zcode.cjs app-server` for one account. The caller owns the lifecycle:
 // kill the whole tree on exit (the CLI spawns plugin-host children, which
 // node's child.kill does not reap on Windows).
 export function spawnAppServer(zcodeCli, cloneHome, { nodePath = process.execPath, stdio } = {}) {
+    const providerConfig = resolveBuiltinProviderConfig(zcodeCli, cloneHome);
+    if (!providerConfig) {
+        // The bundle's nbs() argv gate requires the builtin provider config for
+        // app-server too; without the lever the child dies at bootstrap with
+        // the opaque "无法定位 CLI ZCode Built-in Provider Config" error.
+        throw new Error(
+            'zcode.cjs bootstrap needs the bundled provider config (0.17.1 plain-node regression) but neither ' +
+            path.join(path.dirname(path.dirname(path.resolve(zcodeCli))), 'config', 'provider', 'zcode-builtin.json') +
+            ' nor any zcode-builtin.json under ' +
+            path.join(cloneHome, '.zcode', 'v2', 'runtime', 'provider') +
+            ' exists. Launch the ZCode desktop app once to materialize it, then retry.'
+        );
+    }
     const child = spawn(nodePath, [zcodeCli, 'app-server'], {
-        env: buildChildEnv(cloneHome),
+        env: buildChildEnv(cloneHome, providerConfig),
         stdio: stdio ?? ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
     });

@@ -158,21 +158,22 @@ honest limits: [WMI_SERIAL_SPOOFING.md](WMI_SERIAL_SPOOFING.md).
 ### 9. Other clone suites (Cline / OpenCode / AutoClaw2)
 
 The same "Primary + 5 clones" pattern exists for three more apps, each with
-its own spec doc (menu ranges: Cline [1]-[9], OpenCode [1]-[10]; AutoClaw2 is
-CLI-only):
+its own spec doc (menu ranges: AutoClaw2 [1]-[9], Cline [1]-[9], OpenCode
+[1]-[10]):
 
 - **Cline** (Tauri/WebView2) — env levers only (`CLINE_DIR`,
   `WEBVIEW2_USER_DATA_FOLDER`, fixed per-clone hub/sidecar ports); the
   launcher neutralizes the app's single-instance hidden window and enforces
   per-clone locks itself. [CLINE_CLONES_SPEC.md](CLINE_CLONES_SPEC.md)
 - **OpenCode desktop** (Electron) — needs the one-time clone-home asar patch
-  (OpenCode [7]; re-apply after app updates — the launcher aborts loudly when
-  it is missing); per-clone `XDG_*` CLI-state homes; native per-userData
+  (OpenCode [8]; the row waits for you to close OpenCode first; re-apply
+  after app updates — the launcher aborts loudly when it is missing);
+  per-clone `XDG_*` CLI-state homes; native per-userData
   single-instance lock; ephemeral service ports.
   [OPENCODE_CLONES_SPEC.md](OPENCODE_CLONES_SPEC.md)
 - **AutoClaw2** (Electron, v2.1.1 "zwork") — pure env levers
-  (`ZWORK_USER_DATA` + `AUTOCLAW_PROFILE_ROOT`), no patching, no `GHOST.bat`
-  wiring by design. [AUTOCLAW2_CLONES_SPEC.md](AUTOCLAW2_CLONES_SPEC.md)
+  (`ZWORK_USER_DATA` + `AUTOCLAW_PROFILE_ROOT`), no patching; wired into
+  `GHOST.bat` main [4] (rows [1]-[9]). [AUTOCLAW2_CLONES_SPEC.md](AUTOCLAW2_CLONES_SPEC.md)
 
 Command-level detail for all three suites: [cli.md](cli.md).
 

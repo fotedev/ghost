@@ -10,7 +10,8 @@
   shortcut points at src\windows\launch_autoclaw2_clone.ps1 -Instance <id>,
   which sets the isolation env and starts AutoClaw2.exe - any future
   launcher fix automatically applies to the shortcuts (same pattern as
-  tools\install_autoclaw_clone_shortcuts.ps1 for the v1.20 suite).
+  tools\install_zcode_second_shortcuts.ps1; the v1.20 installer this file
+  originally mirrored left with the v1.20 sunset).
 
   Per-clone icons: tools\autoclaw2-<color>-branding\tray_icon.ico generated
   by tools\make_clone_icon.ps1 from the app's own 512x512 app-icon-square

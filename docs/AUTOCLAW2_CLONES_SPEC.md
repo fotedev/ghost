@@ -9,8 +9,10 @@ Project: GHOST (`unban-machine-id`) · Target app:
 `%LOCALAPPDATA%\Programs\AutoClaw2\AutoClaw2.exe` (v2.1.1.262, internal name
 zwork, package "AutoClaw desktop AI product" by Zhipu AI, Electron asInvoker)
 
-This is a GHOST spec-first document like its v1 sibling
-(`docs/AUTOCLAW_CLONES_SPEC.md`). Every mechanism quoted below was read out
+This is a GHOST spec-first document. (Its v1.20 sibling,
+`docs/AUTOCLAW_CLONES_SPEC.md`, was removed 2026-10-31 with the v1.20 app —
+recover it from git history or `archive/autoclaw-v1.20/`.) Every mechanism
+quoted below was read out
 of the installed app's `resources\app\dist\main.cjs` or live-verified on
 this host (provenance §5).
 
@@ -28,7 +30,8 @@ the four v1.20 clones (`%USERPROFILE%\AutoClawCloneHome\inst1..4`).
 
 ## 2. Relationship to the v1.20 AutoClaw suite
 
-The v1 suite (`launch_autoclaw_clone.ps1`, `docs/AUTOCLAW_CLONES_SPEC.md`)
+The v1.20 suite (its launcher and spec now live in git history /
+`archive/autoclaw-v1.20/`)
 clones the OLD app, whose elevation manifest (`requireAdministrator`) kills
 env levers at the UAC boundary — hence its heavier machinery (USERPROFILE
 relocation, asar port patch, taskbar patch engine, identity seeding with

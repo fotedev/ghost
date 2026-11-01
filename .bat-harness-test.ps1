@@ -64,7 +64,17 @@ function Invoke-Scenario([string]$Name, [string[]]$Lines) {
     Remove-Item Env:TESTINPUT -ErrorAction SilentlyContinue
     Remove-Item Env:TESTIDX -ErrorAction SilentlyContinue
     Remove-Item Env:TESTREADS -ErrorAction SilentlyContinue
-    return (Get-Content $outFile -Raw)
+    $out = Get-Content $outFile -Raw
+    # Global guard, inherited by EVERY scenario: any rendering bug that leaks
+    # CMD error output ("X' is not recognized as an internal or external
+    # command" — e.g. a bare & through an unquoted echo expansion, 2026-10-30)
+    # fails the harness even where no scenario asserts that specific spot.
+    # $script: scope so the += lands on the script-level accumulator, not a
+    # function-local copy.
+    if ($out -match 'is not recognized as an internal or external command') {
+        $script:failures += "$($Name): CMD error output leaked into scenario output"
+    }
+    return $out
 }
 
 $failures = @()
@@ -82,6 +92,22 @@ foreach ($block in $menuBlocks) {
     for ($i = 0; $i -lt $rows.Count; $i++) { if ($rows[$i] -ne ($i + 1)) { $bad = $true } }
     if ($ids.Count -eq 0 -or $ids[-1] -ne 0) { $bad = $true }
     if ($bad) { $failures += "S0: $name submenu ids not ascending 1..N with trailing 0 - got $($ids -join ',')" }
+}
+
+# S0b) static guard: :Div/:Hdr/:Opt label args expand into an UNQUOTED echo
+#      inside their subroutines, so a bare & splits the line and CMD executes
+#      the tail as a command ('Chat' is not recognized... above rows [17]/[24],
+#      2026-10-30). Label text must avoid & entirely (reword with + or -);
+#      direct echo lines must caret-escape every & as ^&.
+$harnessLines = $src -split "`r?`n"
+for ($i = 0; $i -lt $harnessLines.Count; $i++) {
+    $ln = $harnessLines[$i]
+    if ($ln -match '(?i)^\s*call\s+:(Div|Hdr|Opt|RunWith)\b' -and $ln -match '&') {
+        $failures += ("S0b: line {0} passes & through a Div/Hdr/Opt/RunWith label arg (expands into unquoted echo): {1}" -f ($i + 1), $ln.Trim())
+    }
+    if ($ln -match '(?i)^\s*echo\b' -and $ln -match '(?<!\^)&') {
+        $failures += ("S0b: line {0} echoes a bare & (must be ^& or reworded): {1}" -f ($i + 1), $ln.Trim())
+    }
 }
 
 # A) plain exit at main menu -> Done, zero Unknown task, zero literal junk
@@ -151,13 +177,20 @@ if ($out -match 'calc')               { $failures += 'L: injection attempt leake
 if ($out -notmatch 'Invalid input')   { $failures += 'L: rejection hint missing' }
 
 # M) ZCode reset block renders the reset entries incl. the Fifth reset, the
-#    all-six reset, the Primary reset and the Sixth reset (2026-10-29 numbering)
+#    all-six reset, the Primary reset and the Sixth reset (2026-10-29 numbering;
+#    2026-10-31: color moved into the tail, [29] Remove row added). The label
+#    and tail are split by ANSI codes in the colored render, so the color
+#    assertions use .* between them.
 $out = Invoke-Scenario 'M_zcode_reset_render' @('2', '0', '0')
-if ($out -notmatch '\[12\].*Reset Fifth instance - Red')   { $failures += 'M: ZCode [12] Fifth reset not rendered' }
+if ($out -notmatch '\[ 9\].*Reset Second instance.*- Blue')   { $failures += 'M: ZCode [9] Second reset+Blue not rendered' }
+if ($out -notmatch '\[10\].*Reset Third instance.*- Yellow')  { $failures += 'M: ZCode [10] Third reset+Yellow not rendered' }
+if ($out -notmatch '\[11\].*Reset Fourth instance.*- Green')  { $failures += 'M: ZCode [11] Fourth reset+Green not rendered' }
+if ($out -notmatch '\[12\].*Reset Fifth instance.*- Red')     { $failures += 'M: ZCode [12] Fifth reset+Red not rendered' }
+if ($out -notmatch '\[13\].*Reset Sixth instance.*- Orange')  { $failures += 'M: ZCode [13] Sixth reset+Orange not rendered' }
 if ($out -notmatch '\[16\].*Reset ALL SIX instances')      { $failures += 'M: ZCode [16] all-six reset not rendered' }
 if ($out -notmatch '\[14\].*Reset ZCode Primary instance') { $failures += 'M: ZCode [14] Primary reset not rendered' }
-if ($out -notmatch '\[13\].*Reset Sixth instance - Orange') { $failures += 'M: ZCode [13] Sixth reset not rendered' }
 if ($out -notmatch '\[ 9\].*survivors kept running')       { $failures += 'M: ZCode [9] reset tail not rendered' }
+if ($out -notmatch '\[29\].*Remove clone shortcuts')       { $failures += 'M: ZCode [29] Remove shortcuts not rendered' }
 
 # N) Cline submenu (main [5]): renders clean, entries listed, no chain leak;
 #    invalid Cline chain id -> exactly one legit Unknown task
@@ -179,7 +212,8 @@ if ($out -match 'Unknown task')                  { $failures += 'O: Unknown task
 if ($out -match '%PENDING_CHAIN%')               { $failures += 'O: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'OpenCode Multi-Instance')    { $failures += 'O: OpenCode submenu not shown' }
 if ($out -notmatch '\[ 1\].*Launch c1')          { $failures += 'O: OpenCode [1] Launch c1 not rendered' }
-if ($out -notmatch '\[ 7\].*Apply clone-home patch') { $failures += 'O: OpenCode [7] Apply clone-home patch not rendered' }
+if ($out -notmatch '\[ 7\].*Install clone shortcuts') { $failures += 'O: OpenCode [7] Install shortcuts not rendered' }
+if ($out -notmatch '\[ 8\].*Apply clone-home patch') { $failures += 'O: OpenCode [8] Apply clone-home patch not rendered' }
 if ($out -notmatch '\[10\].*Remove clone shortcuts') { $failures += 'O: OpenCode [10] Remove shortcuts not rendered' }
 
 # P) invalid OpenCode chain id "6 77" -> exactly one legit Unknown task
