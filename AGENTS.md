@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/Devin Desktop**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent/OpenCode**, **AutoClaw** — for privacy hygiene, multi-account testing, and dev-environment resets. Windows PowerShell (primary) and Linux Bash scripts.
+Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/Devin Desktop**, **Trae**, **Qoder**, **ZCode**, **QoderWork**, **MiniMax Agent/OpenCode**, **AutoClaw2** — for privacy hygiene, multi-account testing, and dev-environment resets. Windows PowerShell (primary) and Linux Bash scripts.
 
 ## Repository layout
 
@@ -10,8 +10,8 @@ Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/
 README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (scripts live under src/;
                                              #   CLI cheat sheet: docs/cli.md); GHOST.bat =
                                              #   6 submenus with CONTINUOUS LOCAL numbering
-                                             #   (IDE resets [1]-[8] / ZCode Multi-Instance &
-                                             #   Clones [1]-[28] / System & GHOST Maintenance
+                                             #   (IDE Resets [1]-[8] / ZCode Multi-Instance &
+                                             #   Clones [1]-[29] / System & GHOST Maintenance
                                              #   [1]-[3] / AutoClaw2 Multi-Instance & Clones
                                              #   [1]-[9] / Cline Multi-Instance & Clones
                                              #   [1]-[9] / OpenCode Multi-Instance & Clones
@@ -21,9 +21,6 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (scripts live unde
                                              #   global gid jump from the main menu, and
                                              #   [U] Check for updates on the main menu
 src/windows/                        # current .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
-                                    #   + launch_autoclaw_clone.ps1 (AutoClaw clone launcher,
-                                    #     -Instance inst1..inst4 + -Status) + Launch-AutoClaw-Clone.bat
-                                    #   + reset_autoclaw.ps1 (-Target Primary|inst1..4|All)
 src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters)
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
@@ -89,8 +86,14 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     re-run after app updates; after an app update the stale marker is
                                    #     auto-detected (asar byte-probe of the engine's signature strings) and
                                    #     the patch re-applies itself with a FRESH backup of the new pristine
-                                   #     asar - no -Force needed (2026-10-24);
-                                   #   zcode-blue-branding/ (blue, Secondary), zcode-yellow-branding/
+                                   #     asar - no -Force needed (2026-10-24); -WaitForClose (2026-10-31,
+                                   #     GHOST.bat [27] passes it) turns the running-ZCode guard into
+                                   #     instruct-and-poll: prints the running PIDs, waits for every
+                                   #     ZCode.exe from the install dir to exit (2 consecutive clear
+                                   #     probes, 30-min default via -WaitTimeoutMinutes) and continues
+                                   #     straight into the patch - the bare throw remains the default
+                                   #     for direct runs without the switch (-Restore honors it too);
+                                   #   zcode-blue-branding/ (blue, Second), zcode-yellow-branding/
                                    #     (yellow, Third), zcode-green-branding/ (green, Fourth),
                                    #     zcode-red-branding/ (red, Fifth — blue master +150° hue-rotate
                                    #     via make_clone_icon.ps1, accent #CA0607),
@@ -116,7 +119,8 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #   install_zcode_second_shortcuts.ps1 — per-user Desktop +
                                    #     Start-menu shortcuts for all five clones (AppUserModel.ID =
                                    #     base + ".2"/".3"/".4"/".5"/".6" for pin grouping; -Instance to scope;
-                                   #     -Remove to uninstall; ZCode submenu [8]);
+                                   #     -Remove to uninstall; install = ZCode submenu [8],
+                                   #     remove = ZCode submenu [29]);
                                    #   refresh_zcode_second_chats.ps1 — cross-instance chat
                                    #     refresh (name is historical; -Target Primary|Second|Third|
                                    #     Fourth|Fifth|Sixth|All covers every instance now). One-shot (ZCode submenu [21]
@@ -221,50 +225,9 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     overwrite-edits prompt); GHOST.bat replaced by either path
                                    #     prints a close-and-relaunch note (cmd reads the .bat
                                    #     incrementally)
-                                   #   patch_autoclaw_ports.ps1 (+ .mjs engine v12; update-recovery 2026-10-24:
-#     byte-probes app.asar for the engine's signature strings before the
-#     marker gate - after an app update wipes marker+backups it re-patches
-#     automatically with a FRESH backup, no -Force; -Force pristine-extract
-#     only when the live asar is still patched, else extracts the new asar)
-#     — one-time app.asar
-                                   #     patch widening AutoClaw's hardcoded MCP candidate-port array
-                                   #     [19681..19684] -> [19681..19688] + home-override (the state-dir
-#     isolation marker .autoclaw-home; see the ELEVATION bullet below)
-                                   #     multi-instance ceiling; inst4 has no port without it)
-                                   #     + taskbar identity (spec §7.3c v2, 2026-10-17): families
-                                   #     aumid-suffix (wraps BOTH real setAppUserModelId call sites to
-                                   #     append .<aumidSuffix>) + window-identity (routes every
-                                   #     new BrowserWindow through a cached subclass that sets the
-                                   #     window icon from <userData>\.autoclaw-icon.ico, stamps the
-                                   #     WINDOW-level AUMID via setAppDetails at creation time, and
-                                   #     forces the "AutoClaw <Color>" title via page-title-updated
-                                   #     interception; v12: setAppDetails takes `appId` (not
-                                   #     appUserModelId) and RE-STAMPS on show + title re-assert —
-                                   #     ctor stamps die with HWND recreation; -Force re-patches
-                                   #     extract the pristine backup asar or the engine skips its
-                                   #     own wrapped anchors and silently ships old code); identity
-                                   #     source = <userData>\.autoclaw-identity.json
-                                   #     written by launch_autoclaw_clone.ps1 step 4c (missing marker =>
-                                   #     stock behavior — Primary and bare spawns untouched; env vars
-                                   #     die at the UAC boundary, marker files do not);
-                                   #     backup + marker (autoclaw-ports-patch.marker.json) + -Restore
-                                   #     + node --check gate; AutoClaw must be
-                                   #     closed; an app update reverts it (all instances run with
-                                   #     system.autoUpdate=false as the guard); run directly - the
-                                   #     v1.20 menu entry was retired 2026-10-29 with the v1.20 app;
-                                   #   install_autoclaw_clone_shortcuts.ps1 — per-user Desktop +
-                                   #     Start-menu shortcuts for inst1..inst4 (AppUserModel.ID =
-                                   #     com.zhipuai.autoclaw.inst1..4; base read from the Primary .lnk
-                                   #     or the verified app constant; -Instance to scope; -Remove;
-                                   #     -RepairPrimaryAumid strips a hijacked .instN suffix + restores
-                                   #     <exe>,0 icon; .lnk AUMIDs read ONLY via Shell.Application
-                                   #     ExtendedProperty); per-clone IconLocation =
-                                   #     tools\autoclaw-<color>-branding\tray_icon.ico,0 (blue/yellow/
-                                   #     green/red ← inst1..4; missing dir warns + falls back to the
-                                   #     exe icon); run directly - the v1.20 menu entry was retired
-                                   #     2026-10-29 with the v1.20 app
-                                   #   patch_opencode_clone_home.ps1 (+ .mjs engine v2) — one-time
-                                   #     OpenCode desktop app.asar patch (OpenCode submenu [7]):
+                                   #   patch_opencode_clone_home.ps1 (+ .mjs engine v3 — re-derived
+                                   #     2026-11-01 for the 2.2.5.0 bundle) — one-time
+                                   #     OpenCode desktop app.asar patch (OpenCode submenu [8]):
                                    #     clone-home (packaged bootstrap hardcodes userData =
                                    #     %APPDATA%\ai.opencode.desktop — the patch swaps the
                                    #     isPackaged branch of the app's own ye() for an argv scan of
@@ -284,18 +247,25 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     byte-probe (core/current tiers — old-engine trees rebuild
                                    #     from the marker's pristine backup) + locked-asar in-place
                                    #     overwrite fallback (indexer-held asar: delete blocked,
-                                   #     write shared; pristine-backup-gated); OpenCode must be
-                                   #     closed; re-apply after app updates (auto-detected);
+                                   #     write shared; pristine-backup-gated); -WaitForClose
+                                   #     (2026-10-31, GHOST.bat OpenCode [8] passes it) turns the
+                                   #     running-OpenCode guard into instruct-and-poll: prints the
+                                   #     running PIDs, waits for every OpenCode.exe from the install
+                                   #     dir to exit (2 consecutive clear probes, 30-min default via
+                                   #     -WaitTimeoutMinutes) and continues straight into the patch -
+                                   #     the bare throw remains the default for direct runs without
+                                   #     the switch (-Restore honors it too); re-apply after app
+                                   #     updates (auto-detected);
                                    #   install_opencode_clone_shortcuts.ps1 — per-user Desktop +
                                    #     Start-menu shortcuts for c1..c5 (AppUserModel.ID =
-                                   #     ai.opencode.desktop.c1..5; base read from the stock
+                                   #     ai.opencode.desktop.c1..c5; base read from the stock
                                    #     OpenCode.lnk via Shell ExtendedProperty or the verified
                                    #     constant; -Instance to scope; -Remove; -RepairPrimaryAumid
                                    #     strips a hijacked .cN suffix + restores <exe>,0 icon);
                                    #     per-clone IconLocation =
                                    #     tools\opencode-<color>-branding\tray_icon.ico,0 (missing
                                    #     dir warns + falls back to the exe icon); OpenCode
-                                   #     submenu [8]
+                                   #     submenu [7]
                                    #   new_clone_suite.ps1 — clone-suite scaffolding generator (playbook
                                    #     phases 3-10 mechanics): intake JSON → reset/launcher/.bat/
                                    #     shortcuts/SPEC skeletons + GHOST.bat submenu anchor-edit with
@@ -305,9 +275,10 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     PS 5.1 + System.Drawing only): corner-sampled background →
                                    #     tile detection (LongestLowRun profiles, -BgTolerance, or
                                    #     -ManualCrop x,y,size) → inset crop → 1024 master +
-                                   #     rounded-corner alpha mask → tray_icon.ico (16..256
-                                   #     PNG-in-ICO) + icon_windows.png + source.<ext> provenance;
-                                   #     -HueRotate derives extra colors (autoclaw-red-branding =
+                                   #     rounded-corner alpha mask → tray_icon.ico (16..256,
+                                   #     DIB frames below 256 + PNG at 256 — the only layout the
+                                   #     shell renders) + icon_windows.png + source.<ext> provenance;
+                                   #     -HueRotate derives extra colors (zcode-red-branding =
                                    #     blue master +150°); re-runs reuse the transparent-corner
                                    #     master; verify-after + TEMP previews; built for the
                                    #     opencode/cline future clones — do not delete
@@ -378,15 +349,29 @@ launch_zcode_second_instance.ps1   # ZCode multi-instance launcher -Instance Sec
                                    #          instances it prints live commit numbers and asks before
                                    #          starting another (renderer-OOM 2026-09-25 + Start Plan
                                    #          throttling); non-interactive callers warn+continue, an
-                                   #          already-running clone never prompts; -LowRam passes
+                                   #          already-running clone never prompts; hidden-console
+                                   #          launches (shortcuts, -WindowStyle Hidden) get a Yes/No
+                                   #          dialog instead of an invisible prompt that would hang
+                                   #          the launch (2026-11-01, launcher-side so installed
+                                   #          shortcuts need no reinstall; -NonInteractive switch
+                                   #          for unattended callers); -LowRam passes
                                    #          --disable-gpu (experimental);
-                                   #          Launch-ZCode-Second/Third/Fourth/Fifth/Sixth.bat wrappers)
+                                   #          Launch-ZCode-Blue/Yellow/Green/Red/Orange.bat wrappers)
 launch_zcode_cli_light.ps1         # ZCode LIGHT headless worker -Instance Second..Sixth (GHOST.bat ZCode
                                    #          [7], gid 70; verified 2026-10-28 — docs/ZCODE_LIGHT_MODE.md):
-                                   #          runs resources\glm\zcode.cjs under system node with the four
+                                   #          runs resources\glm\zcode.cjs under system node with the FIVE
                                    #          env levers (HOME+USERPROFILE -> CloneHome redirect
                                    #          cli/config.json + cli/db/db.sqlite; ZCODE_DATA_BASE_DIR ->
-                                   #          v2 credentials/provider_config; ZCODE_STORAGE_DIR -> cli caches)
+                                   #          v2 credentials/provider_config; ZCODE_STORAGE_DIR -> cli caches;
+                                   #          ZCODE_BUILTIN_PROVIDER_CONFIG_FILE -> the bundled
+                                   #          resources\config\provider\zcode-builtin.json — FIFTH lever
+                                   #          added 2026-10-31 for the CLI 0.17.1 plain-node bootstrap
+                                   #          regression: the bundle's own fallback climbs a dev-monorepo
+                                   #          path and never finds the packaged file, and the nbs() argv
+                                   #          gate requires it for -p/app-server/login; the desktop app
+                                   #          injects this env into its own children so only plain-node
+                                   #          spawners need it — T3 bridge spawnAppServer carries the same
+                                   #          lever; bundled copy first, newest runtime-cache copy fallback)
                                    #          — ~0.9 GB commit vs ~1.6 GB+ per desktop instance; modes:
                                    #          interactive REPL (default), -Prompt one-shot (--mode, --cwd),
                                    #          -Server = foreground app-server stdio for orchestrators.
@@ -423,31 +408,6 @@ spoof_wmi_serials.ps1              # System-level WMI serial spoof (2026-10-27, 
                                    #   arbiter, audit + generated winmgmt /restore script; -DryRun. WMI
                                    #   layer only (docs/WMI_SERIAL_SPOOFING.md) — ported from the Hydra
                                    #   Spoofer review, technique only; CPU/GPU/volume serials excluded.
-reset_autoclaw.ps1                # AutoClaw: 7 steps (auth.json deviceId rotate,
-                                   #          identity\device.json ed25519 keypair regen via node:crypto
-                                   #          (system node or the app-bundled node.exe), settings.json
-                                   #          gateway.port+url + system.autoUpdate=false (asar-patch
-                                   #          guard), .updaterId rotate, openclaw.json mode/checkOnStart,
-                                   #          devices\paired.json delete — live operator credential,
-                                   #          gateway regenerates; final re-verify; -Target
-                                   #          Primary|inst1|inst2|inst3|inst4|All + -DryRun;
-                                   #          All = clones first, Primary last)
-launch_autoclaw_clone.ps1         # AutoClaw multi-instance launcher -Instance inst1|inst2|inst3|inst4
-                                   #          + -Status: env levers USERPROFILE/HOME/TEMP/TMP/TMPDIR +
-                                   #          AUTOCLAW_GATEWAY_PORT (drift +9 read back, recorded to
-                                   #          instance-record.json) + --user-data-dir (this app HONOURS it,
-                                   #          lock keys off the profile dir); step 4c writes the taskbar
-                                   #          identity markers (.autoclaw-identity.json + .autoclaw-icon.ico,
-                                   #          verify-after; consumed by patch engine v12 — see tools/ notes);
-                                   #          first run seeds the Primary
-                                   #          profile EXCLUDING credential stores (token-cache.json,
-                                   #          *.backup, auth.json tokens stripped — userInfo kept, ONE
-                                   #          manual login per clone) + rotates device identity + ed25519
-                                   #          keypair; marker-guarded one-time primary-token reconciliation;
-                                   #          verify-after-launch: subtree stable 5s, MCP/gateway /health on
-                                   #          DISCOVERED ports (never the requested one), paired.json holds
-                                   #          only the clone's own key, Primary openclaw.json hash unchanged.
-                                   #          Launch sequentially, never elevated.
 launch_cline_clone.ps1             # Cline desktop clone launcher -Instance c1..c5 + -Status
                                    #   (Tauri 2.11.1/WebView2 app; see the Cline conventions section):
                                    #   env isolation CLINE_DIR + WEBVIEW2_USER_DATA_FOLDER +
@@ -462,7 +422,7 @@ launch_opencode_clone.ps1          # OpenCode desktop clone launcher -Instance c
                                    #   section): argv isolation --opencode-clone-home=<home> consumed
                                    #   by the clone-home asar patch (userData/sessionData + XDG_* per
                                    #   clone), identity ALSO on argv (--opencode-clone-id/-title/-icon;
-                                   #   engine v2 — the app's ESM main has no require), patch-signature
+                                   #   engine v3 — the app's ESM main has no require), patch-signature
                                    #   preflight ABORTS unpatched installs (a flagged launch on a
                                    #   stock app opens the PRIMARY profile), lockfile running-guard
                                    #   informs instead of blocking (per-clone single-instance keys
@@ -475,8 +435,8 @@ launch_opencode_clones_all.ps1     # sequential all-five (launcher verify-after 
 ```
 (All .ps1 above live in src/windows/; .sh scripts in src/linux/;
 superseded versions (Qoder v0.1-v0.3, ZCode v1.0-v1.3, MiniMax v1.0-v1.1,
-Cursor/Windsurf/Trae v0.1 legacy) live in archive/ as local-only fallbacks —
-never committed, do not run them.)
+Cursor/Windsurf/Trae v0.1 legacy, AutoClaw v1.20 suite) live in archive/ as
+local-only fallbacks — never committed, do not run them.)
 
 Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin -> Stop-App -> New-IdentitySet -> per-target [n/N] steps with verify-after -> audit log -> restore script -> summary.
 
@@ -513,6 +473,15 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   double quotes, aborting the whole script silently. Reword to avoid parens
   (e.g. `a separate window - leave it open`) or escape as `^( ^)`.
   (Bit us in `GHOST.bat` option [9]: the parent menu vanished instantly.)
+- Never pass a bare `&` through a `call :Div` / `:Hdr` / `:Opt` label
+  argument or a `:RunWith` note argument — those subroutines echo `%~N`
+  UNQUOTED, so CMD splits on the `&` and executes the tail as a command.
+  Reword labels with `+` or `-` (row style); direct `echo` lines escape as
+  `^&`. The harness guards it (S0b static scan + a global no-CMD-error
+  assertion inherited by every scenario).
+  (Bit us in `GHOST.bat` ZCode rows [17]/[24] 2026-10-30: `call :Div "Sync
+  & Chat Refresh"` printed `-- Sync` then `'Chat' is not recognized...`;
+  reworded to `Sync + Chat Refresh`.)
 - GUI apps that call `AttachConsole(ATTACH_PARENT_PROCESS)` (verified: ZCode)
   hijack the launching console with log floods. Launch them detached
   (`cmd /c start "" <exe>`, new window via `start` in the .bat) — never inline.
@@ -521,22 +490,41 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   local ids run strictly ascending 1..N in visual order, grouped by `:Div`
   sections — ZCode: Launch Clones [1]-[8] (Second/Third/Fourth/Fifth/Sixth,
   ALL, light worker, shortcuts) / Reset Clones [9]-[16] (Second..Sixth,
-  Primary, Both, ALL SIX) / Sync & Chat Refresh [17]-[23] / Watchers &
-  Diagnostics [24]-[26] / Maintenance [27]-[28] (login helper); AutoClaw2: Launch Clones [1]-[7]
+  Primary, Both, ALL SIX) / Sync + Chat Refresh [17]-[23] / Watchers +
+  Diagnostics [24]-[26] / Maintenance [27]-[29] (patch, login helper,
+  shortcuts remove); AutoClaw2: Launch Clones [1]-[7]
   (c1..c5, ALL, shortcuts) / Maintenance [8]-[9] (rewired to the AutoClaw2
   suite the same day — born display-ordered); Cline: Launch Clones [1]-[7]
-  (c1..c5, ALL, shortcuts) / Maintenance [8]-[9]. **Gids NEVER renumber** —
-  specs, wiring history and repo-integrity cite them; a renumber touches only
-  the submenu echo block + its resolver ladder. Add future rows in display
-  order inside their section — never a higher id out of sequence (the .bat
-  harness asserts ascending ids per submenu). Old→new for citations written
-  before 2026-10-29: ZCode launches [1,3,4,18,22]→[1,2,3,4,5], ALL [5]→[6],
-  light [27]→[7], shortcuts [2]→[8], resets [6,8,9,19,23,21,7,10]→
+  (c1..c5, ALL, shortcuts) / Maintenance [8]-[9]; OpenCode: Launch Clones
+  [1]-[7] (c1..c5, ALL, shortcuts) / Maintenance [8]-[10] (patch, status,
+  remove — 2026-10-31: shortcuts moved into Launch and the patch row into
+  Maintenance, locals [7]/[8] swapped, gids unchanged). **Gids NEVER
+  renumber** — specs, wiring history and repo-integrity cite them; a
+  renumber touches only the submenu echo block + its resolver ladder. Add
+  future rows in display order inside their section — never a higher id out
+  of sequence (the .bat harness asserts ascending ids per submenu).
+  **Row pattern (2026-10-31): the label carries the action + name ONLY — the
+  color and all qualifiers live in the tail** (`Reset Third instance` +
+  `- Yellow (survivors kept running)`); never embed a `- descriptor` inside
+  a label. **Naming scheme (2026-11-01 display unification):** the shortcut
+  FILE names use the color vocabulary shared by all four suites —
+  `<Suite> <Color>.lnk` (`ZCode Blue.lnk` .. `ZCode Orange.lnk`, matching the
+  `ZCode <Color>` window titles); the pre-unification ordinal/cN names are
+  LEGACY and every installer cleans them up on each run. The technical keys
+  stay FROZEN: ZCode instance keys Second..Sixth (clone dirs `ZCode<Name>Home`
+  / roaming `ZCode-<Name>`, AUMID suffixes `2..6` — the Primary carries the
+  bare base), newer suites `c1..cN` (dirs `<Home>\cN`, AUMID `.cN`); window
+  titles are app-driven and frozen. Alias map: Second↔c1↔Blue `#066BCB`,
+  Third↔c2↔Yellow `#D4AA10`, Fourth↔c3↔Green `#13826A`, Fifth↔c4↔Red
+  `#CA0607`, Sixth↔c5↔Orange `#CB5D06`; `clone` is the unified docs term.
+  Old→new for citations written before 2026-10-29:
+  ZCode launches [1,3,4,18,22]→[1,2,3,4,5], ALL [5]→[6], light [27]→[7],
+  shortcuts [2]→[8], resets [6,8,9,19,23,21,7,10]→
   [9,10,11,12,13,14,15,16], sync [20,24]→[17,18], MCP watcher [25,26]→[19,20],
   chats [13,15,14]→[21,22,23], watchers [11,16,17]→[24,25,26], patch [12]→[27];
-  Cline [3,4,6,7,5,2]→[2,3,4,5,6,7]. (The AutoClaw v1.20 rows were not
-  renumbered — they were retired outright the same day; see the AutoClaw2
-  rewiring entry.)
+  Cline [3,4,6,7,5,2]→[2,3,4,5,6,7]; OpenCode 2026-10-31 patch [7]→[8],
+  shortcuts [8]→[7]. (The AutoClaw v1.20 rows were not renumbered — they
+  were retired outright the same day; see the AutoClaw2 rewiring entry.)
 
 ## Multi-instance conventions (ZCode: Primary + 5 clones)
 
@@ -614,7 +602,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   rewrite ZCode.lnk with the clone's AUMID, which stole the Primary's Start pin
   and broke taskbar icon resolution), and disables the clone's auto-updater
   (`ZCODE_ICON_DIR` guard) so it can never wipe the shared patch via
-  quitAndInstall. Launch clones ONLY via their "ZCode Second/Third/Fourth"
+  quitAndInstall. Launch clones ONLY via their "ZCode Blue/Yellow/Green/Red/Orange"
   shortcuts / the launcher — a bare ZCode.exe launch gets the Primary's
   profile, AUMID and button.
 - Do NOT run ZCode instances elevated (verified 2026-09-24: Primary launched
@@ -738,14 +726,27 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   2026-09-25 renderer-OOM freeze, and the Start Plan provider throttles above
   ~3 concurrent instances anyway, so `launch_zcode_second_instance.ps1` now
   carries a soft `-MaxConcurrent 3` guard (live commit numbers + confirm;
-  non-interactive callers warn+continue; focus-relaunches never prompt; an
+  non-interactive callers warn+continue; hidden-console shortcut launches get
+  a Yes/No dialog — fixed 2026-11-01: the old invisible Read-Host hung the
+  launch so the app looked dead; focus-relaunches never prompt; an
   experimental `-LowRam` passes `--disable-gpu`) and ZCode [7] launches
   `launch_zcode_cli_light.ps1` — a per-account HEADLESS worker (~0.9 GB vs
   ~1.6 GB+). Verified limits recorded in the launcher header: standalone TUI
   impossible (@zcode/tui is asar-locked) and headless runs default to the free
   opencode-zen model until a one-time `zcode login zai` per clone home (the
   working plan provider namespace is `account:zai-start-plan`, discovered from
-  the Primary db's model_usage). T3 Code (pingdotgg) — the local support path
+  the Primary db's model_usage). **2026-10-31: CLI 0.17.1 broke every
+  plain-node launch** (`无法定位 CLI ZCode Built-in Provider Config` — the
+  bundle's builtin-config fallback climbs a dev-monorepo path from
+  `process.argv[1]` and never finds the packaged
+  `resources\config\provider\zcode-builtin.json`; the `nbs()` argv gate demands
+  it for `-p`/`app-server`/`login`) — fixed with the FIFTH env lever
+  `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` in the light launcher AND the T3
+  bridge's `spawnAppServer` (`tools/t3_bridge_lib.mjs`
+  resolveBuiltinProviderConfig: bundled copy first, newest
+  `<home>\.zcode\v2\runtime\provider` runtime-cache copy fallback, clear
+  fail-fast when neither exists; desktop children are immune — the app
+  injects the env into its own children). T3 Code (pingdotgg) — the local support path
   is SPECCED AND PHASES A-B IMPLEMENTED 2026-10-28/29 (docs/T3_LOCAL_SUPPORT.md +
   docs/T3_ZCODE_BRIDGE_SPEC.md §8 addendum; monorepo study clone at ..\t3code,
   1016 MB, never committed here): `tools/t3_zcode_bridge.mjs` is the ACP v1 ⇄
@@ -775,172 +776,24 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   instances — edit only with the app closed), and the user-supervised
   live-acceptance runbook lives in spec §9.2.
 
-## Multi-instance conventions (AutoClaw: Primary + 4 clone slots)
+## Multi-instance conventions (AutoClaw v1.20: SUNSET — superseded by AutoClaw2)
 
-- Layout (FROZEN, never rename): `%USERPROFILE%\AutoClawCloneHome\instN\`
-  with `home\` (USERPROFILE/HOME → gateway state `.openclaw-autoclaw`),
-  `profile\` (--user-data-dir), `tmp\` (TEMP/TMP/TMPDIR). The Primary
-  (`%APPDATA%\AutoClaw` + `~\.openclaw-autoclaw`) is never touched by any
-  clone script beyond reading it for the seed. Spec:
-  `docs/AUTOCLAW_CLONES_SPEC.md` (all §5 ground truth read from the
-  installed app, provenance §13).
-- Isolation levers: env vars FIRST (`USERPROFILE`/`HOME` move the whole
-  gateway state tree; `AUTOCLAW_GATEWAY_PORT` per instance), and
-  `--user-data-dir` as a SECOND layer — this app HONOURS it (unlike ZCode);
-  the single-instance lock keys off the profile dir, so re-launching a
-  running clone just focuses it.
-- The MCP HTTP server binds a hardcoded 4-slot port array
-  (`PRODUCTIVITY_MCP_CANDIDATE_PORTS = [19681..19684]`) in the Electron main
-  process — 4 is the stock ceiling and two instances silently SPLIT across
-  slots (wrong-instance routing, not an error). `tools/patch_autoclaw_ports.ps1`
-  widens it to 8; inst4 has NO MCP port without that patch. An AutoClaw
-  update reverts it — therefore EVERY instance's settings.json carries
-  `system.autoUpdate: false` (set by reset + seed-scrub) and the patch is
-  re-applied after any manual update (AutoClaw submenu [11] — row retired
-  2026-10-29 with the v1.20 app; run the patch script directly on hosts that
-  still run v1.20).
-- The gateway port silently shifts up to +9 when the preferred port is busy
-  (`PORT_PROBE_RANGE`) — never record the REQUESTED port as the actual one:
-  the launcher discovers the clone's real listening ports by scanning
-  19681..19688 / requested..requested+9 against the clone's own process
-  subtree and writes them to `instance-record.json` (`-Status` reads it).
-- One credential = one instance (ZCode Telegram rule generalized): AutoClaw
-  keeps TWO device identities — `auth.json.deviceId` (backend id) and
-  `identity\device.json` (ed25519 keypair; the pubkey is what the backend
-  pins for pairing) — plus `devices\paired.json`, a LIVE operator token with
-  admin scope. The seed copies the Primary profile EXCLUDING every
-  credential store (`token-cache.json` holds live token/refreshToken too —
-  it is excluded, not scrubbed), strips `auth.json` tokens keeping
-  `userInfo` (clone opens on the account, ONE manual login per clone),
-  rotates the identities, and NEVER seeds the gateway state tree (fresh per
-  clone; its gateway regenerates `paired.json`). Verify-after-launch
-  asserts the clone's `paired.json` holds only its own device key.
-- Classify clone processes by PROCESS MARKERS (the `--user-data-dir` /
-  home-dir strings in the command line), never by window title (ZCode
-  splash-phase lesson applies verbatim); helpers/gateway children hang off
-  the marker-matched main via a parent walk.
-- Launch clones SEQUENTIALLY, never in parallel, and never elevated (UIPI;
-  the ZCode drag-drop rule applies). The launcher itself needs NO admin.
-- The FIRST-RUN seed requires the Primary CLOSED — a live Chromium profile
-  cannot be robocopied (leveldb LOCK files + open DBs; verified 2026-10-15:
-  robocopy exit 9 with the Primary running). The launcher waits up to 180s
-  then aborts; later launches never need this. Seed completion is
-  marker-guarded (`.autoclaw-seeded` written only after scrub verified):
-  needsSeed keyed on `auth.json` alone let an aborted robocopy's PARTIAL
-  profile pass as seeded — the app launched on inconsistent stores and died
-  within seconds (live-verified). A partial profile is cleared + re-seeded
-  automatically on the next run.
-- Taskbar identity v2 IMPLEMENTED 2026-10-17, live-verified 2026-10-18 (spec
-  §7.3c, patch engine v12 + launcher step 4c): the launcher writes
-  `<CloneProfile>\.autoclaw-identity.json`
-  (`{aumidSuffix, title, iconPath?}` — inst1=blue, inst2=yellow, inst3=green,
-  inst4=red, synced with the shortcut installer's `$InstanceDefs`) and copies
-  `tools\autoclaw-<color>-branding\tray_icon.ico` → `<CloneProfile>\.autoclaw-icon.ico`
-  fresh on every launch. The patched app (engine v12) resolves the identity from
-  `--user-data-dir` argv (env dies at the UAC boundary, args do not) and: wraps BOTH
-  `setAppUserModelId("com.zhipuai.autoclaw")` call sites to declare
-  `com.zhipuai.autoclaw.instN` (equal to the shortcut AUMIDs, so the running button
-  resolves the clone shortcut's icon), routes every `new BrowserWindow` through a
-  subclass that stamps the WINDOW-level AUMID via `setAppDetails` at creation time
-  (BEFORE show/grouping — no stale-group kick needed; the ZCode `.kick`/watcher existed
-  for LATE external re-stamping) and sets the colored window icon, and forces the
-  "AutoClaw <Color>" title via `page-title-updated` interception (renderer
-  `document.title` cannot fold it back — the pin-collision class prevented at source).
-  Missing marker (Primary, bare native-host spawns) => resolver null => stock behavior.
-  Contingency if a merge case ever appears: adapt the watch_zcode_taskbar.ps1 pattern
-  elevated (clone windows are elevated, UIPI). The SHORTCUTS carry the matching
-  per-clone AUMIDs (`com.zhipuai.autoclaw.inst1..4`) and ICONS
-  (`tools\autoclaw-<color>-branding\tray_icon.ico` — blue/yellow/green for
-  inst1..3 from developer-supplied renders 2026-10-17, red for inst4 as a
-  +150° hue-rotate of the blue master via `tools\make_clone_icon.ps1`;
-  `bad-green` rejected by the developer). A pinned clone can hijack the
-  Primary's `AutoClaw.lnk` AUMID + wipe its icon — same as ZCode: repair with
-  `install_autoclaw_clone_shortcuts.ps1 -RepairPrimaryAumid` (the Primary
-  keeps the stock exe icon; only clone .lnk icons are custom).
-- Electron fuses verified patchable (no asar-integrity validation, no
-  integrity.json) — the ZCode asar-patch mechanism works on AutoClaw as-is.
-  AutoClaw also bundles `resources\node\node.exe` — the keygen fallback when
-  system node is missing (ed25519 via node:crypto; PS 5.1 cannot generate
-  ed25519; PEM shapes verified: SPKI 113, PKCS8 119 chars).
-- **ELEVATION (verified live 2026-10-16, changes everything above):**
-  AutoClaw.exe's manifest declares `requestedExecutionLevel
-  level="requireAdministrator"` — EVERY launch self-elevates (UAC silent for
-  admin accounts with ConsentPromptBehaviorAdmin=0), and the elevated process
-  gets a FRESH ENVIRONMENT: the launcher's env levers (USERPROFILE/HOME/
-  AUTOCLAW_GATEWAY_PORT) never survive. `--user-data-dir` (an argument)
-  survives ONLY when the launching cmd itself is elevated first — a
-  non-elevated `start` hits the ERROR_ELEVATION_REQUIRED ShellExecute
-  fallback, which launches the elevated process with a bare command line
-  (verified via PEB reads: every AutoClaw.exe ran with NO arguments).
-  Therefore: (a) the launcher elevates its own `cmd /c start` via
-  `-Verb RunAs` so the args ride a plain CreateProcess; (b) the gateway-port
-  lever is the clone's settings.json `gateway.port` (file-based, survives
-  elevation), not the env var; (c) the state dir is isolated by
-  `tools/patch_autoclaw_ports.ps1` engine v10 (`home-override`): the patched
-  app reads `<userData>\.autoclaw-home` (written by the launcher each launch,
-  trim-tolerant — the app's argv carries a trailing space after the quoted
-  path) and redirects the whole `~/.openclaw-autoclaw` tree; the resolver is
-  `app.getPath("home")`-based (Chromium known-folder, env-immune), NOT
-  `os.homedir()` — the spec's section 5.3 env-var claim was verified against
-  plain node only and does NOT hold for the app. The scan is
-  argv-driven (reads --user-data-dir from process.argv — getPath("userData")
-  is NOT yet applied at resolver time) and caches into
-  `globalThis.__autoclawHomeOverride`.
-- **WMI (Win32_Process) is unusable for AutoClaw classification**: it omits
-  AutoClaw.exe processes ENTIRELY (healthy mains invisible minutes after
-  start) and CommandLine is permanently empty for the ones it shows (the app
-  effectively scrubs its PEB command line — PEB reads confirm args were
-  passed while WMI/PEB show none). Classification uses Get-Process
-  (toolhelp32) pid-diff + the profile lockfile exclusive-open probe
-  (`Test-ProfileLockHeld`); port ownership falls back to an unattributed
-  advisory scan. `taskkill /F` may report "Access is denied" for same-user
-  processes misleadingly — use .NET `Process.Kill()`.
-- Every patched app start appends one diagnostic record to
-  `%TEMP%\ac-argv-debug.txt` (argv + resolved override + error) — the field
-  tool for diagnosing clone isolation; remove from
-  `tools/patch_autoclaw_ports.mjs` `ARGV_SCAN_CACHED`/`homeOverrideIife` if
-  it ever needs to go silent.
-- Full live-verified clone cycle 2026-10-16: inst1 launched beside the
-  Primary with `gateway :18799 /health OK {"ok":true,"status":"live"}`,
-  `paired.json` holding only the clone's device key, Primary openclaw.json
-  hash unchanged, and the whole `.openclaw-autoclaw` tree materializing in
-  the clone home. One manual login remains per clone.
-- **First-run seed gate = the PRIMARY's profile lockfile, never "any
-  AutoClaw.exe process"** (live bug 2026-10-17): the gate used
-  `Get-Process -Name AutoClaw`, so inst1 RUNNING blocked inst2/3/4's first
-  launch for the full 180s wait and then aborted — user-visible as a cmd
-  window that flashes and closes with nothing opening. Clones are named
-  AutoClaw.exe too and never lock the Primary's files; the correct gate is
-  `Test-ProfileLockHeld` on `%APPDATA%\AutoClaw` (clean Primary exit leaves
-  no lockfile; a running instance holds it exclusively — semantics
-  verified on a live clone the same day). Running-clone detection also
-  needs the lockfile probe: WMI cannot see the clone, so the marker-based
-  subtree match alone misses it.
-- **Sign-in gate on the gateway (asar-verified 2026-10-17):** the embedded
-  gateway auto-starts only via `shouldLaunchGatewayAtColdStart =
-  isCloudMode || hasAcceptedRiskAgreement()` → `triggerGatewayLaunch()`,
-  whose start is parked on the renderer's `APP_MAIN_UI_READY`
-  (`markGatewayMainUiReady`); the handler re-checks via
-  `ensureEmbeddedGatewayLaunchedAfterRiskAgreement`. An instance sitting on
-  the SIGN-IN screen never sends it — NO gateway/MCP ports until the ONE
-  manual login completes and the main UI mounts (inst2 live case: seeded +
-  isolated + running, gateway absent while `auth.json` had no token; after
-  the user's inst1 login 02:13 its gateway bound 18799). The launcher
-  treats a missing gateway as WARN when the profile has no token (login
-  pending) and FAIL only when a token IS present.
-- **Browser-extension native host spawns bare Primary instances**
-  (live-verified 2026-10-17): `%APPDATA%\AutoClaw\chrome-ext\0.1.6\com.autoclaw.native_host_stub.json`
-  points at `C:\Program Files\AutoClaw\AutoClaw.exe` with NO arguments —
-  whenever the AutoClaw extension reconnects in Chrome/Edge it spawns a
-  bare AutoClaw.exe that opens the PRIMARY profile and rewrites its
-  `openclaw.json` (bare pid 12612 spawned 43s into inst2's launch; this is
-  also the source of the "openclaw.json modified externally" dialogs). The
-  launcher therefore attributes Primary-hash changes via the Primary
-  lockfile before/after (held during the window → WARN out-of-band, not a
-  clone breach); a clone's FIRST launch needs every Primary-profile window
-  closed — including that stray spawn.
+The AutoClaw v1.20 suite (Primary + inst1..4 clones, `C:\Program Files\AutoClaw`
++ `~\.openclaw-autoclaw`) was RETIRED: the app was uninstalled from the dev
+host 2026-10-29 (AutoClaw2 v2.1.1 "zwork" is the active successor — its own
+section above in the AutoClaw2 suite docs), and the suite's scripts
+(`launch_autoclaw_clone.ps1`, `reset_autoclaw.ps1`, `patch_autoclaw_ports.ps1`
++ engine v12, `install_autoclaw_clone_shortcuts.ps1`), v1 branding dirs and
+`docs/AUTOCLAW_CLONES_SPEC.md` were removed from the tracked repo
+2026-10-31. Nothing in the current tree can run them. Recover from git
+history (last full presence: commit 874346f and its descendants) or the
+gitignored local copy at `archive/autoclaw-v1.20/` if a v1.20 host ever
+needs the machinery again. The cross-suite lessons that outlived it — one
+credential = one instance, classify by process markers never titles,
+sequential non-elevated launches, UIPI drag-drop, the sign-in-gate pattern —
+are already stated in the live suites' sections where they apply.
 
-## Multi-instance conventions (Cline: Primary + 5 clone slots)
+## Multi-instance conventions (Cline: Primary + 5 clones)
 
 - Layout: `%USERPROFILE%\ClineClonesHome\c1..c5\` (each = `CLINE_DIR`,
   whole state tree incl. `data\` db/locks/logs/settings/secrets) +
@@ -1002,18 +855,22 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   + `~\.local\share\opencode` + `~\.config\opencode` (holds LIVE provider
   API keys — never copied). Spec: `docs/OPENCODE_CLONES_SPEC.md`
   (implemented + LIVE-VERIFIED 2026-10-24/25).
-- The app is **Electron (electron-builder NSIS) 2.0.32, asInvoker** — and
+- The app is **Electron (electron-builder NSIS), asInvoker** (2.0.32 shipped
+  the suite; 2.2.5.0 live-patched 2026-11-01) — and
   UNLIKE AutoClaw2/Cline its packaged build has NO env lever for the
   userData: `OPENCODE_DESKTOP_TEST_ROOT` is unpackaged-only,
   `OPENCODE_TEST_ONBOARDING` rmSync-wipes its root every boot, and the
   channel map only has beta/prod. Isolation therefore needs the ONE-TIME
   **clone-home asar patch** (`tools/patch_opencode_clone_home.ps1` +
-  `.mjs`, engine v2): the argv flag `--opencode-clone-home=<dir>` feeds
-  the app's OWN `ye()` test-mode branch → `userData=<home>\desktop`,
-  `sessionData=<home>\session`, and the four `XDG_*` env vars set from
-  the home's subdirs BEFORE the v2 background-service spawn (the app's
-  own redirection surface, read unconditionally in production). No flag =
-  bit-for-bit stock. Backup + marker (`opencode-clone-home-patch.marker.json`,
+  `.mjs`, engine v3 — re-derived 2026-11-01 for the 2.2.5.0 bundle after
+  the updater replaced app.asar wholesale on 2026-10-31): the argv flag
+  `--opencode-clone-home=<dir>` slots into the app's OWN test-root read
+  (the bootstrap `ue()` — was the `ye()` ternary tail in 2.0.32) →
+  `userData=<home>\desktop`, `sessionData=<home>\session`, and the four
+  `XDG_*` env vars set from the home's subdirs BEFORE the background-service
+  spawn (the app's own redirection surface, read unconditionally in
+  production). No flag = bit-for-bit stock. Backup + marker
+  (`opencode-clone-home-patch.marker.json`,
   patchVersion) + `-Restore` + `node --check` + zero-site abort +
   update-recovery byte-probe with TWO tiers — CORE signatures
   (`__opencodeCloneHome`/`__opencodeCloneIdentity`/`--opencode-clone-home`,
@@ -1026,7 +883,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   place, allowed only with a verified pristine backup; locked unpacked
   dir kept-with-verify — the engine changes no unpacked bytes). An app
   update reverts the patch — the byte-probe re-patches automatically; run
-  OpenCode [7] (or the launcher's abort message) after any manual update.
+  OpenCode [8] (or the launcher's abort message) after any manual update.
   Patch with OpenCode CLOSED.
 - Single-instance = Chromium's userData-keyed lock (`requestSingleInstanceLock`
   with NO custom key, count=1) — per-clone homes coexist NATIVELY
@@ -1039,8 +896,9 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   `.<aumidSuffix>` + an app-level `browser-window-created` listener
   stamps every window's WINDOW-level AUMID via `setAppDetails` at
   creation, sets the per-color window icon and forces the
-  "OpenCode <Color>" title. **Identity rides PURE ARGV (engine v2, live
-  finding): the main bundle `out/main/index.js` is ESM — `require` is
+  "OpenCode <Color>" title. **Identity rides PURE ARGV (the argv-only
+  finding landed in engine v2, live 2026-10-24, and carries through v3):
+  the main bundle `out/main/index.js` is ESM — `require` is
   undefined — so v1's fs-based identity json resolver silently no-oped
   (caught error → null → stock identity; isolation unaffected, caught by
   the launcher's title check). The launcher passes
@@ -1096,11 +954,8 @@ default to IMPROVISE (generate tinted placeholder variants from the stock
 icon) + report, with stock-default + report as the allowed fallback — both
 branches are ALWAYS reported, never silent (playbook §5). Colors are
 developer-specified per clone (defaults: the ZCode blue/yellow/green
-palette). Current suites: ZCode (gold standard, full identity) and AutoClaw
-(v1 shipped: shortcut AUMIDs + per-clone icons; taskbar identity v2
-IMPLEMENTED 2026-10-17, live-verified 2026-10-18 — patch engine v12 +
-launcher step 4c per its spec §7.3c; window AUMID readback observed live);
-AutoClaw2 (2026-10-23, c1..c5, env-lever-only, no patching) and Cline
+palette). Current suites: ZCode (gold standard, full identity) and AutoClaw2
+(2026-10-23, c1..c5, env-lever-only, no patching) and Cline
 (2026-10-24, c1..c5, env levers + single-instance window neutralization,
 no patching — its spec documents the Tauri guard anatomy). OpenCode
 desktop (2026-10-24, c1..c5, clone-home asar patch — packaged builds
@@ -1109,7 +964,11 @@ redirection from an argv flag; native per-userData single-instance lock;
 single setAppUserModelId site wrapped + browser-window-created stamper
 with argv identity (ESM main); LIVE-VERIFIED 2026-10-24/25 — coexistence,
 ephemeral service ports, Primary snapshot diff = 0 clone-attributable
-changes; spec docs/OPENCODE_CLONES_SPEC.md).
+changes; spec docs/OPENCODE_CLONES_SPEC.md). The older AutoClaw v1.20
+suite (shortcut AUMIDs + per-clone icons + taskbar identity v2 via patch
+engine v12) was RETIRED 2026-10-31 with the v1.20 app — its spec and
+scripts live in git history + archive/autoclaw-v1.20/ (see the sunset
+note in the AutoClaw conventions section).
 
 ## Out of scope
 

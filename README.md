@@ -27,14 +27,14 @@ touches, and emits an audit log plus a self-contained restore script.
 | Task | Windows | Linux |
 |------|---------|-------|
 | Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` |
-| Reset Windsurf / Devin Desktop | `reset_devin.ps1` | `reset_windsurf.sh` |
+| Reset Windsurf\Devin | `reset_devin.ps1` | `reset_windsurf.sh` |
 | Reset Trae | `reset_trae.ps1` | — (legacy only, local) |
 | Reset Qoder | `reset_qoder.ps1` | — |
 | Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | — |
-| ZCode clones (Primary + 5 branded instances) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | — |
+| ZCode clones (Primary + 5 branded clones) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | — |
 | ZCode light headless worker (no desktop window) | `launch_zcode_cli_light.ps1 -Instance Second\|...\|Sixth` (`-Prompt` / `-Server`) | — |
 | Reset QoderWork | `reset_qoderwork.ps1` | — |
-| Reset MiniMax Agent / OpenCode | `reset_minimax_opencode.ps1` | — |
+| Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | — |
 | Device fingerprint | `change_device_id.ps1` | `change_device_id.sh Fingerprint` |
 | WMI serial spoof (BIOS/motherboard/disks/RAM via WMI) | `spoof_wmi_serials.ps1` | — |
 | System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` |
@@ -103,8 +103,8 @@ ghost/
 ├── ghost.sh        # Linux interactive launcher
 ├── src/
 │   ├── windows/    # .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
-│   │               #   + ZCode/AutoClaw/AutoClaw2/Cline/OpenCode clone launchers
-│   │               #   (launch_zcode_second_instance.ps1, launch_autoclaw_clone.ps1,
+│   │               #   + ZCode/AutoClaw2/Cline/OpenCode clone launchers
+│   │               #   (launch_zcode_second_instance.ps1,
 │   │               #   launch_autoclaw2_clone.ps1 + launch_autoclaw2_clones_all.ps1,
 │   │               #   launch_cline_clone.ps1 + launch_cline_clones_all.ps1,
 │   │               #   launch_opencode_clone.ps1 + launch_opencode_clones_all.ps1)
@@ -122,10 +122,7 @@ ghost/
 │                   #   diagnose_zcode_freeze.ps1 (read-only freeze diagnostic),
 │                   #   diagnose_zcode_throttle.ps1 (read-only Start-Plan throttle
 │                   #   diagnostic — CLI-only, no GHOST.bat entry),
-│                   #   patch_autoclaw_ports.ps1 + .mjs (AutoClaw app.asar MCP
-│                   #   port-array patch 4 -> 8 slots — re-run after app updates),
-│                   #   install_autoclaw_clone_shortcuts.ps1 (AutoClaw clone
-│                   #   shortcuts), make_ghost_icon.ps1 (regenerates the launcher icon),
+│                   #   make_ghost_icon.ps1 (regenerates the launcher icon),
 │                   #   make_clone_icon.ps1 (generic per-app clone-icon generator),
 │                   #   new_clone_suite.ps1 (clone-suite scaffolding generator),
 │                   #   set_zcode_bot.ps1 (per-clone Telegram bot audit/sync),
@@ -133,8 +130,7 @@ ghost/
 │                   #   sync; -McpOnly is safe against RUNNING instances),
 │                   #   zcode_mcp_merge.ps1 (unit-tested MCP merge core),
 │                   #   watch_zcode_mcp_sync.ps1 (resident MCP sync watcher),
-│                   #   zcode-{blue,yellow,green,red,orange}-branding/ +
-│                   #   autoclaw-{blue,yellow,green,red}-branding/ (icon assets);
+│                   #   zcode-{blue,yellow,green,red,orange}-branding/ (icon assets);
 │                   #   cline-{blue,yellow,green,red,orange}-branding/ (clone icons,
 │                   #   wired via install_cline_clone_shortcuts.ps1);
 │                   #   patch_opencode_clone_home.ps1 + .mjs (OpenCode desktop
@@ -214,17 +210,14 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   (Desktop + repo root) that carry the launcher icon; `-Remove` uninstalls
 - `tools/update_ghost.ps1` — repo self-updater: fetch + compare + guarded
   `git pull --ff-only` (`-CheckOnly` reports without writing)
-- **AutoClaw multi-instance** — `src/windows/launch_autoclaw_clone.ps1
-  -Instance inst1|inst2|inst3|inst4` launches independent clones (own profile,
-  identity, gateway port; first run seeds the Primary profile minus every
-  credential store — one manual login per clone), `-Status` reports processes,
-  actual bound ports and health. `src/windows/reset_autoclaw.ps1 -Target
-  Primary|inst1..4|All` rotates both device identities and deletes the live
-  operator credential. `tools/patch_autoclaw_ports.ps1` widens the installed
-  `app.asar`'s hardcoded 4-slot MCP port array to 8 (`-Restore` undoes it;
-  re-run after every AutoClaw app update). `tools/install_autoclaw_clone_shortcuts.ps1`
-  installs Desktop + Start-menu shortcuts (`-Remove`, `-RepairPrimaryAumid`).
-  Design + verified ground truth: [docs/AUTOCLAW_CLONES_SPEC.md](docs/AUTOCLAW_CLONES_SPEC.md)
+- **AutoClaw multi-instance (SUNSET)** — the AutoClaw v1.20 suite
+  (`launch_autoclaw_clone.ps1`, `reset_autoclaw.ps1`,
+  `patch_autoclaw_ports.ps1` + engine v12,
+  `install_autoclaw_clone_shortcuts.ps1`, `docs/AUTOCLAW_CLONES_SPEC.md`)
+  was REMOVED 2026-10-31 with the v1.20 app (uninstalled from the dev host
+  2026-10-29; AutoClaw2 below is the successor). Recover the machinery from
+  git history (last full presence: commit 874346f and its descendants) or
+  the gitignored `archive/autoclaw-v1.20/` copy.
 - **Cline multi-instance** — `src/windows/launch_cline_clone.ps1 -Instance
   c1..c5` launches fully isolated Cline desktop clones beside the Primary:
   each gets its own state tree (`CLINE_DIR`), web login profile
@@ -259,7 +252,9 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   generates a fresh device id per profile. `-Status` introspects a clone;
   `launch_autoclaw2_clones_all.ps1` launches all five sequentially;
   `tools/install_autoclaw2_clone_shortcuts.ps1` installs per-color shortcuts
-  (`-Remove`). CLI-only — the one suite not wired into `GHOST.bat`.
+  (`-Remove`). Wired into `GHOST.bat` main [4] — the AutoClaw2 submenu runs
+  the same launchers (rows [1]-[9]: launch c1..c5 / ALL / shortcuts / status /
+  remove).
   Design + verified ground truth: [docs/AUTOCLAW2_CLONES_SPEC.md](docs/AUTOCLAW2_CLONES_SPEC.md)
 - Telegram alerts for `tools/watch_zcode_captcha.ps1` come from
   `-TelegramBotToken`/`-TelegramChatId` params or `TELEGRAM_BOT_TOKEN` /

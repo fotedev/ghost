@@ -20,11 +20,17 @@
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\patch_zcode_icon_override.ps1
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\patch_zcode_icon_override.ps1 -Force
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\patch_zcode_icon_override.ps1 -Restore
+
+  With -WaitForClose (GHOST.bat ZCode [27] passes it) a running ZCode no longer
+  aborts the run: the script prints which processes are up and polls until every
+  ZCode.exe from the install dir has exited, then continues into the patch.
 #>
 [CmdletBinding()]
 param(
   [switch]$Restore,
   [switch]$Force,
+  [switch]$WaitForClose,
+  [int]$WaitTimeoutMinutes = 30,
   [string]$InstallDir
 )
 
@@ -95,9 +101,48 @@ function Assert-ZCodeClosed {
     Write-Warning ("{0} ZCode process(es) exposed no readable path and were NOT checked (PID(s): {1}). If the asar swap fails with the file in use, close every ZCode instance and re-run." -f
       $unclassified.Count, (($unclassified | Select-Object -First 5 -ExpandProperty Id) -join ", "))
   }
-  if ($procs.Count -gt 0) {
-    throw ("ZCode.exe from this install dir is running (PID(s): {0}). Close all its windows and try again." -f
-      (($procs | Select-Object -First 5 -ExpandProperty Id) -join ", "))
+  if ($procs.Count -eq 0) { return }
+
+  $pidList = (($procs | Select-Object -First 5 -ExpandProperty Id) -join ", ")
+  if (-not $script:WaitForClose) {
+    throw ("ZCode.exe from this install dir is running (PID(s): {0}). Close all its windows and try again." -f $pidList)
+  }
+
+  # -WaitForClose (GHOST.bat ZCode [27]): the operator is routinely working
+  # INSIDE a ZCode instance, so refuse-and-rerun blocks the patch indefinitely.
+  # Instruct once, poll until every instance has exited, then continue straight
+  # into the patch. Two consecutive clear probes defeat an exit-time helper
+  # respawn race; the deadline keeps an abandoned console from waiting forever.
+  # No per-iteration unclassified warnings - .Path is transiently unreadable
+  # while a process exits.
+  Write-Host ""
+  Write-Host ("ZCode.exe from this install dir is running (PID(s): {0})." -f $pidList)
+  Write-Host "Close ALL ZCode windows and instances now - the patch starts automatically once every one has exited."
+  Write-Host ("Waiting up to {0} minutes - Ctrl+C to abort." -f $script:WaitTimeoutMinutes)
+  $deadline = (Get-Date).AddMinutes($script:WaitTimeoutMinutes)
+  $clearStreak = 0
+  $lastStatus = Get-Date
+  while ($true) {
+    Start-Sleep -Seconds 2
+    $remaining = @(Get-Process -Name "ZCode" -ErrorAction SilentlyContinue |
+      Where-Object { $_.Path -and ($_.Path -like "$InstallPath*") })
+    if ($remaining.Count -eq 0) {
+      $clearStreak++
+      if ($clearStreak -ge 2) {
+        Write-Host "All ZCode instances closed - continuing."
+        return
+      }
+    } else {
+      $clearStreak = 0
+      if (((Get-Date) - $lastStatus).TotalSeconds -ge 30) {
+        $lastStatus = Get-Date
+        Write-Host ("      still waiting - {0} ZCode.exe process(es) from this install dir (PID(s): {1})" -f
+          $remaining.Count, (($remaining | Select-Object -First 5 -ExpandProperty Id) -join ", "))
+      }
+    }
+    if ((Get-Date) -gt $deadline) {
+      throw ("Timed out after {0} minutes waiting for ZCode.exe to exit. Close all ZCode instances and run this again." -f $script:WaitTimeoutMinutes)
+    }
   }
 }
 

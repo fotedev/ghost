@@ -557,7 +557,10 @@ function Start-ZCodeInstances {
         else {
             Write-WatchLog ("relaunching clone via launcher: " + $inst)
             try {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Instance $inst | Out-Null
+                # -NonInteractive: the watchdog console is hidden, so the
+                # launcher's console prompt AND its dialog branch would both
+                # block an unattended relaunch. Warn+continue instead.
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Instance $inst -NonInteractive | Out-Null
                 if ($LASTEXITCODE -ne 0) { throw ("launcher exit " + $LASTEXITCODE) }
             }
             catch {

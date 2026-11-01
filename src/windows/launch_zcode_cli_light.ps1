@@ -16,6 +16,13 @@
 #       ZCODE_DATA_BASE_DIR     -> <CloneHome>   (redirects v2\credentials.json +
 #                                                   telemetry + provider_config.json)
 #       ZCODE_STORAGE_DIR       -> <CloneHome>\.zcode  (cli\exec, clipboard, caches)
+#       ZCODE_BUILTIN_PROVIDER_CONFIG_FILE -> <install>\resources\config\provider\
+#                                            zcode-builtin.json  (FIFTH lever, 2026-10-31:
+#                                            CLI 0.17.1 plain-node bootstrap regression -
+#                                            the bundle's own fallback climbs a dev-monorepo
+#                                            path and never finds the packaged file; the
+#                                            desktop app injects this env into its own CLI
+#                                            children, so only plain-node spawners need it)
 #     Sessions land in the clone's own db.sqlite and share history with that
 #     clone's desktop app (same home = same store).
 #
@@ -89,6 +96,37 @@ $env:USERPROFILE = $CloneHome
 $env:ZCODE_DATA_BASE_DIR = $CloneHome
 $env:ZCODE_STORAGE_DIR = $CloneZCode
 
+# FIFTH lever (0.17.1 plain-node regression, found 2026-10-31): the bundle's
+# resolveBundledZCodeBuiltinProviderConfig derives both fallback candidates from
+# process.argv[1] via a dev-monorepo climb (glm\provider\zcode-builtin.json,
+# then 5x ..\ -> AppData\config\provider\) and never reaches the packaged file
+# at resources\config\provider\zcode-builtin.json, so every plain-node launch
+# dies at bootstrap ("无法定位 CLI ZCode Built-in Provider Config"). The desktop
+# app injects ZCODE_BUILTIN_PROVIDER_CONFIG_FILE into its own CLI children; the
+# light worker does the same (the lever tools\watch_zcode_captcha.ps1 already
+# sets). Bundled install copy first, newest runtime-cache copy as fallback.
+$ZcodeCliDir = Split-Path -Parent $ZcodeCli
+$BundledProvider = Join-Path (Split-Path -Parent $ZcodeCliDir) 'config\provider\zcode-builtin.json'
+$ProviderConfig = $null
+if (Test-Path -LiteralPath $BundledProvider) {
+    $ProviderConfig = $BundledProvider
+} else {
+    $runtimeRoot = Join-Path $CloneZCode 'v2\runtime\provider'
+    if (Test-Path -LiteralPath $runtimeRoot) {
+        $cached = Get-ChildItem -LiteralPath $runtimeRoot -Recurse -Filter 'zcode-builtin.json' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+        if ($cached) { $ProviderConfig = $cached.FullName }
+    }
+}
+if (-not $ProviderConfig) {
+    throw ("CLI bootstrap needs the bundled provider config (0.17.1 plain-node regression) but neither {0} " +
+           "nor any copy under {1} exists. Launch the ZCode desktop app once (it materializes the config), then retry." -f
+           $BundledProvider, (Join-Path $CloneZCode 'v2\runtime\provider'))
+}
+$env:ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = $ProviderConfig
+Write-Host ("[light] provider-config: {0}" -f $ProviderConfig) -ForegroundColor DarkGray
+
 # Node probe = functional (matches the repo's Python rule): a candidate only
 # counts when --version exits 0 reporting a version.
 $NodeExe = $null
@@ -128,6 +166,7 @@ if (-not $NoLoginWarn) {
         Write-Host ('[model]   set USERPROFILE={0}' -f $CloneHome) -ForegroundColor Yellow
         Write-Host ('[model]   set ZCODE_DATA_BASE_DIR={0}' -f $CloneHome) -ForegroundColor Yellow
         Write-Host ('[model]   set ZCODE_STORAGE_DIR={0}' -f $CloneZCode) -ForegroundColor Yellow
+        Write-Host ('[model]   set ZCODE_BUILTIN_PROVIDER_CONFIG_FILE={0}' -f $ProviderConfig) -ForegroundColor Yellow
         Write-Host ('[model]   node "{0}" login zai' -f $ZcodeCli) -ForegroundColor Yellow
         Write-Host '[model] (log in with THIS clone''s account; the login writes the plan default itself).' -ForegroundColor Yellow
     }

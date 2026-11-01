@@ -17,11 +17,31 @@ Everything below was **live-verified on 2026-10-28** against the installed
 | ZCode desktop instance | ~1.6 GB private commit each (3 running instances = 4.7 GB across 37 processes) |
 | Headless CLI worker (`-p` one-shot) | ~0.35 GB main + ~0.58 GB across its 5 plugin-host children ≈ **0.9 GB total** |
 
-Env isolation is complete: with the four levers set, `cli\config.json`,
+Env isolation is complete: with the five levers set, `cli\config.json`,
 `cli\db\db.sqlite`, `v2\credentials.json`, `v2\provider_config.json`,
 `cli\plugins` and `cli\log` all resolve inside the clone home. Sessions a
 light worker creates are visible to that clone's desktop app (same home =
 same store) and vice versa.
+
+**2026-10-31 regression (CLI 0.17.1)** — the four original levers alone now
+die at bootstrap with `无法定位 CLI ZCode Built-in Provider Config`: the
+bundle's `resolveBundledZCodeBuiltinProviderConfig` fallback derives both
+candidates from `process.argv[1]` via a dev-monorepo climb
+(`glm\provider\zcode-builtin.json`, then `5× ..\config\provider\` ending at
+`%USERPROFILE%\AppData\config\provider\`, which never exists) and never
+reaches the packaged file at `resources\config\provider\zcode-builtin.json`.
+Plain-node launches must set the **FIFTH lever**
+`ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` to that bundled file. The desktop app
+injects it into its own CLI children (`createNodeProviderRuntimePathEnv` in
+app.asar), so only plain-node spawners are affected — the Primary CLI and all
+desktop instances kept working. `launch_zcode_cli_light.ps1` and the T3
+bridge's `spawnAppServer` (`tools/t3_bridge_lib.mjs`) resolve the lever
+automatically: bundled install copy first, newest
+`<home>\.zcode\v2\runtime\provider\**\zcode-builtin.json` runtime-cache copy
+as fallback (the same shape `tools/watch_zcode_captcha.ps1` uses), and a clear
+fail-fast message when neither exists. The `nbs()` argv gate requires the
+config for `-p`, `app-server` AND `login`, so the manual login recipe below
+also carries the fifth line.
 
 ## What works and what does not
 
@@ -75,6 +95,7 @@ set HOME=%USERPROFILE%\ZCodeSecondHome
 set USERPROFILE=%USERPROFILE%\ZCodeSecondHome
 set ZCODE_DATA_BASE_DIR=%USERPROFILE%\ZCodeSecondHome
 set ZCODE_STORAGE_DIR=%USERPROFILE%\ZCodeSecondHome\.zcode
+set ZCODE_BUILTIN_PROVIDER_CONFIG_FILE=%LOCALAPPDATA%\Programs\ZCode\resources\config\provider\zcode-builtin.json
 node "%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs" login zai
 ```
 
@@ -89,7 +110,13 @@ a login across clone homes.
   instances and, at `-MaxConcurrent` (default 3), prints live commit numbers
   and asks. Non-interactive callers (watchdog relaunch, test harness) warn and
   continue instead of hanging. Relaunching an already-running clone just
-  focuses it and never prompts.
+  focuses it and never prompts. The ask routes by entry point: a visible
+  console (GHOST.bat, Launch-ZCode-*.bat) gets the usual Read-Host prompt,
+  while a hidden console (the Desktop/Start-menu shortcuts run powershell with
+  `-WindowStyle Hidden`, and hidden stdin is NOT redirected) gets a Yes/No
+  dialog — fixed 2026-11-01, before that the invisible prompt hung the launch
+  and the app never appeared. Launcher-side, so already-installed shortcuts
+  need no reinstall.
 - `-LowRam` (experimental): launches the app with `--disable-gpu`, dropping the
   per-instance GPU process. Off by default — rendering falls back to software.
 - Pagefile: the OOM incident happened at a 16 GB RAM + ~16 GB pagefile commit

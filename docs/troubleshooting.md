@@ -226,7 +226,7 @@ a script edit keeps the old code — close its window and relaunch ZCode [25].
 ## A clone launched with the Primary's profile or taskbar icon
 
 A bare `ZCode.exe` launch always gets the Primary's profile, AUMID and taskbar
-button. Launch clones only via their `ZCode Second/Third/Fourth/Fifth/Sixth` shortcuts or
+button. Launch clones only via their `ZCode Blue/Yellow/Green/Red/Orange` shortcuts or
 the `Launch-ZCode-*.bat` wrappers. If the Primary's Start-menu pin was taken
 over by a clone's AUMID, repair it with
 `tools\install_zcode_second_shortcuts.ps1 -RepairPrimaryAumid`.

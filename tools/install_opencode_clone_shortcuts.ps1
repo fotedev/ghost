@@ -76,12 +76,16 @@ $StartMenu  = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 
 if (-not (Test-Path $Launcher)) { Write-Error "launcher not found: $Launcher" }
 
+# 2026-11-01 display-name unification: the shortcut FILE names use the color
+# vocabulary shared by all four suites ("<Suite> <Color>.lnk" - it matches the
+# "OpenCode <Color>" window titles); the cN names are legacy and are cleaned
+# up on every install/remove run. Instance keys, clone dirs and AUMIDs stay frozen.
 $InstanceDefs = @{
-    'c1' = @{ ShortcutName = 'OpenCode c1.lnk'; BrandingRepo = 'opencode-blue-branding';   DisplayName = 'Blue' }
-    'c2' = @{ ShortcutName = 'OpenCode c2.lnk'; BrandingRepo = 'opencode-yellow-branding'; DisplayName = 'Yellow' }
-    'c3' = @{ ShortcutName = 'OpenCode c3.lnk'; BrandingRepo = 'opencode-green-branding';  DisplayName = 'Green' }
-    'c4' = @{ ShortcutName = 'OpenCode c4.lnk'; BrandingRepo = 'opencode-red-branding';    DisplayName = 'Red' }
-    'c5' = @{ ShortcutName = 'OpenCode c5.lnk'; BrandingRepo = 'opencode-orange-branding'; DisplayName = 'Orange' }
+    'c1' = @{ ShortcutName = 'OpenCode Blue.lnk';   LegacyShortcutName = 'OpenCode c1.lnk'; BrandingRepo = 'opencode-blue-branding';   DisplayName = 'Blue' }
+    'c2' = @{ ShortcutName = 'OpenCode Yellow.lnk'; LegacyShortcutName = 'OpenCode c2.lnk'; BrandingRepo = 'opencode-yellow-branding'; DisplayName = 'Yellow' }
+    'c3' = @{ ShortcutName = 'OpenCode Green.lnk';  LegacyShortcutName = 'OpenCode c3.lnk'; BrandingRepo = 'opencode-green-branding';  DisplayName = 'Green' }
+    'c4' = @{ ShortcutName = 'OpenCode Red.lnk';    LegacyShortcutName = 'OpenCode c4.lnk'; BrandingRepo = 'opencode-red-branding';    DisplayName = 'Red' }
+    'c5' = @{ ShortcutName = 'OpenCode Orange.lnk'; LegacyShortcutName = 'OpenCode c5.lnk'; BrandingRepo = 'opencode-orange-branding'; DisplayName = 'Orange' }
 }
 
 $TargetIds = if ($Instance) { @($Instance) } else { @('c1','c2','c3','c4','c5') }
@@ -230,9 +234,18 @@ foreach ($id in $TargetIds) {
 
     foreach ($root in @($Desktop, $StartMenu)) {
         $lnk = Join-Path $root $def.ShortcutName
+        $legacyLnk = Join-Path $root $def.LegacyShortcutName
         if ($Remove) {
-            if (Test-Path $lnk) { Remove-Item $lnk -Force; Write-Host "removed: $lnk" }
+            foreach ($candidate in @($lnk, $legacyLnk)) {
+                if (Test-Path $candidate) { Remove-Item $candidate -Force; Write-Host "removed: $candidate" }
+            }
             continue
+        }
+        if ((Test-Path $legacyLnk) -and ($legacyLnk -ine $lnk)) {
+            # 2026-11-01 display-name unification: drop the pre-rename shortcut
+            # so the Desktop/Start menu keeps exactly one entry per clone.
+            Remove-Item $legacyLnk -Force
+            Write-Host "removed legacy: $legacyLnk"
         }
         if (-not (Test-Path $iconPath)) {
             Write-Warning "icon missing ($iconPath) - falling back to exe icon"

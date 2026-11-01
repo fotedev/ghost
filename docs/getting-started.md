@@ -64,7 +64,7 @@ Run up to six fully independent ZCode windows side by side (separate Electron lo
 
 ```powershell
 # Option A — menu: GHOST.bat → ZCode [1] Second / [2] Third / [3] Fourth / [4] Fifth / [5] Sixth / [6] all clones
-# Option B — double-click: src\windows\Launch-ZCode-Second.bat / -Third.bat / -Fourth.bat / -Fifth.bat / -Sixth.bat
+# Option B — double-click: src\windows\Launch-ZCode-Blue.bat / -Yellow.bat / -Green.bat / -Red.bat / -Orange.bat
 powershell -File src\windows\launch_zcode_second_instance.ps1 -Instance Third   # example
 ```
 
@@ -75,7 +75,7 @@ First launch of each clone copies history (`~\.zcode` → `~\ZCodeSecondHome\.zc
 | Menu | Script | What it does |
 |---|---|---|
 | ZCode [27] | `tools\patch_zcode_icon_override.ps1` | One-time `app.asar` patch (engine v8) enabling the `ZCODE_ICON_DIR` / `ZCODE_AUMID_SUFFIX` / `ZCODE_ACCENT_HEX` / `ZCODE_INSTANCE_NAME` overrides — per-clone icon, separate taskbar button + pins, accent color, "ZCode <Color>" window title — plus **bidi auto-direction** in the chat: every paragraph/line auto-detects Arabic RTL vs English LTR, code blocks stay LTR, and `ZCODE_BIDI_OFF=1` disables it per launch. Auto-detects the install dir; re-run after **every ZCode app update**. `-Restore` rolls back, `-Force` re-patches, `-InstallDir` overrides detection; the marker file auto-upgrades patches made by older engines. |
-| ZCode [8] | `tools\install_zcode_second_shortcuts.ps1` | Desktop + Start-menu shortcuts for all five clones (`ZCode Second/Third/Fourth/Fifth/Sixth.lnk`), each stamped with its own AppUserModel ID so taskbar pins never collide with the Primary. `-Instance Second\|Third\|Fourth\|Fifth\|Sixth` scopes, `-Remove` uninstalls, `-RepairPrimaryAumid` strips a stray clone AUMID from the Primary's `ZCode.lnk`. |
+| ZCode [8] | `tools\install_zcode_second_shortcuts.ps1` | Desktop + Start-menu shortcuts for all five clones (`ZCode Blue/Yellow/Green/Red/Orange.lnk` — the shortcut name equals the window title), each stamped with its own AppUserModel ID so taskbar pins never collide with the Primary. `-Instance Second\|Third\|Fourth\|Fifth\|Sixth` scopes, `-Remove` uninstalls, `-RepairPrimaryAumid` strips a stray clone AUMID from the Primary's `ZCode.lnk`. |
 | ZCode [21] / [22] | `tools\refresh_zcode_second_chats.ps1` | Shows chats created in another instance inside a running sidebar, no app restart: finds shared-store chats missing from the target's tasks-index, recycles its app-server(s) (auto-respawn reseeds the index), then verifies. `-Target Primary\|Second\|Third\|Fourth\|Fifth\|Sixth\|All`; a hot-activity guard waits out in-flight turns (up to ~90 s, `-Force` bypasses). ZCode [21] = Second only, [22] = all instances. |
 | ZCode [23] | same script, `-Watch -Target All` | Detached watcher: tails the CLI JSONL logs for terminal failures (captcha stall / quota / rate-limit — same signatures as `watch_zcode_captcha.ps1`) and refreshes every RUNNING instance on a 300 s cooldown. |
 | ZCode [25] | `tools\watch_zcode_taskbar.ps1` | Resident taskbar-identity watcher: re-stamps `System.AppUserModel.ID` on every ZCode main window every 5 s (heals merges + fresh/splash-swapped windows), self-heals a hijacked Primary `ZCode.lnk` every ~5 m. `-RunOnce`, `-CheckPrimaryHijack`, `-InstallAutostart`/`-RemoveAutostart`. |
@@ -158,21 +158,22 @@ honest limits: [WMI_SERIAL_SPOOFING.md](WMI_SERIAL_SPOOFING.md).
 ### 9. Other clone suites (Cline / OpenCode / AutoClaw2)
 
 The same "Primary + 5 clones" pattern exists for three more apps, each with
-its own spec doc (menu ranges: Cline [1]-[9], OpenCode [1]-[10]; AutoClaw2 is
-CLI-only):
+its own spec doc (menu ranges: AutoClaw2 [1]-[9], Cline [1]-[9], OpenCode
+[1]-[10]):
 
 - **Cline** (Tauri/WebView2) — env levers only (`CLINE_DIR`,
   `WEBVIEW2_USER_DATA_FOLDER`, fixed per-clone hub/sidecar ports); the
   launcher neutralizes the app's single-instance hidden window and enforces
   per-clone locks itself. [CLINE_CLONES_SPEC.md](CLINE_CLONES_SPEC.md)
 - **OpenCode desktop** (Electron) — needs the one-time clone-home asar patch
-  (OpenCode [7]; re-apply after app updates — the launcher aborts loudly when
-  it is missing); per-clone `XDG_*` CLI-state homes; native per-userData
+  (OpenCode [8]; the row waits for you to close OpenCode first; re-apply
+  after app updates — the launcher aborts loudly when it is missing);
+  per-clone `XDG_*` CLI-state homes; native per-userData
   single-instance lock; ephemeral service ports.
   [OPENCODE_CLONES_SPEC.md](OPENCODE_CLONES_SPEC.md)
 - **AutoClaw2** (Electron, v2.1.1 "zwork") — pure env levers
-  (`ZWORK_USER_DATA` + `AUTOCLAW_PROFILE_ROOT`), no patching, no `GHOST.bat`
-  wiring by design. [AUTOCLAW2_CLONES_SPEC.md](AUTOCLAW2_CLONES_SPEC.md)
+  (`ZWORK_USER_DATA` + `AUTOCLAW_PROFILE_ROOT`), no patching; wired into
+  `GHOST.bat` main [4] (rows [1]-[9]). [AUTOCLAW2_CLONES_SPEC.md](AUTOCLAW2_CLONES_SPEC.md)
 
 Command-level detail for all three suites: [cli.md](cli.md).
 

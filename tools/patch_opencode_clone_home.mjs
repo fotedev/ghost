@@ -5,27 +5,36 @@
 // exit 1 = any patch found zero sites (tree left untouched).
 //
 // Engine v1 patch set (all anchors byte-verified against the installed
-// OpenCode 2.0.32 app.asar, 2026-10-24 - see docs/OPENCODE_CLONES_SPEC.md):
+// OpenCode 2.0.32 app.asar, 2026-10-24 - see docs/OPENCODE_CLONES_SPEC.md).
+// Engine v3 (2026-11-01): re-derived for the 2.2.5.0 bundle - the clone-home
+// anchor is now the app's generic test-root read (1 occurrence), slotted
+// into the non-onboarding branch; the clone-identity regex matches 2.2.5.0
+// unchanged (`g.setAppUserModelId(le)` - 1 site).
 //
-//   clone-home      give packaged builds the TEST_ROOT-equivalent: the app's own
-//                   bootstrap runs `ye()` whose packaged branch hardcodes
-//                   userData = %APPDATA%\ai.opencode.desktop
-//                   (`<recv>.isPackaged?void 0:process.env.OPENCODE_DESKTOP_TEST_ROOT`
-//                   - exactly 1 site). The patch swaps that branch for an argv
-//                   scan of `--opencode-clone-home=<dir>`; ye()'s EXISTING body
-//                   then does the rest for free: mkdirs the
-//                   data/config/cache/state/desktop/session/documents subdirs,
-//                   sets XDG_DATA/CONFIG/CACHE/STATE_HOME from them (the app's
-//                   OWN redirection surface, read unconditionally in production)
-//                   and the call site sets userData=<home>\desktop +
-//                   sessionData=<home>\session. No flag => the branch evaluates
-//                   to void 0 exactly like stock - the Primary and any bare
-//                   spawn are untouched. (The app is asInvoker, so argv - not a
-//                   marker file - is the identity channel; there is no UAC
-//                   boundary to survive.)
+//   clone-home      give packaged builds the TEST_ROOT-equivalent: the app's
+//                   bootstrap test-root read (`ue()` in 2.2.5.0 - was the
+//                   `ye()` ternary tail in 2.0.32) is extended with an argv
+//                   scan of `--opencode-clone-home=<dir>` slotted into the
+//                   NON-onboarding branch ahead of the env fallback:
+//                     L?onboarding:(CLONE_HOME_SCAN||process.env.OPENCODE_DESKTOP_TEST_ROOT)
+//                   The onboarding branch must stay first (it rmSync-wipes its
+//                   root). The app's OWN body then does the rest for free:
+//                   mkdirs the data/config/cache/state/desktop/session/
+//                   documents subdirs, sets XDG_DATA/CONFIG/CACHE/STATE_HOME
+//                   from them (the app's OWN redirection surface, read
+//                   unconditionally in production) and - since 2.2.5.0 - the
+//                   SAME bootstrap fn (z()) pins userData=<home>\desktop +
+//                   sessionData=<home>\session straight from ue()'s return
+//                   value. No flag => the scan yields "" and the expression
+//                   falls through to the env var exactly like stock - the
+//                   Primary and any bare spawn are untouched. (The app is
+//                   asInvoker, so argv - not a marker file - is the identity
+//                   channel; there is no UAC boundary to survive.)
 //
 //   clone-identity  per-clone taskbar identity at the app's SINGLE
-//                   setAppUserModelId call site (count = 1 in 2.0.32):
+//                   setAppUserModelId call site (count = 1 in 2.0.32 AND in
+//                   2.2.5.0: `g.setAppUserModelId(le)` inside the bootstrap
+//                   z(), where `le` is the channel AUMID/userData name):
 //                   wraps the argument to append ".<aumidSuffix>" AND registers
 //                   an app-level "browser-window-created" listener that stamps
 //                   every window's WINDOW-level AUMID via setAppDetails at
@@ -50,7 +59,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-const ENGINE_VERSION = 2;
+const ENGINE_VERSION = 3;
 const extractedDir = process.argv[2];
 if (!extractedDir) {
   console.error(JSON.stringify({ ok: false, error: "usage: patch_opencode_clone_home.mjs <extractedDir>" }));
@@ -58,9 +67,13 @@ if (!extractedDir) {
 }
 
 // ── clone-home (F1) ──────────────────────────────────────────────────────────
-// Pristine anchor: the exact minified ternary tail (string search cannot
-// break; byte-verified 1 occurrence in the 2.0.32 asar).
-const HOME_PRISTINE = "isPackaged?void 0:process.env.OPENCODE_DESKTOP_TEST_ROOT";
+// Pristine anchor: the app's own test-root read. 2.2.5.0 (v3 anchor, verified
+// 1 occurrence in the asar 2026-11-01): the bootstrap `ue()` reads
+//   let e=L?O.join(D(),`opencode-onboarding-${ie()}`):process.env.OPENCODE_DESKTOP_TEST_ROOT;
+// so the GENERIC env-name anchor slots the scan into the non-onboarding
+// branch while keeping the onboarding rmSync-wipe branch first. 2.0.32
+// (v2 anchor, retired): `isPackaged?void 0:process.env.OPENCODE_DESKTOP_TEST_ROOT`.
+const HOME_PRISTINE = "process.env.OPENCODE_DESKTOP_TEST_ROOT";
 // Done anchor: what a patched tree contains verbatim.
 const HOME_DONE = "globalThis.__opencodeCloneHome ??=";
 // Cached argv scan: the clone home path or "". Trim-tolerant (a trailing
@@ -109,7 +122,9 @@ const PATCHES = [
       if (src.includes(HOME_DONE)) return { src, count: -1 };
       const parts = src.split(HOME_PRISTINE);
       if (parts.length === 1) return { src, count: 0 };
-      const replacement = `isPackaged?(${CLONE_HOME_SCAN}||void 0):process.env.OPENCODE_DESKTOP_TEST_ROOT`;
+      // The scan slots into the non-onboarding branch, ahead of the env
+      // fallback: L?onboarding:(SCAN||process.env.OPENCODE_DESKTOP_TEST_ROOT)
+      const replacement = `(${CLONE_HOME_SCAN}||process.env.OPENCODE_DESKTOP_TEST_ROOT)`;
       return { src: parts.join(replacement), count: parts.length - 1 };
     },
   },

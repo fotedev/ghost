@@ -12,6 +12,9 @@
   So each shortcut points at src\windows\launch_zcode_second_instance.ps1 with
   -Instance <name>, which sets the isolation env and launches ZCode detached
   (cmd /c start) - any future launcher fix automatically applies to the shortcuts.
+  The shortcut's powershell runs with -WindowStyle Hidden on purpose (no console
+  flash): the launcher's RAM guard detects the hidden console and asks via a
+  Yes/No dialog when the soft instance limit is hit, so the guard is not lost.
 
   Per-user locations only -> NO admin rights needed:
     Desktop    : [Environment]::GetFolderPath('Desktop')
@@ -54,16 +57,25 @@ $Launcher = Join-Path $RepoRoot 'src\windows\launch_zcode_second_instance.ps1'
 # Must stay in sync with the InstanceMap in launch_zcode_second_instance.ps1.
 # Second is FROZEN (existing installed profile); Third = Yellow, Fourth = Green,
 # Fifth = Red (2026-10-17), Sixth = Orange (2026-10-24).
+# 2026-11-01 display-name unification: the shortcut FILE names use the color
+# vocabulary shared by all four suites ("<Suite> <Color>.lnk" - it matches the
+# "ZCode <Color>" window titles); the ordinal names are legacy and are cleaned
+# up on every install/remove run. Instance keys, dirs, AUMIDs stay frozen.
 $InstanceDefs = @{
-  'Second' = @{ ShortcutName = 'ZCode Second.lnk'; AumidSuffix = '2'
+  'Second' = @{ ShortcutName = 'ZCode Blue.lnk';   LegacyShortcutNames = @('ZCode Second.lnk')
+                AumidSuffix = '2'
                 BrandingRepo = 'zcode-blue-branding';   DisplayName = 'Blue' }
-  'Third'  = @{ ShortcutName = 'ZCode Third.lnk';  AumidSuffix = '3'
+  'Third'  = @{ ShortcutName = 'ZCode Yellow.lnk'; LegacyShortcutNames = @('ZCode Third.lnk')
+                AumidSuffix = '3'
                 BrandingRepo = 'zcode-yellow-branding'; DisplayName = 'Yellow' }
-  'Fourth' = @{ ShortcutName = 'ZCode Fourth.lnk'; AumidSuffix = '4'
+  'Fourth' = @{ ShortcutName = 'ZCode Green.lnk';  LegacyShortcutNames = @('ZCode Fourth.lnk')
+                AumidSuffix = '4'
                 BrandingRepo = 'zcode-green-branding';  DisplayName = 'Green' }
-  'Fifth'  = @{ ShortcutName = 'ZCode Fifth.lnk';  AumidSuffix = '5'
+  'Fifth'  = @{ ShortcutName = 'ZCode Red.lnk';    LegacyShortcutNames = @('ZCode Fifth.lnk')
+                AumidSuffix = '5'
                 BrandingRepo = 'zcode-red-branding';    DisplayName = 'Red' }
-  'Sixth'  = @{ ShortcutName = 'ZCode Sixth.lnk';  AumidSuffix = '6'
+  'Sixth'  = @{ ShortcutName = 'ZCode Orange.lnk'; LegacyShortcutNames = @('ZCode Sixth.lnk')
+                AumidSuffix = '6'
                 BrandingRepo = 'zcode-orange-branding'; DisplayName = 'Orange' }
 }
 $script:Failed = $false
@@ -80,6 +92,25 @@ function Get-ShortcutTargets {
     $targets += Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$ShortcutName"
   }
   return $targets
+}
+
+function Remove-LegacyShortcuts {
+  # 2026-11-01 display-name unification: deletes the pre-rename shortcut names
+  # so a rename never leaves orphaned .lnks on the Desktop or Start menu.
+  param([hashtable]$Def)
+  foreach ($name in $Def.LegacyShortcutNames) {
+    foreach ($t in (Get-ShortcutTargets -ShortcutName $name)) {
+      if (Test-Path -LiteralPath $t) {
+        Remove-Item -LiteralPath $t -Force
+        if (Test-Path -LiteralPath $t) {
+          Write-Host "  [FAILED] legacy shortcut still exists after delete: $t" -ForegroundColor Red
+          $script:Failed = $true
+        } else {
+          Write-Host "  [ok] removed legacy: $t" -ForegroundColor Green
+        }
+      }
+    }
+  }
 }
 
 function Assert-Value {
@@ -336,6 +367,7 @@ if ($Remove) {
         Write-Host "  [skip] not present: $t"
       }
     }
+    Remove-LegacyShortcuts -Def $def
   }
   if ($script:Failed) { Write-Host 'FAILED - see lines above.' -ForegroundColor Red; exit 1 }
   Write-Host 'SUCCESS - shortcuts removed.' -ForegroundColor Green
@@ -366,6 +398,7 @@ Write-Host '[2/4] Creating shortcuts (verify-after)...'
 $ws = New-Object -ComObject WScript.Shell
 foreach ($inst in $Instance) {
   $spec = $installed[$inst]
+  Remove-LegacyShortcuts -Def $spec.Def
   Write-Host "  [$inst] $($spec.Def.ShortcutName)"
   foreach ($t in $spec.Targets) {
     Write-Host "    -> $t"

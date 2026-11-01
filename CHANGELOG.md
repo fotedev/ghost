@@ -5,6 +5,180 @@ All notable changes to GHOST are documented here. Versions are Git tags
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **ZCode patch [27] waits for you to close the app** (2026-10-31):
+  `patch_zcode_icon_override.ps1` gained `-WaitForClose` (GHOST.bat ZCode
+  [27] passes it via `:RunWith`'s new optional extra-args slot) — when
+  ZCode.exe is running from the install dir the script no longer throws and
+  forces a manual re-run; it prints the running PIDs, polls until every one
+  has exited (two consecutive clear probes, 30-min default timeout, Ctrl+C
+  to abort) and continues straight into the patch. Direct runs without the
+  switch keep the bare throw; `-Restore` honors the switch too. The [27]
+  follow-up note now reminds about relaunching via the ZCode shortcuts (a
+  bare ZCode.exe opens the PRIMARY profile).
+- **OpenCode patch [8] waits for you to close the app** (2026-10-31):
+  `patch_opencode_clone_home.ps1` gained `-WaitForClose` (GHOST.bat OpenCode
+  [8] passes it via `:RunWith`'s extra-args slot, mirroring ZCode [27]) —
+  when OpenCode.exe is running from the install dir the script no longer
+  throws and forces a manual re-run; it prints the running PIDs, polls until
+  every one has exited (two consecutive clear probes, 30-min default timeout,
+  Ctrl+C to abort) and continues straight into the patch. Direct runs without
+  the switch keep the bare throw; `-Restore` honors the switch too. The [8]
+  follow-up note now reminds about relaunching via the OpenCode shortcuts (a
+  bare OpenCode.exe opens the PRIMARY profile).
+
+### Fixed
+- **ZCode clone shortcuts hung invisibly at the RAM guard** (2026-11-01):
+  the Desktop/Start-menu shortcuts run the launcher with `-WindowStyle
+  Hidden`, whose hidden-console stdin is NOT redirected — so the guard's only
+  non-interactive probe (`[Console]::IsInputRedirected`) passed and the
+  `Launch anyway? (y/N)` prompt was written into a window nobody could see:
+  at/over `-MaxConcurrent` the launcher hung invisibly and ZCode never
+  appeared (looked like the app failed to run). The guard now routes by entry
+  point: `-NonInteractive` or redirected stdin warns and continues (unchanged
+  watchdog/harness contract), a visible console (GHOST.bat,
+  Launch-ZCode-*.bat) keeps the Read-Host prompt, and a hidden console gets a
+  topmost Yes/No dialog (default No, same live commit numbers). Fixed
+  launcher-side so already-installed shortcuts need no reinstall;
+  `watch_zcode_captcha.ps1` relaunches pass `-NonInteractive` (also closing a
+  latent hang — the hidden watchdog console could block on the old prompt).
+- **ZCode light worker + T3 bridge died at bootstrap after the 0.17.1 CLI
+  update** (2026-10-31): every plain-node launch of
+  `resources\glm\zcode.cjs` (`-p`, `app-server`, `login` — the bundle's
+  `nbs()` argv gate demands the builtin provider config for all three) failed
+  with `无法定位 CLI ZCode Built-in Provider Config`: the bundle's
+  `resolveBundledZCodeBuiltinProviderConfig` fallback derives both candidates
+  from `process.argv[1]` via a dev-monorepo climb (`glm\provider\
+  zcode-builtin.json` — removed from the package; then `5× ..\config\provider\`
+  landing at `%USERPROFILE%\AppData\config\provider\` — never exists) and
+  never reaches the packaged file at `resources\config\provider\
+  zcode-builtin.json`. Fixed with the FIFTH env lever
+  `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` (the same override the desktop app
+  injects into its own CLI children, and which `watch_zcode_captcha.ps1`
+  already sets): `launch_zcode_cli_light.ps1` resolves it after the four
+  isolation levers (bundled install copy first, newest
+  `<home>\.zcode\v2\runtime\provider` runtime-cache copy as fallback, clear
+  fail-fast when neither exists) and the printed standalone-login recipe gained
+  the matching fifth `set` line; the T3 bridge suite gets the same lever via
+  `resolveBuiltinProviderConfig` + `buildChildEnv`/`spawnAppServer` in
+  `tools/t3_bridge_lib.mjs` (bridge + probe + fake client in one spot), which
+  now fails fast with an English message instead of letting the child die on
+  the opaque Chinese error. Desktop instances and the Primary CLI were never
+  affected (the app injects the env itself). Docs: ZCODE_LIGHT_MODE.md
+  (five-lever contract + regression note + login recipe), AGENTS.md, T3
+  bridge spec §8.
+- **GHOST.bat ZCode submenu section headers printed CMD errors** (2026-10-30):
+  `call :Div "Sync & Chat Refresh"` (row [17]) and `call :Div "Watchers &
+  Diagnostics"` (row [24]) rode a bare `&` into `:Div`'s unquoted
+  `echo   -- %~1 --`, so CMD split on it — the menu showed `-- Sync` then
+  `'Chat' is not recognized as an internal or external command` (and
+  `-- Watchers` → `'Diagnostics' not recognized`). Labels reworded to
+  `Sync + Chat Refresh` / `Watchers + Diagnostics` (row style already avoids
+  `&`); rem comment synced; AGENTS.md .bat rules gained the `&`-through-
+  label-arg bullet. The harness now guards the whole class: a static S0b
+  scan (no `&` in `:Div`/`:Hdr`/`:Opt` label args, every `&` on an `echo`
+  line caret-escaped) plus a global assertion inherited by every scenario
+  that CMD error output never leaks into captured menu output.
+- **OpenCode 2.2.5.0 broke the clone suite — engine v3 re-derived and the
+  fleet is live again (2026-11-01)**: the updater replaced `app.asar`
+  wholesale on 2026-10-31 (2.2.5.0, 235 MB — marker + prior backup gone),
+  and the v2 clone-home byte anchor (the 2.0.32 `isPackaged?void 0:...`
+  ternary tail) had ZERO sites in the new bundle — the patch aborted with
+  zero damage (fresh pristine backup kept) and c1..c5 were unlaunchable.
+  Recon of the new bundle showed the mechanism intact: the bootstrap
+  test-root fn (minified `ue()`, was `ye()`) reads
+  `process.env.OPENCODE_DESKTOP_TEST_ROOT` (1 occurrence) and — new in
+  2.2.5.0 — the SAME bootstrap fn (`z()`) pins `userData`/`sessionData`
+  inline straight from its return, so v3 shrinks the hook to ONE slot: the
+  clone-home argv scan slotted into the non-onboarding branch ahead of the
+  env fallback (the onboarding `rmSync`-wipe branch stays first); the
+  clone-identity regex matched 2.2.5.0 unchanged (`g.setAppUserModelId(le)`
+  — 1 site). Re-patched (marker v3 + `node --check` + candidate/live
+  signature verify) and live-verified: c1 launched with
+  `OpenCodeClonesHome\c1\{desktop,session}` receiving all writes, window
+  title "OpenCode Blue" observed live, and the Primary profile snapshot
+  diff = **0 changes** (1338 files path|size|mtime identical before/after).
+  A stale "run OpenCode [7]" citation fixed to [8] in AGENTS.md. Spec
+  gained the engine v3 addendum (docs/OPENCODE_CLONES_SPEC.md).
+
+### Changed
+- **Menu label naming unified (2026-10-31)** — one row pattern across every
+  submenu: the label carries the action + name ONLY, and the color + all
+  qualifiers live in the tail. ZCode reset rows [9]-[13] had the color inside
+  the label (`Reset Third instance - Yellow`) while the launch rows kept it
+  in the tail, and [9] had no color at all — all five now read
+  `Reset <Name> instance` + `- <Color> (survivors kept running)`; the
+  dash-descriptors embedded in labels moved to tails ([22] `Refresh chats -
+  ALL instances` → `Refresh ALL chats`, [27] `Re-apply app patch - v8…` →
+  `Re-apply app patch` + `- v8, icons + bidi auto (after app update)`, [28]
+  `Login clone account - one-time plan setup` → `Login clone account` +
+  `- one-time plan setup (light workers + T3 bridge)`); ZCode [6]'s tail now
+  matches the other suites' phrasing (`- Second..Sixth, one after another`).
+  Section placement unified: OpenCode `Install clone shortcuts` moved from
+  Maintenance into Launch Clones [7] (matching AutoClaw2/Cline), the patch row
+  moved to Maintenance [8] — locals [7]/[8] swapped, gids 59/60 unchanged.
+  NEW row: ZCode [29] `Remove clone shortcuts` (gid 72,
+  `install_zcode_second_shortcuts.ps1 -Remove`) — ZCode was the only suite
+  without one; dispatch header widened to 1-72. Naming-scheme rule documented
+  (AGENTS.md .bat rules): ZCode clones keep their legacy NAMES
+  (Second..Sixth — dirs/shortcuts/`ZCode <Color>` titles frozen), newer
+  suites use `c1..cN`, and `clone` is the unified docs term. The
+  `:RunZcodeReset` note no longer cites the nonexistent "ZCode Color"
+  shortcuts. Docs truth sweep: the four stale "AutoClaw2 is CLI-only / not
+  wired into GHOST.bat" claims fixed (README, getting-started ×2,
+  architecture) to cite main [4] rows [1]-[9]; cli.md ZCode range [1]-[29]
+  + `IDE Resets` casing + OpenCode equivalents (patch [8], shortcuts [7])
+  + the [29] cite; AGENTS.md header, `blue, Second` typo, complete
+  Fifth/Sixth shortcut list, `c1..c5`, `clone slots`→`clones`, playbook
+  palette gains Sixth orange `#CB5D06`; README table rows now quote the
+  exact GHOST.bat labels. Harness: O retargeted (patch [8], shortcuts [7])
+  + M asserts the new [29] row.
+- **Clone shortcut display names unified to `<Suite> <Color>.lnk`
+  (2026-11-01)**: one naming vocabulary across all four clone suites — the
+  desktop/Start-menu shortcuts are now `ZCode Blue` .. `ZCode Orange`,
+  `Cline Blue..Orange`, `OpenCode Blue..Orange`, `AutoClaw2 Blue..Orange`.
+  Color is the only vocabulary already shared by every suite (per-color
+  icons, `<suite>-<color>-branding` dirs, and the app-patched `ZCode <Color>`
+  / `OpenCode <Color>` window titles), so the shortcut name now equals the
+  window title. All four installers gained LEGACY cleanup: the pre-rename
+  names (ZCode `Second..Sixth`, others `c1..c5`) are deleted on every
+  install AND `-Remove` run, so a rename never orphans .lnks. Technical keys
+  stay frozen: `-Instance` values (ZCode Second..Sixth, others c1..c5),
+  clone-home dirs, AUMIDs (ZCode suffixes `2..6`), `-Target` values, window
+  titles; the alias map (Second↔c1↔Blue …) is documented in AGENTS.md and
+  the playbook. `Launch-ZCode-Second/Third/Fourth/Fifth/Sixth.bat` wrappers
+  renamed to `Launch-ZCode-Blue/Yellow/Green/Red/Orange.bat` (git mv; the
+  `-Instance` argument inside is unchanged); GHOST.bat notes + the
+  `:StartClone`/`:Detached` console titles now speak the color vocabulary
+  too (`ZCode Second Instance` → `ZCode Blue`, `Cline c1` → `Cline Blue`,
+  …); docs swept (cli.md, getting-started, troubleshooting, architecture,
+  AGENTS.md, playbook, launcher comment). Applied live: all four installers
+  run on the dev host, leaving exactly the five color-named shortcuts per
+  suite on Desktop + Start menu.
+
+### Removed
+- **AutoClaw v1.20 suite sunset — code removed from the tracked repo
+  (2026-10-31)**: the v1.20 app was uninstalled from the dev host
+  2026-10-29 and `GHOST.bat` main [4] was rewired to the AutoClaw2 suite
+  the same day; the dead machinery now leaves the tree entirely —
+  `src/windows/launch_autoclaw_clone.ps1`, `src/windows/reset_autoclaw.ps1`,
+  `src/windows/Launch-AutoClaw-Clone.bat`,
+  `tools/install_autoclaw_clone_shortcuts.ps1`,
+  `tools/patch_autoclaw_ports.ps1` + `.mjs` (engine v12),
+  `tools/autoclaw-{blue,yellow,green,red}-branding/` and
+  `docs/AUTOCLAW_CLONES_SPEC.md`. Recoverable from git history (last full
+  presence: 874346f and its descendants) or the gitignored local copy at
+  `archive/autoclaw-v1.20/`. Docs scrubbed to sunset notes: AGENTS.md
+  (conventions section compressed, layout tree, playbook suites list),
+  README, architecture, cli, docs/README, the AutoClaw2 spec sibling refs,
+  playbook/edge-cases, TASK_BACKLOG (BS-1/BS-2/CS-4 → MOOT),
+  ZCODE_RESET_EDGE_CASES_PLAN F-11, and the tool headers that cited the
+  removed files. `tools/new_clone_suite.ps1` GHOST.bat anchor fixed — it
+  still matched the retired "AutoClaw Multi-Instance" render line and would
+  have thrown on any future scaffold run ("AutoClaw2 Multi-Instance" now).
+
 ## [1.3.0] - 2026-10-30
 
 ### Added
