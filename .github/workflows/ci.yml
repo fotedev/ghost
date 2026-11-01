@@ -50,7 +50,8 @@ jobs:
       - name: Node engines - asar patcher syntax + ENGINE_VERSION marker
         shell: pwsh
         run: |
-          foreach ($f in @('tools/patch_zcode_icon_override.mjs', 'tools/patch_autoclaw_ports.mjs')) {
+          # patch_autoclaw_ports.mjs was removed with the v1.20 sunset (archived locally).
+          foreach ($f in @('tools/patch_zcode_icon_override.mjs')) {
             node --check $f
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $src = Get-Content -LiteralPath $f -Raw
