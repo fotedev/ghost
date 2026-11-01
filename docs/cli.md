@@ -65,8 +65,8 @@ instance only.
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1" [-Instance Second|Third|Fourth|Fifth|Sixth]
 ```
 
-Or double-click: `src\windows\Launch-ZCode-Second.bat` / `-Third.bat` /
-`-Fourth.bat` / `-Fifth.bat` / `-Sixth.bat`.
+Or double-click: `src\windows\Launch-ZCode-Blue.bat` / `-Yellow.bat` /
+`-Green.bat` / `-Red.bat` / `-Orange.bat`.
 
 First launch of each clone copies history into its own home
 (`%USERPROFILE%\ZCodeSecondHome | ZCodeThirdHome | ZCodeFourthHome |
@@ -108,9 +108,9 @@ login recipe when it detects that. Full findings: [ZCODE_LIGHT_MODE.md](ZCODE_LI
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\install_zcode_second_shortcuts.ps1"
 ```
 
-Creates `ZCode Second` / `ZCode Third` / `ZCode Fourth` / `ZCode Fifth` /
-`ZCode Sixth` shortcuts (blue /
-yellow / green / red / orange icons) that run the launcher above; a taskbar pin groups with
+Creates `ZCode Blue` / `ZCode Yellow` / `ZCode Green` / `ZCode Red` /
+`ZCode Orange` shortcuts (matching color icons — the shortcut name equals the
+window title) that run the launcher above; a taskbar pin groups with
 that clone's running window. Remove with `-Remove` (ZCode [29]); install /
 scope with `-Instance` (ZCode [8]).
 Repair a hijacked Primary pin (clone AUMID + wiped icon) with

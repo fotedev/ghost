@@ -191,7 +191,13 @@ Never: fail the clone over icons; silently guess; leave a broken
       `%USERPROFILE%\<App>CloneHome\<inst>\{home,profile,tmp}` (+ per-clone
       roaming dirs if the app uses %APPDATA%). Names frozen from day one —
       renaming dirs later orphans installed profiles (ZCode Second rule).
-      Primary paths recorded, never written by clone scripts.
+      Primary paths recorded, never written by clone scripts. Display layer
+      is NOT frozen: the shortcut file names use the shared color vocabulary
+      `<Suite> <Color>.lnk` (2026-11-01 unification — matches the per-color
+      icons and, where the app supports it, the `<App> <Color>` window
+      titles); the technical instance key (c1..cN) stays the `-Instance`
+      value and the pre-rename names are cleaned up by the installer on
+      every run.
 - [ ] Env levers FIRST; CLI flags only as a second layer (ZCode overwrites
       `--user-data-dir` via `app.setPath` — EC-D02).
 - [ ] Port plan table: per-instance preferred ports spaced beyond the drift

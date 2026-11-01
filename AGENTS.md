@@ -356,7 +356,7 @@ launch_zcode_second_instance.ps1   # ZCode multi-instance launcher -Instance Sec
                                    #          shortcuts need no reinstall; -NonInteractive switch
                                    #          for unattended callers); -LowRam passes
                                    #          --disable-gpu (experimental);
-                                   #          Launch-ZCode-Second/Third/Fourth/Fifth/Sixth.bat wrappers)
+                                   #          Launch-ZCode-Blue/Yellow/Green/Red/Orange.bat wrappers)
 launch_zcode_cli_light.ps1         # ZCode LIGHT headless worker -Instance Second..Sixth (GHOST.bat ZCode
                                    #          [7], gid 70; verified 2026-10-28 — docs/ZCODE_LIGHT_MODE.md):
                                    #          runs resources\glm\zcode.cjs under system node with the FIVE
@@ -506,10 +506,18 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   **Row pattern (2026-10-31): the label carries the action + name ONLY — the
   color and all qualifiers live in the tail** (`Reset Third instance` +
   `- Yellow (survivors kept running)`); never embed a `- descriptor` inside
-  a label. **Naming scheme:** ZCode clones carry legacy NAMES (Second..Sixth
-  — clone dirs, `ZCode <Name>.lnk` shortcuts and `ZCode <Color>` window
-  titles are FROZEN); every newer suite names clones `c1..cN`; `clone` is
-  the unified docs term. Old→new for citations written before 2026-10-29:
+  a label. **Naming scheme (2026-11-01 display unification):** the shortcut
+  FILE names use the color vocabulary shared by all four suites —
+  `<Suite> <Color>.lnk` (`ZCode Blue.lnk` .. `ZCode Orange.lnk`, matching the
+  `ZCode <Color>` window titles); the pre-unification ordinal/cN names are
+  LEGACY and every installer cleans them up on each run. The technical keys
+  stay FROZEN: ZCode instance keys Second..Sixth (clone dirs `ZCode<Name>Home`
+  / roaming `ZCode-<Name>`, AUMID suffixes `2..6` — the Primary carries the
+  bare base), newer suites `c1..cN` (dirs `<Home>\cN`, AUMID `.cN`); window
+  titles are app-driven and frozen. Alias map: Second↔c1↔Blue `#066BCB`,
+  Third↔c2↔Yellow `#D4AA10`, Fourth↔c3↔Green `#13826A`, Fifth↔c4↔Red
+  `#CA0607`, Sixth↔c5↔Orange `#CB5D06`; `clone` is the unified docs term.
+  Old→new for citations written before 2026-10-29:
   ZCode launches [1,3,4,18,22]→[1,2,3,4,5], ALL [5]→[6], light [27]→[7],
   shortcuts [2]→[8], resets [6,8,9,19,23,21,7,10]→
   [9,10,11,12,13,14,15,16], sync [20,24]→[17,18], MCP watcher [25,26]→[19,20],
@@ -594,7 +602,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   rewrite ZCode.lnk with the clone's AUMID, which stole the Primary's Start pin
   and broke taskbar icon resolution), and disables the clone's auto-updater
   (`ZCODE_ICON_DIR` guard) so it can never wipe the shared patch via
-  quitAndInstall. Launch clones ONLY via their "ZCode Second/Third/Fourth/Fifth/Sixth"
+  quitAndInstall. Launch clones ONLY via their "ZCode Blue/Yellow/Green/Red/Orange"
   shortcuts / the launcher — a bare ZCode.exe launch gets the Primary's
   profile, AUMID and button.
 - Do NOT run ZCode instances elevated (verified 2026-09-24: Primary launched

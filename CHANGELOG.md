@@ -135,6 +135,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   palette gains Sixth orange `#CB5D06`; README table rows now quote the
   exact GHOST.bat labels. Harness: O retargeted (patch [8], shortcuts [7])
   + M asserts the new [29] row.
+- **Clone shortcut display names unified to `<Suite> <Color>.lnk`
+  (2026-11-01)**: one naming vocabulary across all four clone suites — the
+  desktop/Start-menu shortcuts are now `ZCode Blue` .. `ZCode Orange`,
+  `Cline Blue..Orange`, `OpenCode Blue..Orange`, `AutoClaw2 Blue..Orange`.
+  Color is the only vocabulary already shared by every suite (per-color
+  icons, `<suite>-<color>-branding` dirs, and the app-patched `ZCode <Color>`
+  / `OpenCode <Color>` window titles), so the shortcut name now equals the
+  window title. All four installers gained LEGACY cleanup: the pre-rename
+  names (ZCode `Second..Sixth`, others `c1..c5`) are deleted on every
+  install AND `-Remove` run, so a rename never orphans .lnks. Technical keys
+  stay frozen: `-Instance` values (ZCode Second..Sixth, others c1..c5),
+  clone-home dirs, AUMIDs (ZCode suffixes `2..6`), `-Target` values, window
+  titles; the alias map (Second↔c1↔Blue …) is documented in AGENTS.md and
+  the playbook. `Launch-ZCode-Second/Third/Fourth/Fifth/Sixth.bat` wrappers
+  renamed to `Launch-ZCode-Blue/Yellow/Green/Red/Orange.bat` (git mv; the
+  `-Instance` argument inside is unchanged); GHOST.bat notes + the
+  `:StartClone`/`:Detached` console titles now speak the color vocabulary
+  too (`ZCode Second Instance` → `ZCode Blue`, `Cline c1` → `Cline Blue`,
+  …); docs swept (cli.md, getting-started, troubleshooting, architecture,
+  AGENTS.md, playbook, launcher comment). Applied live: all four installers
+  run on the dev host, leaving exactly the five color-named shortcuts per
+  suite on Desktop + Start menu.
 
 ### Removed
 - **AutoClaw v1.20 suite sunset — code removed from the tracked repo

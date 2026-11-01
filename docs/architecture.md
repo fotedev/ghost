@@ -12,7 +12,7 @@ src/windows/
 ├── change_device_id.ps1               # system-level: fingerprint / registry / profiles
 ├── spoof_wmi_serials.ps1              # system-level: WMI serial spoof via mofcomp [DYNPROPS] (+ BT MAC)
 ├── launch_zcode_second_instance.ps1   # ZCode clone launcher (-Instance Second|Third|Fourth|Fifth|Sixth)
-├── Launch-ZCode-Second|Third|Fourth|Fifth|Sixth.bat  # double-click wrappers around the launcher
+├── Launch-ZCode-Blue|Yellow|Green|Red|Orange.bat  # double-click wrappers around the launcher
 ├── launch_autoclaw2_clone.ps1         # AutoClaw2 clone launcher (-Instance c1..c5, -Status)
 ├── launch_cline_clone.ps1             # Cline clone launcher (-Instance c1..c5, -Status)
 ├── launch_opencode_clone.ps1          # OpenCode clone launcher (-Instance c1..c5, -Status)
