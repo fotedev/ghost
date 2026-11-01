@@ -10,7 +10,8 @@
   shortcut points at src\windows\launch_autoclaw2_clone.ps1 -Instance <id>,
   which sets the isolation env and starts AutoClaw2.exe - any future
   launcher fix automatically applies to the shortcuts (same pattern as
-  tools\install_autoclaw_clone_shortcuts.ps1 for the v1.20 suite).
+  tools\install_zcode_second_shortcuts.ps1; the v1.20 installer this file
+  originally mirrored left with the v1.20 sunset).
 
   Per-clone icons: tools\autoclaw2-<color>-branding\tray_icon.ico generated
   by tools\make_clone_icon.ps1 from the app's own 512x512 app-icon-square
@@ -67,12 +68,16 @@ $StartMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 
 if (-not (Test-Path $Launcher)) { Write-Error "launcher not found: $Launcher" }
 
+# 2026-11-01 display-name unification: the shortcut FILE names use the color
+# vocabulary shared by all four suites ("<Suite> <Color>.lnk"); the cN names
+# are legacy and are cleaned up on every install/remove run. Instance keys,
+# clone dirs and AUMIDs stay frozen.
 $InstanceDefs = @{
-    'c1' = @{ ShortcutName = 'AutoClaw2 c1.lnk'; BrandingRepo = 'autoclaw2-blue-branding';   DisplayName = 'Blue' }
-    'c2' = @{ ShortcutName = 'AutoClaw2 c2.lnk'; BrandingRepo = 'autoclaw2-yellow-branding'; DisplayName = 'Yellow' }
-    'c3' = @{ ShortcutName = 'AutoClaw2 c3.lnk'; BrandingRepo = 'autoclaw2-green-branding';  DisplayName = 'Green' }
-    'c4' = @{ ShortcutName = 'AutoClaw2 c4.lnk'; BrandingRepo = 'autoclaw2-red-branding';    DisplayName = 'Red' }
-    'c5' = @{ ShortcutName = 'AutoClaw2 c5.lnk'; BrandingRepo = 'autoclaw2-orange-branding'; DisplayName = 'Orange' }
+    'c1' = @{ ShortcutName = 'AutoClaw2 Blue.lnk';   LegacyShortcutName = 'AutoClaw2 c1.lnk'; BrandingRepo = 'autoclaw2-blue-branding';   DisplayName = 'Blue' }
+    'c2' = @{ ShortcutName = 'AutoClaw2 Yellow.lnk'; LegacyShortcutName = 'AutoClaw2 c2.lnk'; BrandingRepo = 'autoclaw2-yellow-branding'; DisplayName = 'Yellow' }
+    'c3' = @{ ShortcutName = 'AutoClaw2 Green.lnk';  LegacyShortcutName = 'AutoClaw2 c3.lnk'; BrandingRepo = 'autoclaw2-green-branding';  DisplayName = 'Green' }
+    'c4' = @{ ShortcutName = 'AutoClaw2 Red.lnk';    LegacyShortcutName = 'AutoClaw2 c4.lnk'; BrandingRepo = 'autoclaw2-red-branding';    DisplayName = 'Red' }
+    'c5' = @{ ShortcutName = 'AutoClaw2 Orange.lnk'; LegacyShortcutName = 'AutoClaw2 c5.lnk'; BrandingRepo = 'autoclaw2-orange-branding'; DisplayName = 'Orange' }
 }
 
 $TargetIds = if ($Instance) { @($Instance) } else { @('c1','c2','c3','c4','c5') }
@@ -187,9 +192,18 @@ foreach ($id in $TargetIds) {
 
     foreach ($root in @($Desktop, $StartMenu)) {
         $lnk = Join-Path $root $def.ShortcutName
+        $legacyLnk = Join-Path $root $def.LegacyShortcutName
         if ($Remove) {
-            if (Test-Path $lnk) { Remove-Item $lnk -Force; Write-Host "removed: $lnk" }
+            foreach ($candidate in @($lnk, $legacyLnk)) {
+                if (Test-Path $candidate) { Remove-Item $candidate -Force; Write-Host "removed: $candidate" }
+            }
             continue
+        }
+        if ((Test-Path $legacyLnk) -and ($legacyLnk -ine $lnk)) {
+            # 2026-11-01 display-name unification: drop the pre-rename shortcut
+            # so the Desktop/Start menu keeps exactly one entry per clone.
+            Remove-Item $legacyLnk -Force
+            Write-Host "removed legacy: $legacyLnk"
         }
         if (-not (Test-Path $iconPath)) {
             Write-Warning "icon missing ($iconPath) - falling back to exe icon"

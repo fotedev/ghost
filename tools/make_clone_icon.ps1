@@ -44,13 +44,13 @@
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_clone_icon.ps1 `
-      -Source "C:\Users\me\Downloads\zcode\autoclaw\blue.jpg" `
-      -OutDir tools\autoclaw-blue-branding
+      -Source "C:\Users\me\Downloads\myapp\blue.jpg" `
+      -OutDir tools\myapp-blue-branding
 .EXAMPLE
   # derived 4th color: hue-rotate the blue master ~+150 deg -> red family
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_clone_icon.ps1 `
-      -Source tools\autoclaw-blue-branding\icon_windows.png `
-      -OutDir tools\autoclaw-red-branding -HueRotate 150
+      -Source tools\zcode-blue-branding\icon_windows.png `
+      -OutDir tools\zcode-red-branding -HueRotate 150
 .EXAMPLE
   # colorize a monochrome (white-logo) master into a suite color; re-run per
   # color dir without -Source (master reused), hues calibrated from the old

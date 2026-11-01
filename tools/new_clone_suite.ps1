@@ -435,7 +435,7 @@ foreach ($name in $Instance) {
     if ($icon) { $lnk.IconLocation = "$icon,0" }
     # TODO(Phase 7): WScript.Shell shortcuts have NO SetAppUserModelId method
     # (the old skeleton called one that cannot exist). AUMIDs need the C#
-    # IPropertyStore helper - copy it from tools\install_autoclaw_clone_shortcuts.ps1
+    # IPropertyStore helper - copy it from tools\install_autoclaw2_clone_shortcuts.ps1
     # and call it here with $def.Aumid before $lnk.Save().
     $lnk.Save()
     # verify-after
@@ -525,9 +525,10 @@ function Edit-GhostMenu {
 
   # Anchor 2: main-menu render - insert the colored entry after the [4] line
   # (the [2]/[3]/[4] entries render via the if-defined-ESC form, not :Opt).
-  $render4 = 'if defined ESC (echo %ESC%[92m[ 4] %ESC%[97mAutoClaw Multi-Instance'
+  # Renamed 2026-10-31: the [4] slot is AutoClaw2 since the v1.20 sunset.
+  $render4 = 'if defined ESC (echo %ESC%[92m[ 4] %ESC%[97mAutoClaw2 Multi-Instance'
   $idx = $bat.IndexOf($render4)
-  if ($idx -lt 0) { throw 'GHOST.bat anchor missing: AutoClaw main-menu render line' }
+  if ($idx -lt 0) { throw 'GHOST.bat anchor missing: AutoClaw2 main-menu render line' }
   $lineEnd = $bat.IndexOf("`r`n", $idx)
   $escEntry = 'if defined ESC (echo %ESC%[92m[ {0}] %ESC%[97m{1} Multi-Instance ^& Clones %ESC%[90m- launchers, resets, sync%ESC%[0m) else echo [ {0}] {1} Multi-Instance ^& Clones - launchers, resets, sync' -f $SubmenuId, $Pascal
   $bat = $bat.Substring(0, $lineEnd + 2) + $escEntry + "`r`n" + $bat.Substring($lineEnd + 2)

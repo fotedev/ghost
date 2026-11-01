@@ -20,9 +20,9 @@ theory.
   AUMID / accent hooks, port-array widening) is silently reverted; clones
   lose their look, inst4 loses its MCP port. **Handling:** the patch marker
   carries `patchVersion`; the launcher/shortcuts warn when it is missing;
-  re-apply via the patch menu entry (ZCode [27]; the AutoClaw v1.20 entry was
-  retired 2026-10-29 with the v1.20 app - run `tools\patch_autoclaw_ports.ps1`
-  directly) after
+  re-apply via the patch menu entry (ZCode [27]; the AutoClaw v1.20 patch
+  machinery was removed 2026-10-31 with the v1.20 app — git history /
+  `archive/autoclaw-v1.20/`) after
   EVERY app update. **A + R.** ZCode marker design; AutoClaw risk A2.
 - **EC-A02 · P0 — An in-clone built-in updater runs `quitAndInstall`** → it
   wipes the SHARED patched asar mid-session for all instances. **Handling:**

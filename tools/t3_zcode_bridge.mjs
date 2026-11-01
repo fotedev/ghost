@@ -145,7 +145,7 @@ log(`cli=${zcodeCli} wire=${wire.protocolVersion}/v4:${wire.v4WireVersion}`);
         const provCfg = JSON.parse(fs.readFileSync(path.join(cloneHome, '.zcode', 'v2', 'provider_config.json'), 'utf8'));
         if (!provCfg?.config?.defaultModelSelection) {
             warnOnceLog('login', `no standalone CLI login in this home - turns will run on the FREE zen model.`);
-            warnOnceLog('login', `one-time fix: set the four env levers (see docs/ZCODE_LIGHT_MODE.md) then run: node "${zcodeCli}" login zai`);
+            warnOnceLog('login', `one-time fix: set the five env levers incl. ZCODE_BUILTIN_PROVIDER_CONFIG_FILE (see docs/ZCODE_LIGHT_MODE.md) then run: node "${zcodeCli}" login zai`);
         }
     } catch { warnOnceLog('login', 'provider_config.json unreadable - login state unknown.'); }
 })();

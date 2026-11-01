@@ -1,5 +1,26 @@
 # OpenCode desktop multi-instance clones (c1..c5) — design spec
 
+> **Engine v3 addendum (2026-11-01): re-derived for the 2.2.5.0 bundle.**
+> The updater replaced `app.asar` wholesale on 2026-10-31 (2.2.5.0, 235 MB;
+> marker + prior backup gone) and the v2 clone-home byte anchor — the 2.0.32
+> `isPackaged?void 0:...` ternary tail — had ZERO sites in the new bundle
+> (zero-site abort, no damage; pristine backup at
+> `resources\ID_Backups\20261031-064242`). Recon of the new bundle:
+> the test-mode machinery is intact — the bootstrap fn (minified `ue()`,
+> was `ye()`) reads `process.env.OPENCODE_DESKTOP_TEST_ROOT` (1 occurrence,
+> offset ≈ 81.73 MB), creates the same seven subdirs and the four `XDG_*`
+> envs, and **2.2.5.0 pins `userData`/`sessionData` inline in the same
+> bootstrap fn (`z()`) straight from `ue()`'s return** — so the v3 hook is
+> ONE slot: `env.OPENCODE_DESKTOP_TEST_ROOT` →
+> `(__opencodeCloneHome_scan || env.OPENCODE_DESKTOP_TEST_ROOT)` inside the
+> non-onboarding branch (the onboarding `rmSync`-wipe branch stays first).
+> The identity regex matched unchanged (`g.setAppUserModelId(le)` — 1 site).
+> Re-patched + live-verified 2026-11-01: c1 launched beside the closed
+> Primary, `OpenCodeClonesHome\c1\{desktop,session}` receiving all writes,
+> window title "OpenCode Blue", **Primary snapshot diff = 0 changes**
+> (1338 files path|size|mtime identical before/after). The 2.0.32 detail
+> below is kept as the v2-era provenance record.
+
 Status: **IMPLEMENTED — live-verified 2026-10-24/25 on this host**: engine
 v2 patched into the installed app (old-engine upgrade path proven en
 route), c1..c5 all launched and verified (per-clone lockfiles HELD

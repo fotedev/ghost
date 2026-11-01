@@ -35,8 +35,9 @@ instances** (a Primary plus N−1 clones), each with:
 Scope: Windows PowerShell (the repo's primary platform), desktop
 Electron-style apps first. Every app-specific fact MUST be verified against
 the **installed** app on this host — never inferred from upstream source,
-docs, or hope (the `AUTOCLAW_CLONES_SPEC.md` §5/§13 pattern: quoted
-decompiled code + live probes + provenance). Applies to any future app.
+docs, or hope (the archived AutoClaw v1.20 spec's §5/§13 pattern — git
+history / `archive/autoclaw-v1.20/`: quoted decompiled code + live probes +
+provenance). Applies to any future app.
 
 ## 2. The identity suite (required features per clone)
 
@@ -77,8 +78,8 @@ Everything else is the agent's job (§4). The Developer supplies, via
 1. App name/slug, instance count, role names.
 2. **Colors** — one accent hex per clone, Developer-specified (defaults
    offered: the ZCode palette — Second blue `#066BCB`, Third yellow
-   `#D4AA10`, Fourth green `#13826A`, Fifth red `#CA0607`). The Primary is
-   never recolored.
+   `#D4AA10`, Fourth green `#13826A`, Fifth red `#CA0607`, Sixth orange
+   `#CB5D06`). The Primary is never recolored.
 3. **Icons** — developer-supplied files per clone (paths), or the §5
    policy applies.
 4. Credential policy (default: one credential = one instance; the seed
@@ -190,7 +191,13 @@ Never: fail the clone over icons; silently guess; leave a broken
       `%USERPROFILE%\<App>CloneHome\<inst>\{home,profile,tmp}` (+ per-clone
       roaming dirs if the app uses %APPDATA%). Names frozen from day one —
       renaming dirs later orphans installed profiles (ZCode Second rule).
-      Primary paths recorded, never written by clone scripts.
+      Primary paths recorded, never written by clone scripts. Display layer
+      is NOT frozen: the shortcut file names use the shared color vocabulary
+      `<Suite> <Color>.lnk` (2026-11-01 unification — matches the per-color
+      icons and, where the app supports it, the `<App> <Color>` window
+      titles); the technical instance key (c1..cN) stays the `-Instance`
+      value and the pre-rename names are cleaned up by the installer on
+      every run.
 - [ ] Env levers FIRST; CLI flags only as a second layer (ZCode overwrites
       `--user-data-dir` via `app.setPath` — EC-D02).
 - [ ] Port plan table: per-instance preferred ports spaced beyond the drift
@@ -369,10 +376,12 @@ This playbook distills verified work, not theory:
   hijack repair, splash-phase misclassification fix, renderer-OOM
   commit-limit diagnosis, Telegram 409 routing rule. Ground truth:
   AGENTS.md "Multi-instance conventions (ZCode: Primary + 5 clones)".
-- **AutoClaw suite** (2026-10-08 → 10-15): the installed-app discovery
+- **AutoClaw v1.20 suite** (2026-10-08 → 10-15; SUNSET — removed 2026-10-31
+  with the v1.20 app): the installed-app discovery
   method (quoted decompiled code + live probes), credential-free seed +
   marker guards, port-array widening + drift discovery,
   `instance-record.json`, the Primary-hash isolation-breach check. Ground
-  truth: [AUTOCLAW_CLONES_SPEC.md](AUTOCLAW_CLONES_SPEC.md) §5/§13.
+  truth: the archived AutoClaw spec (git history /
+  `archive/autoclaw-v1.20/docs/`) §5/§13.
 - Edge-case handling rules:
   [APP_CLONING_EDGE_CASES.md](APP_CLONING_EDGE_CASES.md).
