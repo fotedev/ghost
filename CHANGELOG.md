@@ -8,6 +8,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode clone launches persist their console output to a log** (2026-11-03):
+  `launch_zcode_second_instance.ps1` appends every run to
+  `tools\logs\launch_zcode_<Instance>.log` via a PowerShell transcript (one
+  file per instance, `-Append` with invocation headers) — the auto-closing
+  GHOST.bat launcher windows (ZCode [1]-[6]) and the hidden Desktop/Start-menu
+  shortcut launches no longer lose their output: the ram-guard question and
+  answer, seed/telegram/sync step results, spawn PID and taskbar stamping are
+  all reviewable after the fact. Logging is fully best-effort: a transcript
+  failure prints a yellow warning and never blocks the launch, and
+  `Stop-Transcript` runs before the ram-guard `exit 0` paths and at script
+  end. GHOST.bat ZCode [6] also prints the log location after opening the
+  five windows.
 - **ZCode patch [27] waits for you to close the app** (2026-10-31):
   `patch_zcode_icon_override.ps1` gained `-WaitForClose` (GHOST.bat ZCode
   [27] passes it via `:RunWith`'s new optional extra-args slot) — when
