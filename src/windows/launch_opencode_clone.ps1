@@ -105,7 +105,7 @@ function Get-CloneProcess {
 
 # --- Status mode --------------------------------------------------------------
 if ($Status) {
-    Write-Host "=== OpenCode clone '$Instance' status ==="
+    Write-Host "=== OpenCode $($InstanceDefs[$Instance].Color) clone status ==="
     Write-Host "clone home  : $CloneHome"
     Write-Host "exists      : $(Test-Path $CloneHome)"
     foreach ($sub in @('desktop','session','data','config','cache','state')) {
@@ -210,7 +210,7 @@ Write-Host "      aumidSuffix=$($verify.aumidSuffix) title='$($verify.title)'"
 # too (engine v2: the app's main bundle is ESM - no require - so the
 # injected resolver reads ONLY argv). Each flag is quoted as ONE argument so
 # spaced values stay single argv entries; the injected parser strips quotes.
-Write-Host "[4/5] Launching OpenCode clone '$Instance' ..."
+Write-Host "[4/5] Launching OpenCode $($InstanceDefs[$Instance].Color) clone ..."
 $installDir = Split-Path $ExePath -Parent
 $launchArgs = @(
     "`"--opencode-clone-home=$CloneHome`"",

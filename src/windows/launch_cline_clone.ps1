@@ -63,6 +63,10 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# Display vocabulary (2026-11-03): colors are the user-facing clone names;
+# the frozen c1..c5 keys stay in params, dirs and AUMIDs only.
+$CloneColor = @{ 'c1' = 'Blue'; 'c2' = 'Yellow'; 'c3' = 'Green'; 'c4' = 'Red'; 'c5' = 'Orange' }[$Instance]
+
 # --- Portable paths ---------------------------------------------------------
 $ExePath    = Join-Path $env:LOCALAPPDATA 'Cline\cline-app.exe'
 $ClonesRoot = Join-Path $env:USERPROFILE 'ClineClonesHome'
@@ -126,7 +130,7 @@ function Test-HubLockHeld {
 
 # --- Status mode ------------------------------------------------------------
 if ($Status) {
-    Write-Host "=== Cline clone '$Instance' status ==="
+    Write-Host "=== Cline $CloneColor clone status ==="
     Write-Host "profile dir : $CloneDir"
     Write-Host "exists      : $(Test-Path $CloneDir)"
     if (Test-Path $HubLock) {
@@ -192,7 +196,7 @@ $env:WEBVIEW2_USER_DATA_FOLDER = $WebViewDir
 $env:CLINE_HUB_PORT          = [string]$ports.Hub
 $env:CLINE_SIDECAR_PORT      = [string]$ports.Sidecar
 
-Write-Host "launching Cline clone '$Instance' ..."
+Write-Host "launching Cline $CloneColor clone ..."
 Write-Host "  CLINE_DIR                 = $env:CLINE_DIR"
 Write-Host "  WEBVIEW2_USER_DATA_FOLDER = $env:WEBVIEW2_USER_DATA_FOLDER"
 Write-Host "  CLINE_HUB_PORT            = $env:CLINE_HUB_PORT"
