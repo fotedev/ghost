@@ -488,6 +488,7 @@ if "%~1"=="18" (
     call :StartClone "ZCode Orange" "src\windows\launch_zcode_second_instance.ps1" "-Instance Sixth"
     echo Five launcher windows opened - each closes automatically when done.
     echo First runs clone the Primary profile, so expect a short delay per clone.
+    echo Launch logs: tools\logs\launch_zcode_Second..Sixth.log - one file per clone.
     pause
     exit /b
 )
