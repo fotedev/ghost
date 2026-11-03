@@ -55,6 +55,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   generator templates teach the pattern to future suites.
 
 ### Fixed
+- **A stray click can no longer freeze the reset console's output** (2026-11-04):
+  QuickEdit selection (a click or click-drag inside the console window) blocks
+  all console writes until a key is pressed — during a Fifth reset the output
+  appeared stalled at the terminate step while the script kept running
+  underneath. `reset_zcode.ps1` now drops `ENABLE_QUICK_EDIT_MODE` from its
+  console's mode at startup (best-effort, other flags preserved, the
+  elevated-relaunch child gets it too) and says so in a dim line. Ctrl+S
+  display pause is a host feature that cannot be disabled — any key resumes
+  it; same recovery family as the `[DBG]:` tip below.
 - **The reset console now explains the `[DBG]:` debugger state** (2026-11-03):
   pressing Ctrl+Break during a reset drops PowerShell's console host into its
   "Break All" debugger (`Entering debug mode` + an `[DBG]:` prompt) with no
