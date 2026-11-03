@@ -55,6 +55,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   generator templates teach the pattern to future suites.
 
 ### Fixed
+- **The reset console now explains the `[DBG]:` debugger state** (2026-11-03):
+  pressing Ctrl+Break during a reset drops PowerShell's console host into its
+  "Break All" debugger (`Entering debug mode` + an `[DBG]:` prompt) with no
+  on-screen guidance — it looks like the reset crashed although the script is
+  healthy (verified: zero `Write-Debug`/`Set-PSDebug` in the repo, `-NoProfile`
+  on both spawn paths, clean `[OK]` output immediately before the break).
+  `:RunZcodeReset` now prints a one-line tip BEFORE running: the `[DBG]:`
+  prompt means Ctrl+Break was pressed, `q` + Enter quits, and the menu item
+  can simply be re-run (an interrupted reset stopped before the identity
+  rewrite, so re-running is safe).
 - **ZCode clone shortcuts hung invisibly at the RAM guard** (2026-11-01):
   the Desktop/Start-menu shortcuts run the launcher with `-WindowStyle
   Hidden`, whose hidden-console stdin is NOT redirected — so the guard's only
