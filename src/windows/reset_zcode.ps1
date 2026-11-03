@@ -86,6 +86,37 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# --- Console hygiene: disable QuickEdit (2026-11-03) ---------------------------
+# A click or click-drag inside this console starts a QuickEdit text selection,
+# which BLOCKS all console output until a key is pressed - the reset keeps
+# running underneath, but its progress appears frozen (observed 2026-11-03
+# during a Fifth reset: output stalled at the terminate step until a keypress).
+# Drop ENABLE_QUICK_EDIT_MODE (0x40) from this console's mode, keeping every
+# other flag; ENABLE_EXTENDED_FLAGS (0x80) must accompany the change. The
+# handle opens CONOUT$ (the screen buffer itself) so stdout redirection does
+# not matter. Best effort: any failure here must never block the reset. Note
+# Ctrl+S display pause is a host feature that cannot be disabled - any key
+# resumes it.
+try {
+    if (-not ('Ghost.ResetConsole' -as [type])) {
+        Add-Type -MemberDefinition '
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateFileW(string name, int access, int share, IntPtr sec, int disp, int flags, IntPtr tmpl);
+            [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr h, out int mode);
+            [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr h, int mode);
+        ' -Name ResetConsole -Namespace Ghost | Out-Null
+    }
+    # GENERIC_READ|GENERIC_WRITE = 0xC0000000, share 0x3, OPEN_EXISTING = 3.
+    $qeHandle = [Ghost.ResetConsole]::CreateFileW('CONOUT$', -1069547520, 3, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)
+    $qeMode = 0
+    if (($qeHandle -ne [IntPtr](-1)) -and [Ghost.ResetConsole]::GetConsoleMode($qeHandle, [ref]$qeMode)) {
+        $qeNew = ($qeMode -band (-bnot 0x0040)) -bor 0x0080
+        if ($qeNew -ne $qeMode) {
+            [void][Ghost.ResetConsole]::SetConsoleMode($qeHandle, $qeNew)
+            Write-Host '[console] QuickEdit selection disabled for this window - a stray click can no longer pause the output.' -ForegroundColor DarkGray
+        }
+    }
+} catch { Write-Host "[console] QuickEdit tweak SKIP ($($_.Exception.Message))" -ForegroundColor DarkGray }
+
 # --- Display vocabulary (2026-11-03) -------------------------------------------
 # Colors are the ONLY user-facing clone names; the frozen keys (Secondary..Sixth)
 # survive in params, dirs, AUMIDs and identification lines (color + key in
