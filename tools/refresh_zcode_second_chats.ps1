@@ -360,7 +360,7 @@ function Invoke-RefreshPass {
   $anyRunning = $false
   foreach ($def in $defs) {
     $st = Get-InstanceState $def
-    $label = $def.Name + ' (' + $def.Title + ')'
+    $label = $def.Title + ' (' + $def.Name + ')'
     if ($st.Status -eq 'not-installed') {
       if ($strictSingle) { Stop-WithError "$label tasks-index not found: $($st.TasksIndex) -- launch that instance once first" }
       Write-Host "  ${label}: skipped - never launched on this machine"
@@ -403,7 +403,7 @@ function Invoke-RefreshPass {
 
   if ($DryRun) {
     foreach ($w in $work) {
-      Write-Host "  $($w.Def.Name): [DRY-RUN] would recycle $($w.Servers.Count) app-server process(es); no action taken." -ForegroundColor Cyan
+      Write-Host "  $($w.Def.Title): [DRY-RUN] would recycle $($w.Servers.Count) app-server process(es); no action taken." -ForegroundColor Cyan
       Write-RunLog "DRYRUN target=$($w.Def.Name) missing=$($w.MissingCount) servers=$($w.Servers.Count)"
     }
     return 'nothing'
@@ -422,7 +422,7 @@ function Invoke-RefreshPass {
   Write-Host '[3/3] Recycling app-server(s) + verifying (auto-respawn expected)...'
   $recycledAny = $false
   foreach ($w in $work) {
-    $label = $w.Def.Name + ' (' + $w.Def.Title + ')'
+    $label = $w.Def.Title + ' (' + $w.Def.Name + ')'
     # re-collect: PIDs may have changed if an app-server respawned during the wait
     $desc = @(Get-DescendantProcesses ($w.Mains | ForEach-Object { [int]$_.Id }))
     $servers = @($desc | Where-Object { $_.CommandLine -like '*app-server*' })

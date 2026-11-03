@@ -177,9 +177,9 @@ function Invoke-IdentityKick {
     [void][ZcodeWindowAumid]::Stamp($hwnd, "$($Inst.Aumid).kick")
     Start-Sleep -Milliseconds 300
     $got = [ZcodeWindowAumid]::Stamp($hwnd, $Inst.Aumid)
-    Write-WatchLog ('{0}: pid {1} hwnd 0x{2:X} title "{3}" identity "{4}" -> kicked via "{5}.kick" -> stamped "{6}"' -f $Inst.Name, $Win.Id, [Int64]$hwnd, $Win.MainWindowTitle, $Cur, $Inst.Aumid, $got) 'STAMP'
+    Write-WatchLog ('{0}: pid {1} hwnd 0x{2:X} title "{3}" identity "{4}" -> kicked via "{5}.kick" -> stamped "{6}"' -f $Inst.Title, $Win.Id, [Int64]$hwnd, $Win.MainWindowTitle, $Cur, $Inst.Aumid, $got) 'STAMP'
     if ($got -ne $Inst.Aumid) {
-        Write-WatchLog ('{0}: FAILED - read-back "{1}" != "{2}". If this watcher runs at a lower integrity level than the ZCode window (UIPI), run it from the same level or higher.' -f $Inst.Name, $got, $Inst.Aumid) 'FAIL'
+        Write-WatchLog ('{0}: FAILED - read-back "{1}" != "{2}". If this watcher runs at a lower integrity level than the ZCode window (UIPI), run it from the same level or higher.' -f $Inst.Title, $got, $Inst.Aumid) 'FAIL'
     }
 }
 
@@ -277,7 +277,7 @@ function Invoke-IdentityPass {
             if ($inst.Name -eq 'Primary') {
                 foreach ($cand in $Instances) {
                     if ($cand.Name -ne 'Primary' -and $cand.Title -eq $w.MainWindowTitle) {
-                        Write-WatchLog ("{0}: pid {1} markers said Primary but title is '{2}' - trusting title" -f $cand.Name, $w.Id, $w.MainWindowTitle) 'WARN'
+                        Write-WatchLog ("{0}: pid {1} markers said Primary but title is '{2}' - trusting title" -f $cand.Title, $w.Id, $w.MainWindowTitle) 'WARN'
                         $inst = $cand
                         break
                     }
@@ -297,7 +297,7 @@ function Invoke-IdentityPass {
         $hits = @($unknownWins | Where-Object { $_.MainWindowTitle -eq $inst.Title })
         if ($hits.Count -eq 0) { continue }
         if ($hits.Count -gt 1) {
-            Write-WatchLog ("{0}: {1} windows titled '{2}' - ambiguous (app.asar patch missing?), stamping skipped" -f $inst.Name, $hits.Count, $inst.Title) 'WARN'
+            Write-WatchLog ("{0}: {1} windows titled '{2}' - ambiguous (app.asar patch missing?), stamping skipped" -f $inst.Title, $hits.Count, $inst.Title) 'WARN'
             continue
         }
         # A window is only here because its pid has no WMI data. ONE window
@@ -306,7 +306,7 @@ function Invoke-IdentityPass {
         # Primary row never guesses - skip loudly. Clone v6 titles are unique
         # and keep stamping.
         if ($inst.Name -eq 'Primary') {
-            Write-WatchLog ("{0}: lone window titled '{1}' with no WMI data for pid {2} - ambiguous (could be a splash-phase clone), stamping skipped" -f $inst.Name, $inst.Title, $hits[0].Id) 'WARN'
+            Write-WatchLog ("{0}: lone window titled '{1}' with no WMI data for pid {2} - ambiguous (could be a splash-phase clone), stamping skipped" -f $inst.Title, $inst.Title, $hits[0].Id) 'WARN'
             continue
         }
         $firstSeen = -not $SeenHwnds.ContainsKey([Int64]$hits[0].MainWindowHandle)

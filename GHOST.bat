@@ -112,23 +112,23 @@ cls
 if defined ESC (echo %ESC%[96mGHOST / ZCode Multi-Instance ^& Clones%ESC%[0m) else echo GHOST / ZCode Multi-Instance ^& Clones
 echo.
 call :Div "Launch Clones"
-call :Opt 1 "Launch Second instance" "- Blue branding (independent window)"
-call :Opt 2 "Launch Third instance" "- Yellow branding (independent window)"
-call :Opt 3 "Launch Fourth instance" "- Green branding (independent window)"
-call :Opt 4 "Launch Fifth instance" "- Red branding (independent window)"
-call :Opt 5 "Launch Sixth instance" "- Orange branding (independent window)"
-call :Opt 6 "Launch ALL clones" "- Second..Sixth, one after another"
+call :Opt 1 "Launch Blue clone" "- independent window"
+call :Opt 2 "Launch Yellow clone" "- independent window"
+call :Opt 3 "Launch Green clone" "- independent window"
+call :Opt 4 "Launch Red clone" "- independent window"
+call :Opt 5 "Launch Orange clone" "- independent window"
+call :Opt 6 "Launch ALL clones" "- Blue..Orange, one after another"
 call :Opt 7 "Launch light headless worker" "- run a clone account with no desktop window - low RAM"
 call :Opt 8 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
 echo.
 call :Div "Reset Clones"
-call :Opt 9 "Reset Second instance" "- Blue (survivors kept running)"
-call :Opt 10 "Reset Third instance" "- Yellow (survivors kept running)"
-call :Opt 11 "Reset Fourth instance" "- Green (survivors kept running)"
-call :Opt 12 "Reset Fifth instance" "- Red (survivors kept running)"
-call :Opt 13 "Reset Sixth instance" "- Orange (survivors kept running)"
+call :Opt 9 "Reset Blue clone" "- survivors kept running"
+call :Opt 10 "Reset Yellow clone" "- survivors kept running"
+call :Opt 11 "Reset Green clone" "- survivors kept running"
+call :Opt 12 "Reset Red clone" "- survivors kept running"
+call :Opt 13 "Reset Orange clone" "- survivors kept running"
 call :Opt 14 "Reset ZCode Primary instance" ""
-call :Opt 15 "Reset Second + Primary" "(independent IDs)"
+call :Opt 15 "Reset Blue + Primary" "(independent IDs)"
 call :Opt 16 "Reset ALL SIX instances" "(independent IDs)"
 echo.
 call :Div "Sync + Chat Refresh"
@@ -136,7 +136,7 @@ call :Opt 17 "Sync clone assets" "- MCPs + skills + plugins from Primary"
 call :Opt 18 "Sync MCPs to all clones" "- live - running instances included"
 call :Opt 19 "MCP sync watcher" "- auto-sync on Primary change (separate window)"
 call :Opt 20 "Sync MCPs + apply live now" "- recycles running instances - idle-guarded"
-call :Opt 21 "Refresh Second chats" "- show Primary chats without app restart"
+call :Opt 21 "Refresh Blue chats" "- show Primary chats without app restart"
 call :Opt 22 "Refresh ALL chats" "- re-index every running sidebar"
 call :Opt 23 "Watch errors" "- auto-refresh chats on quota or captcha failure"
 echo.
@@ -199,12 +199,12 @@ cls
 if defined ESC (echo %ESC%[96mGHOST / AutoClaw2 Multi-Instance ^& Clones%ESC%[0m) else echo GHOST / AutoClaw2 Multi-Instance ^& Clones
 echo.
 call :Div "Launch Clones"
-call :Opt 1 "Launch c1" "- Blue - own profile, identity, sign-in"
-call :Opt 2 "Launch c2" "- Yellow"
-call :Opt 3 "Launch c3" "- Green"
-call :Opt 4 "Launch c4" "- Red"
-call :Opt 5 "Launch c5" "- Orange"
-call :Opt 6 "Launch ALL clones" "- c1..c5, one after another"
+call :Opt 1 "Launch Blue clone" "- own profile, identity, sign-in"
+call :Opt 2 "Launch Yellow clone" ""
+call :Opt 3 "Launch Green clone" ""
+call :Opt 4 "Launch Red clone" ""
+call :Opt 5 "Launch Orange clone" ""
+call :Opt 6 "Launch ALL clones" "- Blue..Orange, one after another"
 call :Opt 7 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
 echo.
 call :Div "Maintenance"
@@ -234,12 +234,12 @@ cls
 if defined ESC (echo %ESC%[96mGHOST / Cline Multi-Instance ^& Clones%ESC%[0m) else echo GHOST / Cline Multi-Instance ^& Clones
 echo.
 call :Div "Launch Clones"
-call :Opt 1 "Launch c1" "- Blue - own state, web login, ports"
-call :Opt 2 "Launch c2" "- Yellow"
-call :Opt 3 "Launch c3" "- Green"
-call :Opt 4 "Launch c4" "- Red"
-call :Opt 5 "Launch c5" "- Orange"
-call :Opt 6 "Launch ALL clones" "- c1..c5, one after another"
+call :Opt 1 "Launch Blue clone" "- own state, web login, ports"
+call :Opt 2 "Launch Yellow clone" ""
+call :Opt 3 "Launch Green clone" ""
+call :Opt 4 "Launch Red clone" ""
+call :Opt 5 "Launch Orange clone" ""
+call :Opt 6 "Launch ALL clones" "- Blue..Orange, one after another"
 call :Opt 7 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
 echo.
 call :Div "Maintenance"
@@ -269,12 +269,12 @@ cls
 if defined ESC (echo %ESC%[96mGHOST / OpenCode Multi-Instance ^& Clones%ESC%[0m) else echo GHOST / OpenCode Multi-Instance ^& Clones
 echo.
 call :Div "Launch Clones"
-call :Opt 1 "Launch c1" "- Blue - own clone home, login, identity"
-call :Opt 2 "Launch c2" "- Yellow"
-call :Opt 3 "Launch c3" "- Green"
-call :Opt 4 "Launch c4" "- Red"
-call :Opt 5 "Launch c5" "- Orange"
-call :Opt 6 "Launch ALL clones" "- c1..c5, one after another"
+call :Opt 1 "Launch Blue clone" "- own clone home, login, identity"
+call :Opt 2 "Launch Yellow clone" ""
+call :Opt 3 "Launch Green clone" ""
+call :Opt 4 "Launch Red clone" ""
+call :Opt 5 "Launch Orange clone" ""
+call :Opt 6 "Launch ALL clones" "- Blue..Orange, one after another"
 call :Opt 7 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
 echo.
 call :Div "Maintenance"
@@ -470,10 +470,10 @@ if "%~1"=="8"  (call :Run "src\windows\reset_minimax_opencode.ps1" & exit /b)
 if "%~1"=="9"  (call :Detached "ZCode captcha watch" "-NoExit -NoProfile" "tools\watch_zcode_captcha.ps1" "" "Watchdog launched in a separate window - leave it open." "To verify it runs: check %LOCALAPPDATA%\watch-zcode-captcha\watch.log" & exit /b)
 if "%~1"=="10" (call :Detached "ZCode Blue" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="11" (call :RunZcodeReset "src\windows\reset_zcode.ps1" -Target Secondary & exit /b)
-if "%~1"=="12" (call :ConfirmReset "Reset Second + Primary - independent IDs" "src\windows\reset_zcode.ps1" "-Target Both" & exit /b)
+if "%~1"=="12" (call :ConfirmReset "Reset Blue + Primary - independent IDs" "src\windows\reset_zcode.ps1" "-Target Both" & exit /b)
 if "%~1"=="13" (call :RunWith "tools\patch_zcode_icon_override.ps1" "Patch finished - relaunch instances via their ZCode shortcuts - a bare ZCode.exe opens the PRIMARY profile." -WaitForClose & exit /b)
 if "%~1"=="14" (call :RunWith "tools\install_zcode_second_shortcuts.ps1" "Look for the new ZCode Blue, ZCode Yellow, ZCode Green, ZCode Red and ZCode Orange shortcuts on your Desktop and in the Start menu." & exit /b)
-if "%~1"=="15" (call :RunWith "tools\refresh_zcode_second_chats.ps1" "The blue Secondary window refreshes its chat list by itself in a few seconds." & exit /b)
+if "%~1"=="15" (call :RunWith "tools\refresh_zcode_second_chats.ps1" "The Blue clone window refreshes its chat list by itself in a few seconds." & exit /b)
 if "%~1"=="16" (call :Detached "ZCode Yellow" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Third" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="17" (call :Detached "ZCode Green" "-NoProfile" "src\windows\launch_zcode_second_instance.ps1" "-Instance Fourth" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="18" (
@@ -488,7 +488,7 @@ if "%~1"=="18" (
     call :StartClone "ZCode Orange" "src\windows\launch_zcode_second_instance.ps1" "-Instance Sixth"
     echo Five launcher windows opened - each closes automatically when done.
     echo First runs clone the Primary profile, so expect a short delay per clone.
-    echo Launch logs: tools\logs\launch_zcode_Second..Sixth.log - one file per clone.
+    echo Launch logs: tools\logs - one launch_zcode log file per clone.
     pause
     exit /b
 )

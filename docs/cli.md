@@ -41,8 +41,10 @@ powershell -ExecutionPolicy Bypass -File "src\windows\spoof_wmi_serials.ps1" -Dr
 
 Menu equivalents for the reset targets: `reset_zcode.ps1 -Target Primary` =
 IDE Resets [7] **and** ZCode [14] (the same task from both menus);
-`-Target Secondary` / `Both` / `Third` / `Fourth` / `Fifth` / `Sixth` / `All` = ZCode
-[9] / [15] / [10] / [11] / [12] / [13] / [16]. The AutoClaw v1.20 suite
+`-Target Secondary` / `Both` / `Third` / `Fourth` / `Fifth` / `Sixth` / `All` =
+ZCode [9] Reset **Blue** clone / [15] **Blue** + Primary / [10] **Yellow** /
+[11] **Green** / [12] **Red** / [13] **Orange** / [16] **ALL SIX** (menus display
+the COLOR names; the CLI params keep the frozen keys). The AutoClaw v1.20 suite
 (`reset_autoclaw.ps1` and friends) was REMOVED 2026-10-31 with the v1.20 app
 (uninstalled from the dev host 2026-10-29) — recover it from git history or
 `archive/autoclaw-v1.20/` for a v1.20 host. AutoClaw2 has no reset script
@@ -73,9 +75,10 @@ First launch of each clone copies history into its own home
 ZCodeFifthHome | ZCodeSixthHome`), scrubs
 it to fresh IDs, and reconciles Telegram channel bots via sha8 credential
 comparison (duplicates of Primary disabled, unique clone bots preserved —
-see [docs/ZCODE_TELEGRAM_BOTS.md](ZCODE_TELEGRAM_BOTS.md)). Branding:
-Second = blue, Third = yellow, Fourth = green, Fifth = red #CA0607,
-Sixth = orange #CB5D06
+see [docs/ZCODE_TELEGRAM_BOTS.md](ZCODE_TELEGRAM_BOTS.md)). Colors ARE the
+display vocabulary (menus, console output, shortcut names): Blue, Yellow,
+Green, Red #CA0607, Orange #CB5D06 — the `-Instance` params keep the frozen
+keys Second/Third/Fourth/Fifth/Sixth
 (separate taskbar buttons + window titles "ZCode Blue"/"ZCode Yellow"/
 "ZCode Green"/"ZCode Red"/"ZCode Orange"). Every launch also ensures the two
 resident watchers an install needs are alive and set to autostart (launcher
@@ -125,7 +128,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\refresh_zcode_second_
 
 Shows chats created in another instance inside a running sidebar by recycling
 the target's app-server (auto-respawn reseeds its index; verify-after). ZCode
-[21] = Second only, ZCode [22] = all instances. A hot-activity guard waits out
+[21] = Blue clone only, ZCode [22] = all instances. A hot-activity guard waits out
 in-flight turns (`-Force` bypasses). Watcher mode (`-Watch`, ZCode [23]) tails
 the CLI JSONL logs for terminal failures (captcha stall / quota / rate-limit)
 and refreshes every RUNNING instance on a 300 s cooldown.

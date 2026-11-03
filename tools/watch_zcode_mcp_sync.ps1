@@ -346,27 +346,27 @@ function Invoke-ApplyLivePass {
         try {
             $st = Get-LiveInstanceState $def
             if ($st.Status -eq 'not-running') {
-                Write-WatchLog ("live-apply {0}: not running - config applies on next launch." -f $def.Name)
+                Write-WatchLog ("live-apply {0}: not running - config applies on next launch." -f $def.Title)
                 continue
             }
             if ($st.Status -eq 'no-appserver') {
-                Write-WatchLog ("live-apply {0}: running, no workspace open - picks up at next spawn." -f $def.Name)
+                Write-WatchLog ("live-apply {0}: running, no workspace open - picks up at next spawn." -f $def.Title)
                 continue
             }
             if (-not (Wait-ForIdleGuard $st.Servers)) {
-                Write-WatchLog ("live-apply {0}: deferred - chat still active after ~90s ({1})." -f $def.Name, $script:GuardWhy) 'WARN'
+                Write-WatchLog ("live-apply {0}: deferred - chat still active after ~90s ({1})." -f $def.Title, $script:GuardWhy) 'WARN'
                 continue
             }
             # re-collect: PIDs may have changed during the guard wait
             $desc = @(Get-DescendantProcesses ($st.Mains | ForEach-Object { [int]$_.Id }))
             $servers = @($desc | Where-Object { $_.CommandLine -like '*app-server*' })
             if ($servers.Count -eq 0) {
-                Write-WatchLog ("live-apply {0}: app-server went away while waiting - picks up at next spawn." -f $def.Name)
+                Write-WatchLog ("live-apply {0}: app-server went away while waiting - picks up at next spawn." -f $def.Title)
                 continue
             }
             $oldIds = @($servers | ForEach-Object { [int]$_.ProcessId })
             foreach ($targetId in $oldIds) { Stop-Process -Id $targetId -Force -ErrorAction SilentlyContinue }
-            Write-WatchLog ("live-apply {0}: recycled app-server pid(s) {1} - waiting for respawn..." -f $def.Name, ($oldIds -join ',')) 'SYNC'
+            Write-WatchLog ("live-apply {0}: recycled app-server pid(s) {1} - waiting for respawn..." -f $def.Title, ($oldIds -join ',')) 'SYNC'
             $respawned = $false
             for ($i = 0; $i -lt 30; $i++) {
                 Start-Sleep -Seconds 1
@@ -374,10 +374,10 @@ function Invoke-ApplyLivePass {
                 $fresh = @($descNow | Where-Object { $_.CommandLine -like '*app-server*' -and $oldIds -notcontains [int]$_.ProcessId })
                 if ($fresh.Count -gt 0) { $respawned = $true; break }
             }
-            if ($respawned) { Write-WatchLog ("live-apply {0}: app-server respawned after ~{1}s - new MCP definitions are live." -f $def.Name, ($i + 1)) 'SYNC' }
-            else { Write-WatchLog ("live-apply {0}: [FAIL] app-server did not respawn within 30s - check the window." -f $def.Name) 'FAIL' }
+            if ($respawned) { Write-WatchLog ("live-apply {0}: app-server respawned after ~{1}s - new MCP definitions are live." -f $def.Title, ($i + 1)) 'SYNC' }
+            else { Write-WatchLog ("live-apply {0}: [FAIL] app-server did not respawn within 30s - check the window." -f $def.Title) 'FAIL' }
         } catch {
-            Write-WatchLog ("live-apply {0} FAILED: {1}" -f $def.Name, $_.Exception.Message) 'FAIL'
+            Write-WatchLog ("live-apply {0} FAILED: {1}" -f $def.Title, $_.Exception.Message) 'FAIL'
         }
     }
 }
@@ -471,8 +471,11 @@ if ($InstallAutostart -or $RemoveAutostart) {
 }
 
 # ---- One-shot / resident ----------------------------------------------------
+# Display name for the -Target param: color title for a single clone, 'All' as-is
+# (param values stay frozen keys; only the printed word changes).
+$targetDisplay = if ($Target -eq 'All') { 'All' } else { @($InstanceDefs | Where-Object { $_.Name -eq $Target })[0].Title }
 if ($RunOnce) {
-    Write-WatchLog ("one-shot pass starting (target {0}, DryRun {1}, ApplyLive {2})" -f $Target, [bool]$DryRun, [bool]$ApplyLive)
+    Write-WatchLog ("one-shot pass starting (target {0}, DryRun {1}, ApplyLive {2})" -f $targetDisplay, [bool]$DryRun, [bool]$ApplyLive)
     $status = Invoke-WatchPass
     if ($ApplyLive) { Invoke-ApplyLivePass }
     Write-WatchLog ("single pass complete (-RunOnce, status {0})" -f $status)
@@ -522,7 +525,7 @@ if (-not $created) {
     $mutex.Close()
     exit 0
 }
-Write-WatchLog ('watcher started (pid {0}, interval {1}s, target {2}, ApplyLive {3}, script {4})' -f $PID, $IntervalSeconds, $Target, [bool]$ApplyLive, $PSCommandPath)
+Write-WatchLog ('watcher started (pid {0}, interval {1}s, target {2}, ApplyLive {3}, script {4})' -f $PID, $IntervalSeconds, $targetDisplay, [bool]$ApplyLive, $PSCommandPath)
 try {
     while ($true) {
         $status = Invoke-WatchPass

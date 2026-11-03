@@ -205,7 +205,7 @@ function Test-ThisCloneRunning {
 $mainsNow = Get-ZcodeMainIds
 if ($mainsNow.Count -ge $MaxConcurrent) {
     if (Test-ThisCloneRunning) {
-        Write-Host ("[ram-guard] {0} is already running - this relaunch only focuses its window." -f $Instance)
+        Write-Host ("[ram-guard] {0} is already running - this relaunch only focuses its window." -f $cfg.DisplayName)
     } else {
         $zcodeProcs = @(Get-Process -Name ZCode -ErrorAction SilentlyContinue)
         $zcodeCommit = ($zcodeProcs | Measure-Object -Property PrivateMemorySize64 -Sum).Sum / 1MB
@@ -254,7 +254,7 @@ New-Item -ItemType Directory -Path $CloneSession -Force | Out-Null
 # 2) One-time seed: clone history so the clone opens with same chats/projects.
 #    Never overwrites an existing clone profile (instances stay independent afterwards).
 if (-not (Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\setting.json'))) {
-    Write-Host "[seed] First run for ${Instance}: cloning .zcode -> $($cfg.Home)\.zcode (excluding live locks)..."
+    Write-Host "[seed] First run for $($cfg.DisplayName): cloning .zcode -> $($cfg.Home)\.zcode (excluding live locks)..."
     if (-not (Test-Path -LiteralPath $PrimaryZCode)) { throw "Primary .zcode not found: $PrimaryZCode" }
     New-Item -ItemType Directory -Path $CloneZCode -Force | Out-Null
     # robocopy exit codes 0-7 = success; 8+ = at least one failure (disk full,
@@ -334,7 +334,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\setting.json'))) {
         }
     } catch { Write-Host "[seed-scrub] WARN: $($_.Exception.Message) (launch continues)" -ForegroundColor Yellow }
 } else {
-    Write-Host "[seed] $Instance profile already exists, skipping clone (independent)."
+    Write-Host "[seed] $($cfg.DisplayName) profile already exists, skipping clone (independent)."
 }
 
 # 2c) Telegram routing (marker-guarded): one credential = one instance (EC-D03).
@@ -416,9 +416,9 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
             if ($changed) { [System.IO.File]::WriteAllText($tgCfg, ($bj | ConvertTo-Json -Depth 20), $tgNoBom) }
         } catch { Write-Host "[telegram-route] $cfgName SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
     }
-    if ($tgDisabled -gt 0) { Write-Host ("[telegram-route] Disabled {0} duplicate Telegram bot(s) in $Instance; Telegram stays on Primary." -f $tgDisabled) -ForegroundColor Green }
-    if ($tgPreserved -gt 0) { Write-Host ("[telegram-route] Preserved $tgPreserved unique Telegram bot row(s) in $Instance (distinct credential)." -f $tgPreserved) -ForegroundColor Green }
-    if (($tgDisabled -eq 0) -and ($tgPreserved -eq 0)) { Write-Host "[telegram-route] No enabled Telegram bots in $Instance; nothing to do." -ForegroundColor DarkGray }
+    if ($tgDisabled -gt 0) { Write-Host ("[telegram-route] Disabled {0} duplicate Telegram bot(s) in {1}; Telegram stays on Primary." -f $tgDisabled, $cfg.DisplayName) -ForegroundColor Green }
+    if ($tgPreserved -gt 0) { Write-Host ("[telegram-route] Preserved {0} unique Telegram bot row(s) in {1} (distinct credential)." -f $tgPreserved, $cfg.DisplayName) -ForegroundColor Green }
+    if (($tgDisabled -eq 0) -and ($tgPreserved -eq 0)) { Write-Host "[telegram-route] No enabled Telegram bots in $($cfg.DisplayName); nothing to do." -ForegroundColor DarkGray }
     # Drop stale polling locks, but ONLY when this clone is not running (a live
     # poller owns its lock dir). A running instance picks up the config change
     # on its next restart.
@@ -459,12 +459,12 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
             }
         }
         if ($cloneLive) {
-            if ($tgDisabled -gt 0) { Write-Host "[telegram-route] $Instance is running: restart it once to apply (config saved)." -ForegroundColor Yellow }
+            if ($tgDisabled -gt 0) { Write-Host "[telegram-route] $($cfg.DisplayName) is running: restart it once to apply (config saved)." -ForegroundColor Yellow }
         } else {
             $tgLockRoot = Join-Path $CloneZCode 'v2\bots-runtime-locks\telegram-polling'
             if (($tgDisabled -gt 0) -and (Test-Path -LiteralPath $tgLockRoot)) {
                 Get-ChildItem -LiteralPath $tgLockRoot -Force -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -Confirm:$false -ErrorAction SilentlyContinue }
-                Write-Host "[telegram-route] Stale $Instance polling locks cleared." -ForegroundColor Green
+                Write-Host "[telegram-route] Stale $($cfg.DisplayName) polling locks cleared." -ForegroundColor Green
             }
         }
     } catch { Write-Host "[telegram-route] lock check SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
@@ -656,7 +656,7 @@ $newPid = $null
     $diff = @($nowMains | Where-Object { $beforeMains -notcontains $_ })
     if ($diff.Count -gt 0) { $newPid = $diff[0]; break }
 }
-if ($newPid) { Write-Host "[launch] $Instance ZCode PID=$newPid. $($cfg.DisplayName)-branded window should now appear with its own taskbar button." }
+if ($newPid) { Write-Host "[launch] $($cfg.DisplayName) ZCode PID=$newPid. $($cfg.DisplayName)-branded window should now appear with its own taskbar button." }
 else { Write-Host "[launch] Launched (already running: existing window focused). $($cfg.DisplayName) branding = this instance, unbranded = Primary." }
 Write-Host '[verify] If the window is NOT brand-colored, the installed app.asar needs the one-time patch:'
 Write-Host '        close ZCode, run tools\patch_zcode_icon_override.ps1, then relaunch.'

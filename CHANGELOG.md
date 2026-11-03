@@ -41,6 +41,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   follow-up note now reminds about relaunching via the OpenCode shortcuts (a
   bare OpenCode.exe opens the PRIMARY profile).
 
+### Changed
+- **Colors are now the ONLY user-facing clone names** (2026-11-03): GHOST.bat
+  rows (`Launch Blue clone` / `Reset Red clone` / `Launch Yellow clone` for
+  ZCode, AutoClaw2, Cline and OpenCode) and the suite scripts' console output
+  (ram-guard, seed, telegram-route, reset banners and per-step tags, sync
+  headers and tags, taskbar/MCP watcher logs, shortcut installers, status
+  lines) lead with the COLOR vocabulary, matching the shortcut file names
+  unified on 2026-11-01 — the frozen keys (Second..Sixth, c1..cN) survive
+  only in CLI params, dirs, AUMIDs and log filenames, and in identification
+  lines as `Color (key)` / `Color / key` so params and docs stay
+  correlatable. `.lnk` Description metadata is color-led too; the suite
+  generator templates teach the pattern to future suites.
+
 ### Fixed
 - **ZCode clone shortcuts hung invisibly at the RAM guard** (2026-11-01):
   the Desktop/Start-menu shortcuts run the launcher with `-WindowStyle

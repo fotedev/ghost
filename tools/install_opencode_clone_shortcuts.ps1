@@ -260,7 +260,7 @@ foreach ($id in $TargetIds) {
         $s.Arguments        = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -Instance $id"
         $s.WorkingDirectory = Split-Path -Parent $Launcher
         $s.IconLocation     = "$iconPath,0"
-        $s.Description      = "OpenCode clone $id ($($def.DisplayName)) - isolated clone home"
+        $s.Description      = "OpenCode $($def.DisplayName) clone - isolated clone home"
         $s.Save()
 
         try { Set-ShortcutAumid -LnkPath $lnk -Aumid $aumid } catch { Write-Warning "AUMID set failed on $lnk : $($_.Exception.Message)" }
