@@ -652,6 +652,7 @@ rem ZCode reset wrapper: runs reset_zcode.ps1 with args, then prints the
 rem relaunch-safety note (bare ZCode.exe = Primary profile). Keeps the note
 rem next to the summary instead of inside the script.
 rem Usage: call :RunZcodeReset <script> [args...]
+echo Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~1" %2 %3 %4
 echo.
 echo NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile.
