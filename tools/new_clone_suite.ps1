@@ -326,7 +326,7 @@ if (-not (Test-Path -LiteralPath $SeedMarker)) {
 # <TODO: Phase 2 design> port lever (env var survives? settings.json? marker
 # file read by an asar patch - the AutoClaw home-override pattern) recorded
 # to instance-record.json with the DISCOVERED ports, never the requested one.
-Write-Host ("[launch] {0} (skeleton - wire the real levers after discovery)" -f $Instance) -ForegroundColor Yellow
+Write-Host ("[launch] {0} (skeleton - wire the real levers after discovery; print the COLOR name here, not the {1} key)" -f '<Color>', $Instance) -ForegroundColor Yellow
 $env:TEMP = $CloneTmp
 $env:TMP  = $CloneTmp
 # cmd /c start "" "<exe>" <args>   <- detached launch; a GUI app that calls
@@ -547,8 +547,10 @@ cls
 if defined ESC (echo %ESC%[96mGHOST / $Pascal Multi-Instance ^& Clones%ESC%[0m) else echo GHOST / $Pascal Multi-Instance ^& Clones
 echo.
 call :Div "Launch Clones"
-call :Opt 1 "Launch inst1" "- first clone (own profile, identity, ports)"
-call :Opt 2 "Reset inst1" ""
+rem Row pattern (2026-11-03): label = action + COLOR name (e.g. "Launch Blue clone");
+rem the frozen instance key (inst1) never appears user-visible - only in params/dirs.
+call :Opt 1 "Launch <Color> clone" "- first clone - own profile, identity, ports"
+call :Opt 2 "Reset <Color> clone" ""
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -591,7 +593,7 @@ exit /b
   if ($idx -lt 0) { throw "GHOST.bat anchor missing: gid $maxGid dispatch line" }
   $lineEnd = $bat.IndexOf("`r`n", $idx)
   $newGids = @(
-    ('if "%~1"=="{0}" (call :Detached "{1} inst1" "-NoProfile" "src\windows\launch_{2}_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)' -f ($GidBase), $Pascal, $Slug)
+    ('if "%~1"=="{0}" (call :Detached "{1} <Color>" "-NoProfile" "src\windows\launch_{2}_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)' -f ($GidBase), $Pascal, $Slug)
     ('if "%~1"=="{0}" (call :Run "src\windows\reset_{1}.ps1" -Target inst1 & exit /b)' -f ($GidBase + 1), $Slug)
   ) -join "`r`n"
   $bat = $bat.Substring(0, $lineEnd + 2) + $newGids + "`r`n" + $bat.Substring($lineEnd + 2)

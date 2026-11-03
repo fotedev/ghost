@@ -488,25 +488,29 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   (Bit us in `GHOST.bat` option [10]: the menu drowned in `[pid:*]` logs.)
 - **Submenu ids are display-ordered (renumbered 2026-10-29).** Every submenu's
   local ids run strictly ascending 1..N in visual order, grouped by `:Div`
-  sections — ZCode: Launch Clones [1]-[8] (Second/Third/Fourth/Fifth/Sixth,
-  ALL, light worker, shortcuts) / Reset Clones [9]-[16] (Second..Sixth,
+  sections — ZCode: Launch Clones [1]-[8] (Blue/Yellow/Green/Red/Orange,
+  ALL, light worker, shortcuts) / Reset Clones [9]-[16] (Blue..Orange,
   Primary, Both, ALL SIX) / Sync + Chat Refresh [17]-[23] / Watchers +
   Diagnostics [24]-[26] / Maintenance [27]-[29] (patch, login helper,
   shortcuts remove); AutoClaw2: Launch Clones [1]-[7]
-  (c1..c5, ALL, shortcuts) / Maintenance [8]-[9] (rewired to the AutoClaw2
+  (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9] (rewired to the AutoClaw2
   suite the same day — born display-ordered); Cline: Launch Clones [1]-[7]
-  (c1..c5, ALL, shortcuts) / Maintenance [8]-[9]; OpenCode: Launch Clones
-  [1]-[7] (c1..c5, ALL, shortcuts) / Maintenance [8]-[10] (patch, status,
+  (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9]; OpenCode: Launch Clones
+  [1]-[7] (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[10] (patch, status,
   remove — 2026-10-31: shortcuts moved into Launch and the patch row into
   Maintenance, locals [7]/[8] swapped, gids unchanged). **Gids NEVER
   renumber** — specs, wiring history and repo-integrity cite them; a
   renumber touches only the submenu echo block + its resolver ladder. Add
   future rows in display order inside their section — never a higher id out
   of sequence (the .bat harness asserts ascending ids per submenu).
-  **Row pattern (2026-10-31): the label carries the action + name ONLY — the
-  color and all qualifiers live in the tail** (`Reset Third instance` +
-  `- Yellow (survivors kept running)`); never embed a `- descriptor` inside
-  a label. **Naming scheme (2026-11-01 display unification):** the shortcut
+  **Row pattern (2026-11-03, supersedes the 2026-10-31 rule): the label
+  carries the action + COLOR name ONLY** (`Reset Red clone` +
+  `- survivors kept running`) — qualifiers live in the tail, never a
+  `- descriptor` inside a label, and the frozen keys (Second..Sixth / c1..cN)
+  are never user-visible in menu rows, window titles or script console
+  output; they survive only in CLI params, dirs, AUMIDs and log filenames,
+  and in identification lines as `Color (key)` / `Color / key`.
+  **Naming scheme (2026-11-01 display unification):** the shortcut
   FILE names use the color vocabulary shared by all four suites —
   `<Suite> <Color>.lnk` (`ZCode Blue.lnk` .. `ZCode Orange.lnk`, matching the
   `ZCode <Color>` window titles); the pre-unification ordinal/cN names are

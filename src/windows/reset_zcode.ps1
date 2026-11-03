@@ -86,6 +86,34 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# --- Display vocabulary (2026-11-03) -------------------------------------------
+# Colors are the ONLY user-facing clone names; the frozen keys (Secondary..Sixth)
+# survive in params, dirs, AUMIDs and identification lines (color + key in
+# parens). Mirrors the shortcut naming unified in PR #20.
+function Get-ZcodeLabelColor([string]$Key) {
+    switch ($Key) {
+        'Secondary' { 'Blue' }
+        'Third'     { 'Yellow' }
+        'Fourth'    { 'Green' }
+        'Fifth'     { 'Red' }
+        'Sixth'     { 'Orange' }
+        default     { $Key }
+    }
+}
+function Get-ZcodeTargetDisplay([string]$Key) {
+    switch ($Key) {
+        'Primary'   { 'Primary' }
+        'Secondary' { 'Blue (Secondary)' }
+        'Third'     { 'Yellow (Third)' }
+        'Fourth'    { 'Green (Fourth)' }
+        'Fifth'     { 'Red (Fifth)' }
+        'Sixth'     { 'Orange (Sixth)' }
+        'Both'      { 'Both (Blue + Primary)' }
+        'All'       { 'All (Blue..Orange)' }
+        default     { $Key }
+    }
+}
+
 # --- Self-elevation -----------------------------------------------------------
 # Re-launch elevated with the same script path when not already admin.
 # Forwards -Target / -SkipQoder so child runs keep their scope after UAC.
@@ -108,7 +136,7 @@ if (-not $zcodeIsAdmin) {
     exit
 }
 
-Write-GhostBanner -Target "ZCode/Qoder Identity Reset [$Target]" -Version "1.4"
+Write-GhostBanner -Target "ZCode/Qoder Identity Reset [$(Get-ZcodeTargetDisplay $Target)]" -Version "1.4"
 
 # === Local helpers (mirroring the Cursor reference pattern) ===================
 
@@ -1319,7 +1347,7 @@ function Stop-ZcodeTargetTree {
         [switch]$RequireSurvivor
     )
 
-    Write-Host "[*] Terminating ZCode $Label instance tree only (survivors preserved)..." -ForegroundColor Cyan
+    Write-Host "[*] Terminating ZCode $(Get-ZcodeTargetDisplay $Label) instance tree only (survivors preserved)..." -ForegroundColor Cyan
     $entryMap = Get-ZcodeTargetMains
     $entryTotal = 0
     foreach ($k in $script:ZcodeAllLabels) { $entryTotal += @($entryMap[$k]).Count }
@@ -1360,14 +1388,14 @@ function Stop-ZcodeTargetTree {
             else {
                 $consecutiveClean++
                 if ($consecutiveClean -ge 2) {
-                    Write-Host "[OK] ZCode $Label tree terminated (2 clean checks); survivor mains: $survivors" -ForegroundColor Green
+                    Write-Host "[OK] ZCode $(Get-ZcodeTargetDisplay $Label) tree terminated (2 clean checks); survivor mains: $survivors" -ForegroundColor Green
                     return $true
                 }
             }
         }
         else { $consecutiveClean = 0 }
     }
-    Write-Host "[FAILED] ZCode $Label tree still running after $MaxAttempts attempts. Aborting." -ForegroundColor Red
+    Write-Host "[FAILED] ZCode $(Get-ZcodeTargetDisplay $Label) tree still running after $MaxAttempts attempts. Aborting." -ForegroundColor Red
     return $false
 }
 
@@ -1484,21 +1512,21 @@ if (($Target -eq 'Both') -or ($Target -eq 'All')) {
         )
     }
     $childCount = $children.Count
-    Write-Host "=== ZCode Identity Reset v1.4 (${Target}: independent IDs per instance) ===" -ForegroundColor Cyan
+    Write-Host "=== ZCode Identity Reset v1.4 - $(Get-ZcodeTargetDisplay $Target) - independent IDs per instance ===" -ForegroundColor Cyan
     $exitCodes = @()
     for ($ci = 0; $ci -lt $childCount; $ci++) {
         $child = $children[$ci]
         $qoderNote = ''
         if (-not $child.SkipQoder) { $qoderNote = ' (incl. Qoder)' }
-        Write-Host ("[{0} {1}/{2}] Resetting {3} instance{4}..." -f $Target, ($ci + 1), $childCount, $child.Label, $qoderNote) -ForegroundColor Cyan
+        Write-Host ("[{0} {1}/{2}] Resetting {3} instance{4}..." -f (Get-ZcodeTargetDisplay $Target), ($ci + 1), $childCount, (Get-ZcodeTargetDisplay $child.Label), $qoderNote) -ForegroundColor Cyan
         $fwdArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $v14Script, '-Target', $child.Label)
         if ($child.SkipQoder) { $fwdArgs += '-SkipQoder' }
         & powershell @fwdArgs
         $exitCodes += $LASTEXITCODE
     }
-    Write-Host "`n=== $Target-mode summary ===" -ForegroundColor Cyan
+    Write-Host "`n=== Summary - $(Get-ZcodeTargetDisplay $Target) mode ===" -ForegroundColor Cyan
     for ($ci = 0; $ci -lt $childCount; $ci++) {
-        Write-Host ("{0} exit: {1}" -f $children[$ci].Label, $exitCodes[$ci]) -ForegroundColor Gray
+        Write-Host ("{0} exit: {1}" -f (Get-ZcodeTargetDisplay $children[$ci].Label), $exitCodes[$ci]) -ForegroundColor Gray
     }
     Write-Host "NOTE: IDs were generated independently per instance (never duplicated)." -ForegroundColor Yellow
     Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects ALL ZCode instances + Qoder." -ForegroundColor Yellow
@@ -1518,8 +1546,8 @@ $actions = @()
 $ids = New-IdentitySet
 
 if (-not (Test-Path -LiteralPath $zcodeRoaming)) {
-    Write-Host "ZCode $Target instance not found at: $zcodeRoaming" -ForegroundColor Red
-    Write-Host "Hint: launch it once via its clone shortcut / launcher (Secondary/Third/Fourth/Fifth/Sixth) or ZCode.exe (Primary)." -ForegroundColor Yellow
+    Write-Host "ZCode $(Get-ZcodeTargetDisplay $Target) instance not found at: $zcodeRoaming" -ForegroundColor Red
+    Write-Host "Hint: launch it once via its clone shortcut / launcher (Blue/Yellow/Green/Red/Orange) or ZCode.exe (Primary)." -ForegroundColor Yellow
     exit 1
 }
 
@@ -1536,8 +1564,8 @@ if ($SkipQoder) {
 
 New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
 
-Write-Host "=== ZCode / Qoder Identity Reset v1.4 (Target: $Target) ===" -ForegroundColor Cyan
-Write-Host "ZCode ${Target}: $zcodeRoaming" -ForegroundColor Gray
+Write-Host "=== ZCode / Qoder Identity Reset v1.4 - Target: $(Get-ZcodeTargetDisplay $Target) ===" -ForegroundColor Cyan
+Write-Host "ZCode $(Get-ZcodeTargetDisplay $Target): $zcodeRoaming" -ForegroundColor Gray
 Write-Host "ZCode data: $zcodeUserProfile" -ForegroundColor Gray
 if ($qoderPresent) {
     Write-Host ("Qoder profiles: " + (($qoderProfiles | ForEach-Object { Get-ProfileLabel -MainRoot $qoderRoaming -ProfileRoot $_ }) -join ", ")) -ForegroundColor Gray
@@ -1604,15 +1632,15 @@ else {
         $p = Join-Path $pr "User\globalStorage\storage.json"
         if (Test-Path -LiteralPath $p) {
             if (Set-JsonIdentity -Path $p -Updates $storageUpdates -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions)) {
-                Write-Host "    [$label] [OK] storage.json verified" -ForegroundColor Green
+                Write-Host "    [$(Get-ZcodeLabelColor $label)] [OK] storage.json verified" -ForegroundColor Green
             }
             else {
-                Write-Host "    [$label] [FAILED] storage.json verification failed" -ForegroundColor Red
+                Write-Host "    [$(Get-ZcodeLabelColor $label)] [FAILED] storage.json verification failed" -ForegroundColor Red
                 $stepFailed = $true
             }
         }
         else {
-            Write-Host "    [$label] [SKIP] storage.json not present" -ForegroundColor Yellow
+            Write-Host "    [$(Get-ZcodeLabelColor $label)] [SKIP] storage.json not present" -ForegroundColor Yellow
             Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "telemetry.*" -Before "missing" -After "skipped" -Ok $true
         }
     }
@@ -1633,15 +1661,15 @@ else {
         $p = Join-Path $pr "machineid"
         if (Test-Path -LiteralPath $p) {
             if (Set-VerifiedMachineIdFile -Path $p -Value $ids.devDeviceId -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
-                Write-Host "    [$label] [OK] machineid verified" -ForegroundColor Green
+                Write-Host "    [$(Get-ZcodeLabelColor $label)] [OK] machineid verified" -ForegroundColor Green
             }
             else {
-                Write-Host "    [$label] [FAILED] machineid verification failed" -ForegroundColor Red
+                Write-Host "    [$(Get-ZcodeLabelColor $label)] [FAILED] machineid verification failed" -ForegroundColor Red
                 $stepFailed = $true
             }
         }
         else {
-            Write-Host "    [$label] [SKIP] machineid not present" -ForegroundColor Yellow
+            Write-Host "    [$(Get-ZcodeLabelColor $label)] [SKIP] machineid not present" -ForegroundColor Yellow
             Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "machineid" -Before "missing" -After "skipped" -Ok $true
         }
     }
@@ -1756,15 +1784,15 @@ else {
         $p = Join-Path $pr "User\globalStorage\state.vscdb"
         if (Test-Path -LiteralPath $p) {
             if (Set-SqliteKeys -Path $p -Updates @{ "storage.serviceMachineId" = $ids.devDeviceId } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions)) {
-                Write-Host "    [$label] [OK] state.vscdb verified" -ForegroundColor Green
+                Write-Host "    [$(Get-ZcodeLabelColor $label)] [OK] state.vscdb verified" -ForegroundColor Green
             }
             else {
-                Write-Host "    [$label] [FAILED] state.vscdb verification failed" -ForegroundColor Red
+                Write-Host "    [$(Get-ZcodeLabelColor $label)] [FAILED] state.vscdb verification failed" -ForegroundColor Red
                 $stepFailed = $true
             }
         }
         else {
-            Write-Host "    [$label] [SKIP] state.vscdb not present" -ForegroundColor Yellow
+            Write-Host "    [$(Get-ZcodeLabelColor $label)] [SKIP] state.vscdb not present" -ForegroundColor Yellow
             Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "storage.serviceMachineId" -Before "missing" -After "skipped" -Ok $true
         }
     }
@@ -1783,7 +1811,7 @@ else {
     foreach ($pr in $qoderProfiles) {
         $label = Get-ProfileLabel -MainRoot $qoderRoaming -ProfileRoot $pr
         $p = Join-Path $pr "User\globalStorage\state.vscdb"
-        Write-Host "    [$label] scrubbing secrets..." -ForegroundColor DarkGray
+        Write-Host "    [$(Get-ZcodeLabelColor $label)] scrubbing secrets..." -ForegroundColor DarkGray
         if (-not (Clear-SecretsFromSqlite -Path $p -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
             $stepFailed = $true
         }
@@ -1803,7 +1831,7 @@ else {
     foreach ($pr in $qoderProfiles) {
         $label = Get-ProfileLabel -MainRoot $qoderRoaming -ProfileRoot $pr
         $p = Join-Path $pr "User\globalStorage\state.vscdb.backup"
-        Write-Host "    [$label] stale backup..." -ForegroundColor DarkGray
+        Write-Host "    [$(Get-ZcodeLabelColor $label)] stale backup..." -ForegroundColor DarkGray
         if (-not (Remove-VerifiedFileNoBackup -Path $p -AuditKey "state.vscdb.backup" -Audit ([ref]$audit))) {
             $stepFailed = $true
         }
@@ -1833,7 +1861,7 @@ else {
     foreach ($pr in $qoderProfiles) {
         $label = Get-ProfileLabel -MainRoot $qoderRoaming -ProfileRoot $pr
         $p = Join-Path $pr "Preferences"
-        Write-Host "    [$label] device_id_salt..." -ForegroundColor DarkGray
+        Write-Host "    [$(Get-ZcodeLabelColor $label)] device_id_salt..." -ForegroundColor DarkGray
         if (-not (Set-DeviceIdSalt -Path $p -NewSalt $newDeviceIdSaltQoder -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
             $stepFailed = $true
         }
@@ -1863,7 +1891,7 @@ else {
     foreach ($pr in $qoderProfiles) {
         $label = Get-ProfileLabel -MainRoot $qoderRoaming -ProfileRoot $pr
         $p = Join-Path $pr "Local State"
-        Write-Host "    [$label] os_crypt..." -ForegroundColor DarkGray
+        Write-Host "    [$(Get-ZcodeLabelColor $label)] os_crypt..." -ForegroundColor DarkGray
         if (-not (Remove-OsCryptEncryptedKey -Path $p -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
             $stepFailed = $true
         }
@@ -2148,7 +2176,7 @@ else {
     foreach ($pr in $qoderProfiles) {
         $label = Get-ProfileLabel -MainRoot $qoderRoaming -ProfileRoot $pr
         $stepStart = $audit.Count
-        Write-Host "    [$label] browser data..." -ForegroundColor DarkGray
+        Write-Host "    [$(Get-ZcodeLabelColor $label)] browser data..." -ForegroundColor DarkGray
         $profileFiles = @($qoderFileRelPaths | ForEach-Object { Join-Path $pr $_ })
         $profileActions = Clear-BinaryIdentityStore -Paths $profileFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
         $actions += @($profileActions)
@@ -2179,10 +2207,10 @@ else {
         }
         $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $stepStart -Path $pr
         if ($status.Success) {
-            Write-Host "    [$label] [OK] browser data cleared" -ForegroundColor Green
+            Write-Host "    [$(Get-ZcodeLabelColor $label)] [OK] browser data cleared" -ForegroundColor Green
         }
         else {
-            Write-Host "    [$label] [FAILED] browser data had failures" -ForegroundColor Red
+            Write-Host "    [$(Get-ZcodeLabelColor $label)] [FAILED] browser data had failures" -ForegroundColor Red
             $stepFailed = $true
         }
     }
@@ -2209,7 +2237,7 @@ if ($qoderPresent) {
         # so it is identity-bearing. Per-file delete survives locked log files.
         $logsPath = Join-Path $pr "logs"
         if (Test-Path -LiteralPath $logsPath) {
-            Write-Host "    [$label] logs/ (per-file delete)..." -ForegroundColor DarkGray
+            Write-Host "    [$(Get-ZcodeLabelColor $label)] logs/ (per-file delete)..." -ForegroundColor DarkGray
             $null = Clear-TreeFilesIndividually -Path $logsPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $logsPath) -Audit ([ref]$audit) -Actions ([ref]$actions)
         }
         else {
@@ -2289,7 +2317,7 @@ else {
                 Where-Object { Test-Path -LiteralPath $_ }
         }
         if ($workspaceDbPaths.Count -eq 0) {
-            Write-Host "    [$label] [SKIP] no workspace state.vscdb files found" -ForegroundColor Yellow
+            Write-Host "    [$(Get-ZcodeLabelColor $label)] [SKIP] no workspace state.vscdb files found" -ForegroundColor Yellow
             Add-AuditEntry -Audit ([ref]$audit) -File $workspaceStorageRoot -Key "workspaceStorage" -Before "none" -After "skipped" -Ok $true
             continue
         }
@@ -2479,8 +2507,8 @@ Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects ALL ZCode ins
 [System.IO.File]::WriteAllText("$env:TEMP\zcode_v1.3_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
 
 if ($failCount -gt 0) {
-    Write-Host "ZCode/Qoder reset v1.4 [$Target] completed with failures. Review $auditPath." -ForegroundColor Red
+    Write-Host "ZCode/Qoder reset v1.4 [$(Get-ZcodeTargetDisplay $Target)] completed with failures. Review $auditPath." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "ZCode/Qoder reset v1.4 [$Target] completed successfully." -ForegroundColor Green
+Write-Host "ZCode/Qoder reset v1.4 [$(Get-ZcodeTargetDisplay $Target)] completed successfully." -ForegroundColor Green

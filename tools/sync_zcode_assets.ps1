@@ -102,12 +102,19 @@ $LogFile = Join-Path $LogDir 'sync_zcode_assets.log'
 # and refresh_zcode_second_chats.ps1 ($InstanceDefs): classification is by
 # process markers (home/roaming dir names in the command line), never titles.
 $InstanceDefs = @(
-    @{ Name = 'Second'; HomeRel = 'ZCodeSecondHome'; Markers = @('ZCode-Second',  'ZCodeSecondHome') }
-    @{ Name = 'Third';  HomeRel = 'ZCodeThirdHome';  Markers = @('ZCode-Third',   'ZCodeThirdHome')  }
-    @{ Name = 'Fourth'; HomeRel = 'ZCodeFourthHome'; Markers = @('ZCode-Fourth',  'ZCodeFourthHome') }
-    @{ Name = 'Fifth';  HomeRel = 'ZCodeFifthHome';  Markers = @('ZCode-Fifth',   'ZCodeFifthHome')  }
-    @{ Name = 'Sixth';  HomeRel = 'ZCodeSixthHome';  Markers = @('ZCode-Sixth',   'ZCodeSixthHome')  }
+    @{ Name = 'Second'; HomeRel = 'ZCodeSecondHome'; Color = 'Blue';   Markers = @('ZCode-Second',  'ZCodeSecondHome') }
+    @{ Name = 'Third';  HomeRel = 'ZCodeThirdHome';  Color = 'Yellow'; Markers = @('ZCode-Third',   'ZCodeThirdHome')  }
+    @{ Name = 'Fourth'; HomeRel = 'ZCodeFourthHome'; Color = 'Green';  Markers = @('ZCode-Fourth',  'ZCodeFourthHome') }
+    @{ Name = 'Fifth';  HomeRel = 'ZCodeFifthHome';  Color = 'Red';    Markers = @('ZCode-Fifth',   'ZCodeFifthHome')  }
+    @{ Name = 'Sixth';  HomeRel = 'ZCodeSixthHome';  Color = 'Orange'; Markers = @('ZCode-Sixth',   'ZCodeSixthHome')  }
 )
+
+# Display vocabulary (2026-11-03): colors lead every user-visible tag/header;
+# the frozen key follows after a slash so params/dirs stay correlatable.
+function Get-SyncTargetDisplay([string]$Key) {
+    $d = @($InstanceDefs | Where-Object { $_.Name -eq $Key })[0]
+    if ($d) { '{0} / {1}' -f $d.Color, $d.Name } else { $Key }
+}
 
 $Script:FailedTargets = @()
 $Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -209,12 +216,12 @@ function Sync-McpDefinitions([string]$Name, [string]$CloneZ, [string]$CloneConfi
         $primaryCfg = Read-JsonFile $PrimaryConfig
         $cloneCfg   = Read-JsonFile $CloneConfig
     } catch {
-        Write-Tag "FAILED:$Name" ("config.json unreadable: {0}" -f $_.Exception.Message) 'Red'
+        Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("config.json unreadable: {0}" -f $_.Exception.Message) 'Red'
         Add-Audit $CloneZ $area 'load' $false $_.Exception.Message
         return $false
     }
     if ($null -eq $primaryCfg -or $null -eq $cloneCfg) {
-        Write-Tag "FAILED:$Name" 'config.json parsed empty.' 'Red'
+        Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" 'config.json parsed empty.' 'Red'
         Add-Audit $CloneZ $area 'load' $false 'parsed empty'
         return $false
     }
@@ -223,7 +230,7 @@ function Sync-McpDefinitions([string]$Name, [string]$CloneZ, [string]$CloneConfi
         # every definition deleted): the merge would iterate an empty set --
         # clone-only servers stay, nothing is written. OK/empty, not a layout
         # failure (FAILED stays reserved for unreadable config).
-        Write-Tag "OK:$Name" 'Primary has no mcp.servers - nothing to sync (clone-only servers kept).' 'Green'
+        Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" 'Primary has no mcp.servers - nothing to sync (clone-only servers kept).' 'Green'
         Add-Audit $CloneZ $area 'load' $true 'primary mcp.servers empty'
         return $true
     }
@@ -238,14 +245,14 @@ function Sync-McpDefinitions([string]$Name, [string]$CloneZ, [string]$CloneConfi
     $changed = Invoke-McpMerge -PrimaryServers $pServers -CloneServers $cServers
 
     if ($changed.Count -eq 0) {
-        Write-Tag "OK:$Name" 'MCP server definitions already match the Primary.' 'Green'
+        Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" 'MCP server definitions already match the Primary.' 'Green'
         Add-Audit $CloneZ $area 'verify' $true 'already in sync'
         return $true
     }
 
-    Write-Tag "INFO:$Name" ("MCP definition drift on: {0}" -f ($changed -join ', ')) 'Cyan'
+    Write-Tag "INFO:$(Get-SyncTargetDisplay $Name)" ("MCP definition drift on: {0}" -f ($changed -join ', ')) 'Cyan'
     if ($DryRun) {
-        Write-Tag "DRY:$Name" 'would backup config.json then merge + verify (no write in DryRun).' 'Cyan'
+        Write-Tag "DRY:$(Get-SyncTargetDisplay $Name)" 'would backup config.json then merge + verify (no write in DryRun).' 'Cyan'
         return $true
     }
 
@@ -278,18 +285,18 @@ function Sync-McpDefinitions([string]$Name, [string]$CloneZ, [string]$CloneConfi
         }
     }
     if ($bad.Count -gt 0) {
-        Write-Tag "FAILED:$Name" ("verify-after mismatch ({0}) - config restored from backup." -f ($bad -join ', ')) 'Red'
+        Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("verify-after mismatch ({0}) - config restored from backup." -f ($bad -join ', ')) 'Red'
         Copy-Item -LiteralPath $bak -Destination $CloneConfig -Force
         Add-Audit $CloneZ $area 'verify' $false ('mismatch: ' + ($bad -join ', '))
         return $false
     }
-    Write-Tag "OK:$Name" ("MCP definitions synced + verified ({0}); backup: {1}" -f ($changed -join ', '), (Split-Path -Leaf $bak)) 'Green'
+    Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" ("MCP definitions synced + verified ({0}); backup: {1}" -f ($changed -join ', '), (Split-Path -Leaf $bak)) 'Green'
     return $true
 }
 
 function Sync-SkillsJunction([string]$Name, [string]$CloneZ, [string]$CloneHome) {
     if (-not (Test-Path -LiteralPath $PrimaryAgents)) {
-        Write-Tag "WARN:$Name" ("shared skills store {0} not found - skills sync skipped." -f $PrimaryAgents) 'Yellow'
+        Write-Tag "WARN:$(Get-SyncTargetDisplay $Name)" ("shared skills store {0} not found - skills sync skipped." -f $PrimaryAgents) 'Yellow'
         Add-Audit $CloneZ 'skills' 'junction' $false 'primary .agents missing'
         return $true
     }
@@ -301,19 +308,19 @@ function Sync-SkillsJunction([string]$Name, [string]$CloneZ, [string]$CloneHome)
         if ([string]::IsNullOrEmpty($item.LinkType)) {
             $dest = Join-Path $CloneZ ("skills.pre-sync-" + $Stamp)
             if ($DryRun) {
-                Write-Tag "DRY:$Name" ("would move stale skills copy aside -> {0}" -f (Split-Path -Leaf $dest)) 'Cyan'
+                Write-Tag "DRY:$(Get-SyncTargetDisplay $Name)" ("would move stale skills copy aside -> {0}" -f (Split-Path -Leaf $dest)) 'Cyan'
             } else {
                 Move-Item -LiteralPath $staleSkills -Destination $dest -Force
                 if (Test-Path -LiteralPath $staleSkills) {
-                    Write-Tag "FAILED:$Name" 'stale skills dir still present after the move.' 'Red'
+                    Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" 'stale skills dir still present after the move.' 'Red'
                     Add-Audit $CloneZ 'skills' 'retire-copy' $false 'move failed'
                     return $false
                 }
-                Write-Tag "OK:$Name" ("stale skills copy moved aside -> {0}" -f (Split-Path -Leaf $dest)) 'Green'
+                Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" ("stale skills copy moved aside -> {0}" -f (Split-Path -Leaf $dest)) 'Green'
                 Add-Audit $CloneZ 'skills' 'retire-copy' $true (Split-Path -Leaf $dest)
             }
         } else {
-            Write-Tag "OK:$Name" '.zcode\skills is already a link - left untouched.' 'Green'
+            Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" '.zcode\skills is already a link - left untouched.' 'Green'
         }
     }
 
@@ -323,12 +330,12 @@ function Sync-SkillsJunction([string]$Name, [string]$CloneZ, [string]$CloneHome)
     $movedAside = $null
     if (Test-Path -LiteralPath $cloneAgents) {
         if (Test-LinkIs $cloneAgents $PrimaryAgents) {
-            Write-Tag "OK:$Name" '.agents junction already points at the shared store.' 'Green'
+            Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" '.agents junction already points at the shared store.' 'Green'
             $needCreate = $false
         } else {
             $dest = "$cloneAgents.pre-sync-$Stamp"
             if ($DryRun) {
-                Write-Tag "DRY:$Name" ("would move existing .agents aside -> {0}" -f (Split-Path -Leaf $dest)) 'Cyan'
+                Write-Tag "DRY:$(Get-SyncTargetDisplay $Name)" ("would move existing .agents aside -> {0}" -f (Split-Path -Leaf $dest)) 'Cyan'
             } else {
                 Move-Item -LiteralPath $cloneAgents -Destination $dest -Force
                 $movedAside = $dest
@@ -338,10 +345,10 @@ function Sync-SkillsJunction([string]$Name, [string]$CloneZ, [string]$CloneHome)
     }
     if ($needCreate) {
         if ($DryRun) {
-            Write-Tag "DRY:$Name" ("would junction {0} -> {1}" -f $cloneAgents, $PrimaryAgents) 'Cyan'
+            Write-Tag "DRY:$(Get-SyncTargetDisplay $Name)" ("would junction {0} -> {1}" -f $cloneAgents, $PrimaryAgents) 'Cyan'
         } else {
             if (-not (New-DirJunction $cloneAgents $PrimaryAgents)) {
-                Write-Tag "FAILED:$Name" ("could not create .agents junction -> {0}" -f $PrimaryAgents) 'Red'
+                Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("could not create .agents junction -> {0}" -f $PrimaryAgents) 'Red'
                 Add-Audit $CloneZ 'skills' 'junction' $false 'create failed'
                 # Rollback: without it the clone is stranded -- its original
                 # .agents renamed aside and NO link in place (skill discovery
@@ -349,15 +356,15 @@ function Sync-SkillsJunction([string]$Name, [string]$CloneZ, [string]$CloneHome)
                 if ($movedAside) {
                     try {
                         if (Test-Path -LiteralPath $cloneAgents) {
-                            Write-Tag "FAILED:$Name" ("rollback skipped - a link still occupies {0}; the original is kept at {1}" -f $cloneAgents, $movedAside) 'Red'
+                            Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("rollback skipped - a link still occupies {0}; the original is kept at {1}" -f $cloneAgents, $movedAside) 'Red'
                             Add-Audit $CloneZ 'skills' 'rollback' $false 'path occupied'
                         } else {
                             Move-Item -LiteralPath $movedAside -Destination $cloneAgents -Force
-                            Write-Tag "INFO:$Name" ("original .agents restored from {0}" -f $movedAside) 'Yellow'
+                            Write-Tag "INFO:$(Get-SyncTargetDisplay $Name)" ("original .agents restored from {0}" -f $movedAside) 'Yellow'
                             Add-Audit $CloneZ 'skills' 'rollback' $true (Split-Path -Leaf $movedAside)
                         }
                     } catch {
-                        Write-Tag "FAILED:$Name" ("rollback of the original .agents failed: {0} - restore manually from {1}" -f $_.Exception.Message, $movedAside) 'Red'
+                        Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("rollback of the original .agents failed: {0} - restore manually from {1}" -f $_.Exception.Message, $movedAside) 'Red'
                         Add-Audit $CloneZ 'skills' 'rollback' $false $_.Exception.Message
                     }
                 }
@@ -370,7 +377,7 @@ function Sync-SkillsJunction([string]$Name, [string]$CloneZ, [string]$CloneHome)
 
     # Verify-after: junction intact + skills actually reachable through it.
     if (-not (Test-LinkIs $cloneAgents $PrimaryAgents)) {
-        Write-Tag "FAILED:$Name" '.agents is not a correct junction after the sync.' 'Red'
+        Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" '.agents is not a correct junction after the sync.' 'Red'
         Add-Audit $CloneZ 'skills' 'verify' $false 'junction verify failed'
         return $false
     }
@@ -386,15 +393,15 @@ function Sync-SkillsJunction([string]$Name, [string]$CloneZ, [string]$CloneHome)
             # This script auto-runs as launcher step 2d, so a hard FAIL here
             # would flag every clone launch. Aligns with the "primary .agents
             # missing" WARN path earlier in this function.
-            Write-Tag "WARN:$Name" ("junction correct, but {0} skill(s) visible through it - the shared store has no skills yet." -f $cnt) 'Yellow'
+            Write-Tag "WARN:$(Get-SyncTargetDisplay $Name)" ("junction correct, but {0} skill(s) visible through it - the shared store has no skills yet." -f $cnt) 'Yellow'
             Add-Audit $CloneZ 'skills' 'verify' $true ("junction ok, $cnt skills visible (empty shared store)")
             return $true
         }
-        Write-Tag "FAILED:$Name" 'no skills visible through the .agents junction and the shared store is gone.' 'Red'
+        Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" 'no skills visible through the .agents junction and the shared store is gone.' 'Red'
         Add-Audit $CloneZ 'skills' 'verify' $false '0 skills visible, shared store missing'
         return $false
     }
-    Write-Tag "OK:$Name" (".agents junction verified - {0} skills visible through it." -f $cnt) 'Green'
+    Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" (".agents junction verified - {0} skills visible through it." -f $cnt) 'Green'
     Add-Audit $CloneZ 'skills' 'junction' $true "$cnt skills visible"
     return $true
 }
@@ -421,13 +428,13 @@ function Sync-PluginCache([string]$Name, [string]$CloneZ, [string]$CloneCli) {
     }
 
     if (($diff.Count -eq 0) -and (-not $knownDrift)) {
-        Write-Tag "OK:$Name" ("plugin cache already in sync ({0} plugin versions)." -f $pSet.Count) 'Green'
+        Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" ("plugin cache already in sync ({0} plugin versions)." -f $pSet.Count) 'Green'
         Add-Audit $CloneZ 'plugins' 'verify' $true 'already in sync'
         return $true
     }
 
     if ($DryRun) {
-        Write-Tag "DRY:$Name" ("would robocopy /MIR plugin cache + marketplaces ({0} differing entries)." -f $diff.Count) 'Cyan'
+        Write-Tag "DRY:$(Get-SyncTargetDisplay $Name)" ("would robocopy /MIR plugin cache + marketplaces ({0} differing entries)." -f $diff.Count) 'Cyan'
         return $true
     }
 
@@ -437,13 +444,13 @@ function Sync-PluginCache([string]$Name, [string]$CloneZ, [string]$CloneCli) {
         if (-not (Test-Path -LiteralPath $pair[0])) { continue }
         $null = & robocopy.exe $pair[0] $pair[1] /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
         if ($LASTEXITCODE -ge 8) {
-            Write-Tag "FAIL:$Name" ("robocopy exited {0} for {1}" -f $LASTEXITCODE, $pair[0]) 'Red'
+            Write-Tag "FAIL:$(Get-SyncTargetDisplay $Name)" ("robocopy exited {0} for {1}" -f $LASTEXITCODE, $pair[0]) 'Red'
             $fail = $true
         } elseif ($LASTEXITCODE -ge 4) {
             # Exit 4-7 = mismatches: locked/AV-held files can survive /R:1.
             # Not a hard failure (the verify-after below still runs), but the
             # mirror is suspect and must be named in the verify result.
-            Write-Tag "WARN:$Name" ("robocopy exited {0} for {1} - some files may not have copied (mismatch)." -f $LASTEXITCODE, (Split-Path -Leaf $pair[0])) 'Yellow'
+            Write-Tag "WARN:$(Get-SyncTargetDisplay $Name)" ("robocopy exited {0} for {1} - some files may not have copied (mismatch)." -f $LASTEXITCODE, (Split-Path -Leaf $pair[0])) 'Yellow'
             $suspect += ("robocopy exit {0} on {1}" -f $LASTEXITCODE, (Split-Path -Leaf $pair[0]))
         }
     }
@@ -455,10 +462,10 @@ function Sync-PluginCache([string]$Name, [string]$CloneZ, [string]$CloneCli) {
         # state -- delete it explicitly so the sets converge, never silently OK.
         try {
             Remove-Item -LiteralPath $cKnown -Force
-            Write-Tag "INFO:$Name" 'stale clone known_marketplaces.json deleted (the Primary has none).' 'Cyan'
+            Write-Tag "INFO:$(Get-SyncTargetDisplay $Name)" 'stale clone known_marketplaces.json deleted (the Primary has none).' 'Cyan'
             Add-Audit $CloneZ 'plugins' 'mirror' $true 'stale clone known_marketplaces.json deleted'
         } catch {
-            Write-Tag "FAILED:$Name" ("could not delete the stale clone known_marketplaces.json: {0}" -f $_.Exception.Message) 'Red'
+            Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("could not delete the stale clone known_marketplaces.json: {0}" -f $_.Exception.Message) 'Red'
             Add-Audit $CloneZ 'plugins' 'mirror' $false $_.Exception.Message
             $fail = $true
         }
@@ -478,7 +485,7 @@ function Sync-PluginCache([string]$Name, [string]$CloneZ, [string]$CloneCli) {
         # Same read-only-Primary shape as the known file, but deleting a whole
         # marketplace dir is destructive -- warn loudly instead of mirroring
         # to empty.
-        Write-Tag "WARN:$Name" ("the Primary has no marketplaces dir - the clone's copy was left as-is (Primary is read-only).") 'Yellow'
+        Write-Tag "WARN:$(Get-SyncTargetDisplay $Name)" ("the Primary has no marketplaces dir - the clone's copy was left as-is (Primary is read-only).") 'Yellow'
         Add-Audit $CloneZ 'plugins' 'mirror' $true 'clone-only marketplaces dir left in place'
     }
     $pKnownNow = Test-Path -LiteralPath $pKnown
@@ -492,11 +499,11 @@ function Sync-PluginCache([string]$Name, [string]$CloneZ, [string]$CloneCli) {
     }
     $detail = (@($bad) + @($suspect) | Where-Object { $_ }) -join '; '
     if (($bad.Count -gt 0) -or $fail) {
-        Write-Tag "FAILED:$Name" ("plugin cache verify-after mismatch ({0}) - re-run after closing the instances." -f $detail) 'Red'
+        Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("plugin cache verify-after mismatch ({0}) - re-run after closing the instances." -f $detail) 'Red'
         Add-Audit $CloneZ 'plugins' 'mirror' $false ("mismatch: " + $detail)
         return $false
     }
-    Write-Tag "OK:$Name" ("plugin cache mirrored + verified ({0} plugin versions)." -f $vSet.Count) 'Green'
+    Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" ("plugin cache mirrored + verified ({0} plugin versions)." -f $vSet.Count) 'Green'
     $okDetail = "$($vSet.Count) versions"
     if ($suspect.Count -gt 0) { $okDetail += '; robocopy mismatch warnings: ' + ($suspect -join '; ') }
     Add-Audit $CloneZ 'plugins' 'mirror' $true $okDetail
@@ -510,10 +517,10 @@ function Invoke-InstanceSync([hashtable]$Def) {
     $cloneCli  = Join-Path $cloneZ 'cli'
 
     Write-Host ''
-    Write-Host "=== $name ($($Def.HomeRel)) ===" -ForegroundColor White
+    Write-Host "=== $($Def.Color) / $name ($($Def.HomeRel)) ===" -ForegroundColor White
 
     if (-not (Test-Path -LiteralPath $cloneZ)) {
-        Write-Tag "SKIP:$name" 'not seeded yet - first launch copies the Primary profile (launcher step 2); this sync verifies afterwards.' 'Yellow'
+        Write-Tag "SKIP:$(Get-SyncTargetDisplay $name)" 'not seeded yet - first launch copies the Primary profile (launcher step 2); this sync verifies afterwards.' 'Yellow'
         return $true
     }
     if ($RunningNames.ContainsKey($name)) {
@@ -523,19 +530,19 @@ function Invoke-InstanceSync([hashtable]$Def) {
             # exit, and reads mcp.servers at every app-server spawn (one per
             # new session). Writing under a running instance is safe; the
             # synced definitions land on its next chat without a restart.
-            Write-Tag "INFO:$name" 'instance is RUNNING - MCP merge proceeds (no exit-time rewrite; applies at next session).' 'Cyan'
+            Write-Tag "INFO:$(Get-SyncTargetDisplay $name)" 'instance is RUNNING - MCP merge proceeds (no exit-time rewrite; applies at next session).' 'Cyan'
         } else {
-            Write-Tag "SKIP:$name" 'instance is RUNNING - skills/plugin mirroring must not race a live app; close it and re-run, or use -McpOnly.' 'Yellow'
+            Write-Tag "SKIP:$(Get-SyncTargetDisplay $name)" 'instance is RUNNING - skills/plugin mirroring must not race a live app; close it and re-run, or use -McpOnly.' 'Yellow'
             return $true
         }
     }
     if (-not (Test-Path -LiteralPath $cloneCli)) {
-        Write-Tag "WARN:$name" '.zcode exists but .zcode\cli is missing - unexpected layout, skipping.' 'Yellow'
+        Write-Tag "WARN:$(Get-SyncTargetDisplay $name)" '.zcode exists but .zcode\cli is missing - unexpected layout, skipping.' 'Yellow'
         return $true
     }
     $cloneConfig = Join-Path $cloneCli 'config.json'
     if (-not (Test-Path -LiteralPath $cloneConfig)) {
-        Write-Tag "WARN:$name" 'clone config.json missing - run the clone launcher once to seed, then re-run.' 'Yellow'
+        Write-Tag "WARN:$(Get-SyncTargetDisplay $name)" 'clone config.json missing - run the clone launcher once to seed, then re-run.' 'Yellow'
         return $true
     }
 
@@ -592,15 +599,17 @@ foreach ($def in $targets) {
 Write-Host ''
 Write-Host '--- Summary ---'
 foreach ($r in $results) {
-    if ($r.Ok) { Write-Host ("[{0}] OK" -f $r.Name) -ForegroundColor Green }
+    $rDisplay = Get-SyncTargetDisplay $r.Name
+    if ($r.Ok) { Write-Host ("[{0}] OK" -f $rDisplay) -ForegroundColor Green }
     else {
-        Write-Host ("[{0}] FAILED" -f $r.Name) -ForegroundColor Red
+        Write-Host ("[{0}] FAILED" -f $rDisplay) -ForegroundColor Red
         $Script:FailedTargets += $r.Name
     }
 }
 
 if ($Script:FailedTargets.Count -gt 0) {
-    Write-Host ("FAILED targets: {0} - details in {1}" -f ($Script:FailedTargets -join ', '), $LogFile) -ForegroundColor Red
+    $failedDisplay = (@($Script:FailedTargets | ForEach-Object { Get-SyncTargetDisplay $_ }) -join ', ')
+    Write-Host ("FAILED targets: {0} - details in {1}" -f $failedDisplay, $LogFile) -ForegroundColor Red
     exit 1
 }
 Write-Host ("All targets OK. Log: {0}" -f $LogFile) -ForegroundColor Green

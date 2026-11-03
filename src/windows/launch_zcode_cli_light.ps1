@@ -84,7 +84,7 @@ $CloneHome = Join-Path $UserProfile $cfg.Home
 $CloneZCode = Join-Path $CloneHome '.zcode'
 
 if (-not (Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\credentials.json'))) {
-    throw "Clone home $Instance has no profile yet ($CloneZCode). Launch its desktop instance once (GHOST.bat ZCode [1]-[5]) to seed it, then retry."
+    throw "Clone home $($cfg.DisplayName) has no profile yet ($CloneZCode). Launch its desktop instance once (GHOST.bat ZCode [1]-[5]) to seed it, then retry."
 }
 
 # Per-account env levers. USERPROFILE is set alongside HOME because the CLI's
@@ -158,7 +158,7 @@ if (-not $NoLoginWarn) {
         } catch { $hasDefaultModel = $false }
     }
     if (-not $hasDefaultModel) {
-        Write-Host "[model] WARNING: $Instance has no standalone CLI login - headless runs use the FREE" -ForegroundColor Yellow
+        Write-Host "[model] WARNING: $($cfg.DisplayName) has no standalone CLI login - headless runs use the FREE" -ForegroundColor Yellow
         Write-Host '[model] opencode-zen model, NOT this account''s Start Plan (the desktop app injects the' -ForegroundColor Yellow
         Write-Host '[model] plan adapter only into its own children; hand-edited defaults are ignored).' -ForegroundColor Yellow
         Write-Host '[model] One-time fix - in a terminal run:' -ForegroundColor Yellow
@@ -173,7 +173,7 @@ if (-not $NoLoginWarn) {
 }
 
 if ($Login) {
-    Write-Host "[login] One-time standalone login for $Instance (home: $CloneHome)." -ForegroundColor Cyan
+    Write-Host "[login] One-time standalone login for $($cfg.DisplayName) (home: $CloneHome)." -ForegroundColor Cyan
     Write-Host "[login] A browser window will open - sign in with THIS clone's account." -ForegroundColor Cyan
     & $NodeExe $ZcodeCli login zai
     if ($LASTEXITCODE -ne 0) {
@@ -208,21 +208,21 @@ function Invoke-LightPrompt {
 }
 
 if ($Server) {
-    Write-Host "[light] $Instance ($($cfg.DisplayName)) app-server on stdio - the CALLER owns this pipe." -ForegroundColor Cyan
+    Write-Host "[light] $($cfg.DisplayName) app-server on stdio - the CALLER owns this pipe." -ForegroundColor Cyan
     Write-Host "[light] home=$CloneHome cli=$ZcodeCli"
     & $NodeExe $ZcodeCli app-server
     exit $LASTEXITCODE
 }
 
 if (-not [string]::IsNullOrWhiteSpace($Prompt)) {
-    Write-Host "[light] $Instance ($($cfg.DisplayName)) one-shot task (mode=$Mode, cwd=$Cwd)..." -ForegroundColor Cyan
+    Write-Host "[light] $($cfg.DisplayName) one-shot task (mode=$Mode, cwd=$Cwd)..." -ForegroundColor Cyan
     $ok = Invoke-LightPrompt -Text $Prompt
     if (-not $ok) { exit 1 }
     exit 0
 }
 
 # Interactive REPL: one node process per task, per-account isolation everywhere.
-Write-Host ("[light] ZCode {0} light worker - account isolated to {1}" -f $Instance, $cfg.Home) -ForegroundColor Cyan
+Write-Host ("[light] ZCode {0} light worker - account isolated to {1}" -f $cfg.DisplayName, $cfg.Home) -ForegroundColor Cyan
 Write-Host '[light] Type a task and press Enter. Empty input exits. Each task is a fresh session'
 Write-Host '[light] in the clone''s own store (shareable with its desktop app).'
 while ($true) {

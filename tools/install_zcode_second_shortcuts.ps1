@@ -388,7 +388,7 @@ foreach ($inst in $Instance) {
     IconIco      = $iconIco
     IconOk       = $iconOk
     IconLocation = "$iconIco,0"
-    Description  = "Launch an independent $inst ZCode clone ($($def.DisplayName.ToLowerInvariant()) branding, separate taskbar button)"
+    Description  = "Launch an independent ZCode $($def.DisplayName) clone - separate taskbar button"
     Arguments    = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -Instance $inst"
     Targets      = @(Get-ShortcutTargets -ShortcutName $def.ShortcutName)
   }
@@ -399,7 +399,7 @@ $ws = New-Object -ComObject WScript.Shell
 foreach ($inst in $Instance) {
   $spec = $installed[$inst]
   Remove-LegacyShortcuts -Def $spec.Def
-  Write-Host "  [$inst] $($spec.Def.ShortcutName)"
+  Write-Host "  [$($def.DisplayName)] $($spec.Def.ShortcutName)"
   foreach ($t in $spec.Targets) {
     Write-Host "    -> $t"
     $sc = $ws.CreateShortcut($t)
