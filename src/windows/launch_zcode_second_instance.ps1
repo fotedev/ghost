@@ -38,6 +38,26 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# --- Persistent launch log ---------------------------------------------------
+# The launcher windows close automatically when done (GHOST.bat :StartClone) and
+# the Desktop/Start-menu shortcuts run this script with -WindowStyle Hidden, so
+# the console output is otherwise lost entirely. Append every run to
+# tools\logs\launch_zcode_<Instance>.log via a transcript. One file per instance
+# keeps the five parallel launchers from interleaving. Everything here is
+# best-effort: a logging failure must never block the launch.
+try {
+    $logDir = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\tools\logs'))
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    $script:LaunchLogPath = Join-Path $logDir ("launch_zcode_{0}.log" -f $Instance)
+    Start-Transcript -Path $script:LaunchLogPath -Append -IncludeInvocationHeader | Out-Null
+    Write-Host "[log] transcript: $script:LaunchLogPath"
+} catch {
+    Write-Host "[log] transcript disabled: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+function Stop-LaunchLog {
+    try { Stop-Transcript | Out-Null } catch { }
+}
+
 # Portable paths: work for any Windows user, no hardcoded username.
 $UserProfile  = $env:USERPROFILE
 if ([string]::IsNullOrWhiteSpace($UserProfile)) { $UserProfile = [Environment]::GetFolderPath('UserProfile') }
@@ -210,6 +230,7 @@ if ($mainsNow.Count -ge $MaxConcurrent) {
                 $guardAnswer = Read-Host '[ram-guard] Launch anyway? (y/N)'
                 if ($guardAnswer -notmatch '^[Yy]') {
                     Write-Host '[ram-guard] Launch cancelled - nothing was started.'
+                    Stop-LaunchLog
                     exit 0
                 }
             } else {
@@ -217,6 +238,7 @@ if ($mainsNow.Count -ge $MaxConcurrent) {
                 # invisible and hang the launch forever - ask via a dialog instead.
                 if (-not (Show-GhostRamGuardDialog ($guardLines -join "`n"))) {
                     Write-Host '[ram-guard] Launch cancelled - nothing was started.'
+                    Stop-LaunchLog
                     exit 0
                 }
             }
@@ -782,3 +804,5 @@ if ($targetProc) {
 } else {
     Write-Host "[taskbar] no window found - identity left to the app's process-level AUMID." -ForegroundColor Yellow
 }
+
+Stop-LaunchLog
