@@ -1,0 +1,207 @@
+{
+  "mcpServers": {
+    "omniroute": {
+      "type": "stdio",
+      "command": "omniroute",
+      "args": ["--mcp"],
+      "env": {
+        "OMNIROUTE_API_KEY": "${OMNIROUTE_API_KEY}",
+        "OMNIROUTE_BASE_URL": "${OMNIROUTE_BASE_URL}"
+      },
+      "enabled": false
+    },
+    "supabase": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+        "--project-ref",
+        "eysuvsofdluvzhlxdzkv"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+      },
+      "enabled": true
+    },
+    "supabase-masarx": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+        "--project-ref",
+        "jcufigozkhxazjbwhjjm"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+      },
+      "enabled": true
+    },
+    "supabase-iplogger": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.supabase.com/mcp?project_ref=cetvpltaprdappuxrzbp"],
+      "enabled": false,
+      "only": ["windsurf"]
+    },
+    "supabase-masar-x": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.supabase.com/mcp?project_ref=jcufigozkhxazjbwhjjm"],
+      "enabled": true,
+      "only": ["windsurf"]
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "${GITHUB_MCP_AUTHORIZATION}",
+        "X-MCP-Toolsets": "${GITHUB_MCP_TOOLSETS}"
+      },
+      "enabled": true
+    },
+    "vercel": {
+      "type": "http",
+      "url": "https://mcp.vercel.com",
+      "headers": {
+        "Authorization": "${VERCEL_MCP_AUTHORIZATION}"
+      },
+      "enabled": true
+    },
+    "cloudflare-api": {
+      "type": "http",
+      "url": "https://mcp.cloudflare.com/mcp",
+      "headers": {
+        "Authorization": "${CLOUDFLARE_MCP_AUTHORIZATION}"
+      },
+      "enabled": false
+    },
+    "cloudflare-docs": {
+      "type": "http",
+      "url": "https://docs.mcp.cloudflare.com/mcp",
+      "headers": {
+        "Authorization": "${CLOUDFLARE_MCP_AUTHORIZATION}"
+      },
+      "enabled": false
+    },
+    "cloudflare-browser": {
+      "type": "http",
+      "url": "https://browser.mcp.cloudflare.com/mcp",
+      "headers": {
+        "Authorization": "${CLOUDFLARE_MCP_AUTHORIZATION}"
+      },
+      "enabled": false
+    },
+    "sentry": {
+      "type": "http",
+      "url": "https://mcp.sentry.dev/mcp",
+      "enabled": true
+    },
+    "upstash": {
+      "type": "http",
+      "url": "https://mcp.upstash.com/mcp",
+      "enabled": true
+    },
+    "notion": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server"],
+      "env": {
+        "NOTION_TOKEN": "${NOTION_TOKEN}"
+      },
+      "enabled": false
+    },
+    "cloudinary": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@cloudinary/asset-management-mcp", "start"],
+      "env": {
+        "CLOUDINARY_CLOUD_NAME": "${CLOUDINARY_CLOUD_NAME}",
+        "CLOUDINARY_API_KEY": "${CLOUDINARY_API_KEY}",
+        "CLOUDINARY_API_SECRET": "${CLOUDINARY_API_SECRET}"
+      },
+      "enabled": true
+    },
+    "linkedin": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"],
+      "env": {
+        "LINKEDIN_ACCESS_TOKEN": "${LINKEDIN_ACCESS_TOKEN}"
+      },
+      "enabled": false
+    },
+    "obsidian": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-obsidian"],
+      "env": {
+        "OBSIDIAN_PROTOCOL": "${OBSIDIAN_PROTOCOL:-https}",
+        "OBSIDIAN_HOST": "${OBSIDIAN_HOST:-127.0.0.1}",
+        "OBSIDIAN_PORT": "${OBSIDIAN_PORT:-27124}",
+        "OBSIDIAN_API_KEY": "${OBSIDIAN_API_KEY}"
+      },
+      "enabled": true
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--auto-connect", "--slim"],
+      "enabled": true
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.70"],
+      "enabled": true
+    },
+    "opencode": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "opencode-mcp"],
+      "env": {
+        "OPENCODE_BASE_URL": "${OPENCODE_BASE_URL:-http://127.0.0.1:4096}",
+        "OPENCODE_AUTO_SERVE": "${OPENCODE_AUTO_SERVE:-1}"
+      },
+      "enabled": true,
+      "only": ["minimax"]
+    },
+    "matrix": {
+      "type": "stdio",
+      "command": "C:/Users/FOTE/AppData/Local/Programs/MiniMax Code/MiniMax Code.exe",
+      "args": ["C:/Users/FOTE/AppData/Local/Programs/MiniMax Code/resources/resources/matrix-mcp-cli/index.js"],
+      "env": {
+        "MATRIX_BASE_URL": "${MATRIX_BASE_URL}",
+        "MATRIX_TIMEOUT_MS": "${MATRIX_TIMEOUT_MS:-30000}"
+      },
+      "enabled": true,
+      "only": ["minimax"]
+    },
+    "cu": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:15321/mavis/mcp/cu",
+      "enabled": true,
+      "only": ["minimax"]
+    },
+    "trash": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:15321/mavis/mcp/trash",
+      "enabled": true,
+      "only": ["minimax"]
+    },
+    "stripe": {
+      "type": "http",
+      "url": "https://mcp.stripe.com",
+      "enabled": false
+    },
+    "resend": {
+      "type": "http",
+      "url": "https://mcp.resend.com/mcp",
+      "enabled": false
+    },
+    "openseo": {
+      "type": "http",
+      "url": "https://app.openseo.so/mcp",
+      "enabled": false
+    }
+  }
+}

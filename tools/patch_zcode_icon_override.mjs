@@ -1,8 +1,12 @@
 #!/usr/bin/env node
-// ZCode blue-branding patch engine — pure text transforms on an EXTRACTED asar tree.
-// Usage: node patch_zcode_icon_override.mjs <extractedDir>
-// Prints a JSON result on stdout; exit 0 = all patches applied or already applied,
-// exit 1 = any patch found zero sites (tree left untouched).
+// ZCode blue-branding patch engine — text transforms applied DIRECTLY inside
+// the app.asar via tools/asar_surgery.mjs (no extract-to-disk, no repack).
+// Usage: node patch_zcode_icon_override.mjs <sourceAsar> <candidateOut> <checksDir>
+// Prints a JSON result on stdout; exit 0 = all patches applied or already applied
+// (candidate asar written and fully verified), exit 1 = any patch found zero
+// sites, a marker check failed, node --check rejected a patched file, or the
+// rebuild verification failed (no candidate is swapped by this script - the
+// PS driver owns the swap).
 //
 // Engine v2 patch set:
 //   icon-window   (v1) window icon path      -> env ZCODE_ICON_DIR override
@@ -45,13 +49,31 @@
 //     v8 matches both shapes (bare and &&<flag> conjunct) and appends
 //     !process.env.ZCODE_ICON_DIR as an extra && term when the conjunct is
 //     present.
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+// Engine v9 patch set: NONE - the patch sites are unchanged from v8. v9 swaps
+//   the IO layer: instead of running on an EXTRACTED asar tree (full ~340 MB
+//   extract + repack + per-file npx verify), the engine reads the patch
+//   targets via ranged reads straight out of app.asar and rebuilds the
+//   candidate archive in one streaming pass (tools/asar_surgery.mjs). The
+//   syntax gate (node --check) and marker re-verification moved in-engine;
+//   the JSON contract (ok/totals/results/appliedMarkers) is unchanged and
+//   gained timings + patched file sizes.
+import { mkdirSync, writeFileSync, openSync, closeSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+import {
+  parseAsarHeader,
+  listSourceEntries,
+  readEntryBytes,
+  rebuildAsar,
+  verifyRebuild,
+} from "./asar_surgery.mjs";
 
-const ENGINE_VERSION = 8;
-const extractedDir = process.argv[2];
-if (!extractedDir) {
-  console.error(JSON.stringify({ ok: false, error: "usage: patch_zcode_icon_override.mjs <extractedDir>" }));
+const ENGINE_VERSION = 9;
+const sourceAsar = process.argv[2];
+const candidateOut = process.argv[3];
+const checksDir = process.argv[4];
+if (!sourceAsar || !candidateOut || !checksDir) {
+  console.error(JSON.stringify({ ok: false, error: "usage: patch_zcode_icon_override.mjs <sourceAsar> <candidateOut> <checksDir>" }));
   process.exit(1);
 }
 // Flat blue sampled from the generated icon's Z stroke (RGB 6,107,203).
@@ -107,17 +129,6 @@ const BIDI_APPEND = `,(() => {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
   else start();
 })()`;
-
-function listSourceFiles(dir) {
-  const out = [];
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name);
-    const st = statSync(full);
-    if (st.isDirectory()) out.push(...listSourceFiles(full));
-    else if (/\.(js|cjs|mjs|html)$/.test(name)) out.push(full);
-  }
-  return out;
-}
 
 // Wrap the argument of `<receiver>.setAppUserModelId(` in extra parens plus the
 // AUMID suffix expression. Paren matcher skips string literals.
@@ -229,8 +240,8 @@ const PATCHES = [
     name: "preload-blue",
     min: 1,
     apply: (src) => {
-      // Idempotence must be checked BEFORE the regex: the patch appends AFTER
-      // the matched call, so the regex still matches an already-patched file
+      // Idempotence must be checked BEFORE the match: the patch appends AFTER
+      // the matched call, so the anchor still matches an already-patched file
       // and would stack duplicate exposures on every engine upgrade.
       if (src.includes('exposeInMainWorld("__ZCODE_ACCENT__"')) return { src, count: -1 };
       const accent =
@@ -239,24 +250,58 @@ const PATCHES = [
       const title =
         '.contextBridge.exposeInMainWorld("__ZCODE_TITLE__",' +
         '(process.argv.find(a=>a.startsWith("--zcode-title="))||"").slice(14))';
+      // v9 perf: v2-v8 matched with /([\w$]+)\.contextBridge\.exposeInMainWorld\("..."/
+      // regexes, whose per-position word-run backtracking cost ~290 s across
+      // the ~22k-entry ZCode bundle (the silent bulk of the old patch step).
+      // The literal-needle indexOf + backward receiver scan is byte-equivalent
+      // (the receiver capture is exactly the maximal [\w$]+ run immediately
+      // before the literal, which is also the regex's leftmost capture) and
+      // ~1000x faster.
+      const BLUE_CALL =
+        '.contextBridge.exposeInMainWorld("__ZCODE_BLUE__",process.argv.includes("--zcode-blue=1"))';
+      const DEV_CALL = '.contextBridge.exposeInMainWorld("__ZCODE_DEVICE_ID__",';
+      const isWordChar = (ch) => /[\w$]/.test(ch);
+      const recvStartBefore = (litStart) => {
+        let start = litStart;
+        while (start > 0 && isWordChar(src[start - 1])) start--;
+        return start;
+      };
       // v5 -> v6 upgrade: extend the existing __ZCODE_BLUE__ exposure(s).
-      const reBlue = /([\w$]+)\.contextBridge\.exposeInMainWorld\("__ZCODE_BLUE__",process\.argv\.includes\("--zcode-blue=1"\)\)/g;
-      if (reBlue.test(src)) {
-        let count = 0;
-        const out = src.replace(reBlue, (m, recv) => {
-          count++;
-          return m + "," + recv + accent + "," + recv + title;
-        });
-        return { src: out, count };
+      const blueHits = [];
+      let from = 0;
+      for (;;) {
+        const lit = src.indexOf(BLUE_CALL, from);
+        if (lit === -1) break;
+        const start = recvStartBefore(lit);
+        blueHits.push({ start, end: lit + BLUE_CALL.length, recv: src.slice(start, lit) });
+        from = lit + BLUE_CALL.length;
       }
-      const re = /([\w$]+)\.contextBridge\.exposeInMainWorld\("__ZCODE_DEVICE_ID__",\s*([\w$]+)\(\)\)/;
-      const m = src.match(re);
-      if (!m) return { src, count: 0 };
+      if (blueHits.length) {
+        let out = src;
+        // splice from last to first so earlier indices stay valid
+        for (let i = blueHits.length - 1; i >= 0; i--) {
+          const h = blueHits[i];
+          out = out.slice(0, h.end) + "," + h.recv + accent + "," + h.recv + title + out.slice(h.end);
+        }
+        return { src: out, count: blueHits.length };
+      }
+      // Pristine: append after the __ZCODE_DEVICE_ID__ exposure call
+      // (regex equivalent: recv + DEV_CALL + \s* + factory + "()))").
+      const lit = src.indexOf(DEV_CALL);
+      if (lit === -1) return { src, count: 0 };
+      const start = recvStartBefore(lit);
+      const recv = src.slice(start, lit);
+      let p = lit + DEV_CALL.length;
+      while (p < src.length && /\s/.test(src[p])) p++;
+      let q = p;
+      while (q < src.length && isWordChar(src[q])) q++;
+      if (q === p || src.slice(q, q + 3) !== "())") return { src, count: 0 };
+      const matched = src.slice(start, q + 3);
       const addition =
-        m[0] + "," + m[1] +
+        matched + "," + recv +
         '.contextBridge.exposeInMainWorld("__ZCODE_BLUE__",process.argv.includes("--zcode-blue=1"))' +
-        "," + m[1] + accent + "," + m[1] + title;
-      return { src: src.replace(m[0], addition), count: 1 };
+        "," + recv + accent + "," + recv + title;
+      return { src: src.slice(0, start) + addition + src.slice(q + 3), count: 1 };
     },
   },
   {
@@ -427,27 +472,60 @@ const PATCHES = [
   },
 ];
 
+const T0 = process.hrtime.bigint();
+const lap = (from) => Number(process.hrtime.bigint() - from) / 1e6;
+const timings = {};
+// GHOST_PATCH_DEBUG=1 -> per-patch accumulated timings + progress on STDERR
+// (stdout stays pure JSON for the PS driver).
+const DEBUG = process.env.GHOST_PATCH_DEBUG === "1";
+const patchTimings = {};
+const debugLog = (...a) => { if (DEBUG) console.error("[debug]", ...a); };
+
+// 1. Parse header + ranged-read/patch every text entry in memory.
+const { header, payloadBase } = parseAsarHeader(sourceAsar);
 const results = [];
-const files = listSourceFiles(extractedDir);
-for (const file of files) {
-  const before = readFileSync(file, "utf8");
-  let src = before;
-  const counts = {};
-  const appliedMarkers = [];
-  for (const patch of PATCHES) {
-    const r = patch.apply(src);
-    src = r.src;
-    counts[patch.name] = r.count;
-    if (r.count > 0) {
-      appliedMarkers.push(...(r.markers ?? markersForPatch(patch.name)));
+const patchedContents = new Map(); // rel -> new utf8 content (only changed files)
+const srcFd = openSync(sourceAsar, "r");
+try {
+  let seen = 0;
+  for (const { rel, node } of listSourceEntries(header)) {
+    const before = readEntryBytes(srcFd, payloadBase, node).toString("utf8");
+    let src = before;
+    const counts = {};
+    const appliedMarkers = [];
+    for (const patch of PATCHES) {
+      const pT = DEBUG ? process.hrtime.bigint() : null;
+      const r = patch.apply(src);
+      if (DEBUG) patchTimings[patch.name] = (patchTimings[patch.name] || 0) + Number(process.hrtime.bigint() - pT) / 1e6;
+      src = r.src;
+      counts[patch.name] = r.count;
+      if (r.count > 0) {
+        appliedMarkers.push(...(r.markers ?? markersForPatch(patch.name)));
+      }
     }
+    if (src !== before) {
+      patchedContents.set(rel, src);
+      // verify-after-patch on the in-memory content (the markers the PS
+      // driver used to re-check by re-reading the extracted tree)
+      for (const marker of appliedMarkers) {
+        if (!src.includes(marker)) {
+          console.log(JSON.stringify({ ok: false, engineVersion: ENGINE_VERSION, error: `patch verify FAILED after write: marker '${marker}' missing in ${rel}` }));
+          process.exit(1);
+        }
+      }
+    }
+    if (PATCHES.some((p) => counts[p.name] !== 0)) {
+      results.push({ file: rel, counts, appliedMarkers });
+    }
+    seen++;
+    if (DEBUG && seen % 5000 === 0) debugLog("scanned", seen, "entries");
   }
-  if (src !== before) {
-    writeFileSync(file, src);
-  }
-  if (PATCHES.some((p) => counts[p.name] !== 0)) {
-    results.push({ file: relative(extractedDir, file).split(sep).join("/"), counts, appliedMarkers });
-  }
+} finally {
+  closeSync(srcFd);
+}
+timings.readPatchMs = Math.round(lap(T0));
+if (DEBUG) {
+  for (const [name, ms] of Object.entries(patchTimings)) debugLog("patch", name, Math.round(ms) + "ms");
 }
 
 const totals = {};
@@ -492,4 +570,81 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(JSON.stringify({ ok: true, engineVersion: ENGINE_VERSION, totals, results }));
+// 2. Syntax gate: node --check every patched js/cjs/mjs BEFORE rebuilding
+// (markers alone cannot catch a structurally broken bundle - the v3
+// main-args bug shipped valid markers with a dead main process). The check
+// runs on temp copies under checksDir; the candidate asar is not written yet.
+const tSyntax = process.hrtime.bigint();
+mkdirSync(checksDir, { recursive: true });
+const syntaxFailures = [];
+for (const r of results) {
+  if (!/\.(js|cjs|mjs)$/.test(r.file)) continue;
+  const content = patchedContents.get(r.file);
+  // Already-applied sites (count -1) changed nothing in this run; their
+  // content is the previous engine's output (or pristine vendor bytes on a
+  // -Force pristine rebuild) - v8 re-checked the on-disk copy, which is the
+  // same bytes, so skipping unchanged files here is behavior-identical.
+  if (content === undefined) continue;
+  const checkPath = join(checksDir, r.file.replace(/\//g, "__"));
+  writeFileSync(checkPath, content, "utf8");
+  try {
+    execFileSync(process.execPath, ["--check", checkPath], { stdio: ["ignore", "pipe", "pipe"] });
+  } catch (e) {
+    syntaxFailures.push({ file: r.file, output: String((e && (e.stderr || e.stdout)) || e).trim() });
+  }
+}
+timings.syntaxMs = Math.round(lap(tSyntax));
+if (syntaxFailures.length) {
+  const f = syntaxFailures[0];
+  console.log(JSON.stringify({
+    ok: false,
+    engineVersion: ENGINE_VERSION,
+    totals,
+    results,
+    error: "node --check rejected " + f.file + " - aborting before rebuild: " + f.output,
+    syntaxFailures,
+  }));
+  process.exit(1);
+}
+
+// 3. Rebuild: copy the untouched payload region byte-for-byte, append the
+// patched contents at the tail, rewrite only the patched header entries.
+const tRebuild = process.hrtime.bigint();
+const expected = new Map();
+for (const [rel, content] of patchedContents) expected.set(rel, Buffer.from(content, "utf8"));
+const meta = rebuildAsar({
+  sourcePath: sourceAsar,
+  outPath: candidateOut,
+  // rebuild re-reads each candidate entry; hand back the already-patched text
+  transform: (rel) => patchedContents.get(rel) ?? null,
+});
+timings.rebuildMs = Math.round(lap(tRebuild));
+
+// 4. Verify the candidate: header walk + full payload-region byte compare +
+// exact patched-content compare (stronger than the old per-file extract).
+const tVerify = process.hrtime.bigint();
+const v = verifyRebuild({ sourcePath: sourceAsar, outPath: candidateOut, expected, meta });
+timings.verifyMs = Math.round(lap(tVerify));
+timings.totalMs = Math.round(lap(T0));
+if (!v.ok) {
+  console.log(JSON.stringify({
+    ok: false,
+    engineVersion: ENGINE_VERSION,
+    totals,
+    results,
+    error: "candidate asar verification FAILED: " + v.errors.join("; "),
+    verifyErrors: v.errors,
+  }));
+  process.exit(1);
+}
+
+console.log(JSON.stringify({
+  ok: true,
+  engineVersion: ENGINE_VERSION,
+  totals,
+  results,
+  timings,
+  patchedSizes: meta.patched,
+  outSize: meta.outSize,
+  verifyChecked: v.checked,
+}));

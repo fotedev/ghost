@@ -23,6 +23,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   -ImportId`). 39 unittests + lean Pester orchestrator suite + harness scenario
   U green. Live acceptance (A1-A7 / C2-C7) stays gated on the supervised
   Phase 0 spikes; the MCP watcher row is deferred with gid 74 reserved.
+- **MCP central registry + one-way sync to every app** (2026-11-04):
+  `tools/mcp/master-mcp.json` (25 servers, single source of truth) + gitignored
+  `master-mcp.local.json` overlay (device values, local wins) + the
+  `tools/sync_mcp_registry.ps1` importer (Maintenance [4] / gid 77) pushing
+  definitions into ZCode Primary, Windsurf, VS Code and MiniMax in each app's
+  own config shape (Cursor auto-skips until installed; OpenCode clones sync
+  once their configs exist). Merge preserves app-local enable/disable state and
+  never deletes app-only servers; secrets stay as `${VAR}` names resolved from
+  machine env — all 20 were set from the apps' own working values, so the
+  written files contain zero placeholders; every write is backed up to
+  `MCP_Backups\<ts>\`, verify-after deep-compared, and audited to JSONL. Live
+  run 2026-11-04: windsurf +17, vscode +18, zcode +7, minimax +19 adds, all
+  app-only servers kept, second run idempotent. Harvest direction:
+  `tools/mcp/collect_mcp_inventory.ps1` (read-only, 109 definitions across all
+  hosts) — promotion into the master stays a per-name human decision. Plan:
+  `docs/MCP_CENTRAL_REGISTRY_PLAN.md`.
 - **ZCode clone launches persist their console output to a log** (2026-11-03):
   `launch_zcode_second_instance.ps1` appends every run to
   `tools\logs\launch_zcode_<Instance>.log` via a PowerShell transcript (one
@@ -35,6 +51,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Stop-Transcript` runs before the ram-guard `exit 0` paths and at script
   end. GHOST.bat ZCode [6] also prints the log location after opening the
   five windows.
+- `tests/patch_surgery.Tests.ps1` — runs the surgery module's selftest
+  (synthetic asar with text/binary/empty/deduplicated-twin/unpacked entries,
+  round-trip rebuild + verify + corrupt-header abort) and the pickle-framing
+  probe; 5 tests.
 - **ZCode patch [27] waits for you to close the app** (2026-10-31):
   `patch_zcode_icon_override.ps1` gained `-WaitForClose` (GHOST.bat ZCode
   [27] passes it via `:RunWith`'s new optional extra-args slot) — when
@@ -57,6 +77,54 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   bare OpenCode.exe opens the PRIMARY profile).
 
 ### Changed
+- **The asar patches now take seconds, not minutes** (2026-11-03): the ZCode
+  icon patch [27] (engine v9) and the OpenCode clone-home patch [8]
+  (engine v4) share a new `tools/asar_surgery.mjs` IO layer that replaces the
+  old extract/repack pipeline (`npx @electron/asar extract` of the ~340 MB /
+  ~32k-file archive to %TEMP%, up to 4 repacks in a sidecar-convergence loop,
+  one npx spawn per patched-file verify). The engine now ranges-reads only the
+  text entries straight out of `app.asar`, applies the same patch anchors in
+  memory, rebuilds the candidate in one streaming pass — untouched payload
+  region copied byte-for-byte, patched contents appended at the tail, only the
+  patched header entries rewritten (integrity recomputed) — and fully verifies
+  it (header walk + whole-region byte compare + patched-content compare) in
+  the same node process. The sidecar `app.asar.unpacked` is never touched
+  (swaps run with a new `-SkipUnpackedSwap`); `npx` is no longer needed at
+  all. Measured live: ZCode [27] ~6 s end-to-end (was minutes), OpenCode [8]
+  ~2.5 s; patched-file output proven byte-identical to the previous engines'
+  on the real pristine asars of both apps. Those numbers come from a dev box
+  with no antivirus. On machines with Defender/AV we expect roughly 10-60 s
+  (estimate, not measured), and the relative improvement is likely larger
+  there: the old pipeline's per-file scan overhead across ~32k extracted
+  files and the npx first-run npm download are gone entirely, and the
+  ~290 s regex cost that dominated every machine was pure CPU.
+  `node --check`, marker/backup/restore, update-recovery probing and all
+  abort gates unchanged. Note on safety of the approach itself: every
+  patched build through v8 boots normally, which is only possible with
+  Electron's `EnableEmbeddedAsarIntegrityValidation` fuse off - replacing
+  `app.asar` has been safe so far; re-confirm after the v9 live run and at
+  each future acceptance.
+- **Patch hardening for AV-protected machines** (2026-11-03): both patch
+  drivers now retry the asar swap up to 6 times (300 ms apart) when antivirus
+  briefly holds the freshly written ~340 MB candidate - retrying on
+  IOException AND UnauthorizedAccessException (Access denied), including
+  PowerShell-wrapped InnerExceptions. ZCode's swap is rename-based
+  (app.asar -> app.asar.old -> candidate in -> delete .old, rename-back on
+  failure), so the install is never left without an app.asar; OpenCode keeps
+  its live-proven delete + locked-asar in-place fallback order. A free-disk
+  preflight aborts cleanly with MB numbers before anything is written and
+  models the true peak: backup + candidate coexist on one volume (~2.6x the
+  asar size when install and %TEMP% share a volume, split 2.3x install /
+  1.3x temp across volumes; -Restore staged copy + move-in likewise).
+  Verified by Pester tests that hold the file with FileShare.None: a ~1 s
+  lock succeeds after retries, and a lock outlasting the window rolls back
+  with the original app.asar intact.
+- **Pre-existing perf bug fixed while measuring**: the ZCode `preload-blue`
+  patch anchor matched with a per-position backtracking regex that cost
+  ~290 s across the bundle (the silent bulk of the old [3/7] step) — it now
+  uses a literal-needle indexOf + backward receiver scan (byte-identical
+  output). The OpenCode `clone-identity` anchor got the same treatment
+  (regex-equivalence unit-proven over tricky receiver/argument shapes).
 - **Colors are now the ONLY user-facing clone names** (2026-11-03): GHOST.bat
   rows (`Launch Blue clone` / `Reset Red clone` / `Launch Yellow clone` for
   ZCode, AutoClaw2, Cline and OpenCode) and the suite scripts' console output
