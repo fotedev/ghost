@@ -146,7 +146,7 @@ call :Opt 25 "Taskbar identity watcher" "- auto-fix taskbar merges (separate win
 call :Opt 26 "Freeze diagnostic" "- dead windows, renderer OOM, commit pressure"
 echo.
 call :Div "Maintenance"
-call :Opt 27 "Re-apply app patch" "- v8, icons + bidi auto (after app update)"
+call :Opt 27 "Re-apply app patch" "- v9, icons + bidi auto (after app update)"
 call :Opt 28 "Login clone account" "- one-time plan setup (light workers + T3 bridge)"
 call :Opt 29 "Remove clone shortcuts" "- Desktop + Start menu"
 echo.
@@ -175,6 +175,7 @@ echo.
 call :Opt 1 "Install or repair the GHOST shortcut" "- Desktop + repo folder"
 call :Opt 2 "Check for updates / update GHOST" "- from GitHub"
 call :Opt 3 "Spoof WMI hardware serials" "- BIOS, motherboard, disk, RAM + Bluetooth MAC"
+call :Opt 4 "Sync MCP registry to apps" "- ZCode, Windsurf, VS Code + MiniMax"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -397,6 +398,7 @@ set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=24"
 if "%~1"=="2" set "RESOLVED=26"
 if "%~1"=="3" set "RESOLVED=66"
+if "%~1"=="4" set "RESOLVED=77"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -468,7 +470,7 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-76; 63 unused; 74 reserved for the deferred
+rem Runs one task by global id (1-77; 63 unused; 74 reserved for the deferred
 rem AutoClaw2 MCP watcher). Unknown ids print an error. Returns to caller.
 if "%~1"=="1"  (call :Run "src\windows\change_device_id.ps1" & exit /b)
 if "%~1"=="2"  (call :Run "src\windows\reset_cursor.ps1" & exit /b)
@@ -543,6 +545,7 @@ if "%~1"=="72" (call :Run "tools\install_zcode_second_shortcuts.ps1" -Remove & e
 if "%~1"=="73" (call :Run "tools\sync_autoclaw2_mcp.ps1" -Target All & exit /b)
 if "%~1"=="75" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Inventory -Target All & exit /b)
 if "%~1"=="76" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Import -Apply -Target All & exit /b)
+if "%~1"=="77" (call :Run "tools\sync_mcp_registry.ps1" & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
 if "%~1"=="46" (call :Detached "Cline Yellow" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)

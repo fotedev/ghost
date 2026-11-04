@@ -114,6 +114,7 @@ BS-7, zcode last after W1 + BS-5.
 - **DT-2**: harness scenario gaps (two-token chain, unknown-token continuation) — see W4-2 in §3.
 - **DT-3**: `clear-cli-telemetry` tests (empty + locked DB) — see W4-3 in §3 (guard-blocked until §2).
 - **DT-4**: `CHANGELOG.md` has no record of the 2026-10-24 sweep remediation (the sweep folders are gitignored). When releasing, summarize from `_bug_sweep\fixes\FIXES_SUMMARY.md` (fixed table + blocked list).
+- **DT-5**: MCP registry Phase 2 (optional, design done — `docs/MCP_CENTRAL_REGISTRY_PLAN.md` §6): `supergateway --config tools\mcp\master-mcp.json --port 8310 --host 127.0.0.1` serves every registry server on `http://127.0.0.1:8310/<name>/mcp`; `--host 127.0.0.1` is MANDATORY (upstream default binds every interface); persistent run via a Startup-folder `.lnk` (same pattern as the watchers); optional `--apiKey`. Port 8310 verified free on the dev host.
 
 ## Priority order
 

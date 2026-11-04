@@ -18,6 +18,16 @@ then bursty events on 10-27 - and DIFFERENT accounts failed in the same
 minute, so the limit sits on the plan tier (or the machine's aggregate
 concurrency), not on one account.
 
+Second failure mode (verified 2026-11-02): RISK-CONTROL BLOCK. The gateway
+answers HTTP 405 with body {"code":3012,"msg":"request has been blocked due
+to unusual activity."} - non-retryable, on every request and every session.
+This is NOT admission throttling and NOT a device/account ban: the JWT kept
+refreshing and billing kept answering while every model request failed. The
+same trace returned 405 on the direct line at 00:19Z and 200 at 00:29Z after
+the machine switched egress IP - same account, same request, same model.
+Public template: github.com/zai-org/feedback/issues/1322. Section [2] reports
+the block separately and the verdict explains the remedies.
+
 This tool is strictly read-only. It parses the SHARED agent runtime JSONL
 logs at ~\.zcode\cli\log\zcode-<date>.jsonl - every instance (Primary +
 clones) writes there, because the CLI resolves ~ via the real user profile
@@ -78,6 +88,9 @@ $Retries = @()    # objects: TsLocal, SessionShort, Day
 $Failures = @()   # objects: TsLocal, SessionShort, Day, Exhausted, RateLimited, Cancelled, ProviderCode, Model, Attempts
 $ProviderCodes = @{}
 $ModelsSeen = @{}
+$RiskAttempts = @()    # objects: TsLocal, SessionShort, TraceShort, Day
+$RiskTurns = @()       # objects: TsLocal, SessionShort, TraceShort, Day
+$RiskSignatures = @{}  # raw body codes seen (3012 = unusual-activity block)
 $filesScanned = 0
 $script:SawLogs = $false
 
@@ -143,7 +156,34 @@ foreach ($date in $Dates) {
     }
     $dayEvents = @()
     $dayRetries = 0; $dayExhausted = 0; $dayOtherFails = 0
+    $dayRiskAttempts = 0; $dayRiskTurns = 0
     foreach ($line in $lines) {
+        # Risk-control block (405 / 3012): the gateway refuses the request
+        # outright. model.request.failed carries context.statusCode 405 and
+        # turn.failed carries the same cause; count attempts and turns apart.
+        $isRiskLine = $false
+        if ($line -match '"statusCode":405' -or $line -match '"code":3012' -or $line -match 'Method Not Allowed') { $isRiskLine = $true }
+        if ($isRiskLine) {
+            $rJson = $null
+            try { $rJson = $line | ConvertFrom-Json -ErrorAction Stop } catch { $rJson = $null }
+            $rSession = Get-ShortSession (Get-JsonPath 'sessionId' $rJson)
+            $rTs = Convert-ToLocal (Get-JsonPath 'timestamp' $rJson)
+            $rTrace = Get-JsonPath 'traceId' $rJson
+            $rTraceShort = ''
+            if ($rTrace.Length -gt 8) { $rTraceShort = $rTrace.Substring(0, 8) }
+            if ($line -match '"event":"model\.request\.failed"') {
+                $dayRiskAttempts++
+                $RiskAttempts += [pscustomobject]@{ TsLocal = $rTs; SessionShort = $rSession; TraceShort = $rTraceShort; Day = $date }
+            } elseif ($line -match '"event":"turn\.failed"') {
+                $dayRiskTurns++
+                $RiskTurns += [pscustomobject]@{ TsLocal = $rTs; SessionShort = $rSession; TraceShort = $rTraceShort; Day = $date }
+            }
+            if ($line -match '"code":3012') {
+                if (-not $RiskSignatures.ContainsKey('3012')) { $RiskSignatures['3012'] = 0 }
+                $RiskSignatures['3012']++
+            }
+            continue
+        }
         if ($line -notmatch '"event":"(model\.main_turn\.retry_start_plan_admission_busy|turn\.failed)"') { continue }
         $json = $null
         try { $json = $line | ConvertFrom-Json -ErrorAction Stop } catch { $json = $null }
@@ -186,11 +226,11 @@ foreach ($date in $Dates) {
             if ($cls.Model -ne '') { $ModelsSeen[$cls.Model] = $true }
         }
     }
-    if ($dayEvents.Count -eq 0) {
+    if ($dayEvents.Count -eq 0 -and $dayRiskAttempts -eq 0 -and $dayRiskTurns -eq 0) {
         Write-Output ('-- ' + $date + '.jsonl: clean - no admission/retry events')
         continue
     }
-    Write-Output ('-- ' + $date + '.jsonl: ' + $dayRetries + ' admission-busy retry(ies), ' + $dayExhausted + ' exhausted loop(s), ' + $dayOtherFails + ' other failure(s)')
+    Write-Output ('-- ' + $date + '.jsonl: ' + $dayRetries + ' admission-busy retry(ies), ' + $dayExhausted + ' exhausted loop(s), ' + $dayOtherFails + ' other failure(s), ' + $dayRiskAttempts + ' risk-block 405 attempt(s)')
     foreach ($e in ($dayEvents | Sort-Object { if ($_.Ts -eq '') { '9999' } else { $_.Ts } })) {
         Write-Output ('   ' + $e.Ts + '  ' + $e.Text)
     }
@@ -199,8 +239,37 @@ if (-not $script:SawLogs) {
     Write-Output ('   no zcode-*.jsonl logs for the scanned dates (' + ($Dates -join ', ') + ')')
 }
 
-# ---- [2] hourly histogram ----------------------------------------------------
-Write-Hdr '[2] Hourly histogram (local time)'
+# ---- [2] risk-control block (405 / 3012) -------------------------------------
+Write-Hdr '[2] Risk-control block (405 / 3012)'
+$riskAttemptsTotal = $RiskAttempts.Count
+$riskTurnsTotal = $RiskTurns.Count
+$riskRows = @(@($RiskAttempts) + @($RiskTurns) | Sort-Object { if ($_.TsLocal -eq '') { '9999' } else { $_.TsLocal } })
+if ($riskRows.Count -eq 0) {
+    Write-Output '   none in the scanned window'
+} else {
+    Write-Output ('   405 Method Not Allowed: ' + $riskAttemptsTotal + ' refused attempt(s), ' + $riskTurnsTotal + ' failed turn(s)')
+    Write-Output ('   first: ' + $riskRows[0].TsLocal + '   last: ' + $riskRows[$riskRows.Count - 1].TsLocal)
+    $riskSessions = @{}
+    foreach ($r in $riskRows) { if ($r.SessionShort -ne '') { $riskSessions[$r.SessionShort] = $true } }
+    if ($riskSessions.Count -gt 0) {
+        Write-Output ('   session(s) affected (' + $riskSessions.Count + '): ' + (($riskSessions.Keys | Sort-Object) -join ', '))
+    }
+    $riskTraces = @{}
+    foreach ($r in $riskRows) { if ($r.TraceShort -ne '') { $riskTraces[$r.TraceShort] = $true } }
+    if ($riskTraces.Count -gt 0) {
+        Write-Output ('   trace id prefix(es): ' + (($riskTraces.Keys | Sort-Object) -join ', '))
+    }
+    if ($RiskSignatures.Count -gt 0) {
+        Write-Output ('   raw body code seen in the log: ' + (($RiskSignatures.Keys | Sort-Object) -join ', ') + ' (3012 = unusual-activity block)')
+    }
+    Write-Output ''
+    Write-Output '   Known body: {"code":3012,"msg":"request has been blocked due to'
+    Write-Output '   unusual activity."} The CLI logs only "Method Not Allowed" /'
+    Write-Output '   reason=unknown, so a bare 405 is the tell.'
+}
+
+# ---- [3] hourly histogram ----------------------------------------------------
+Write-Hdr '[3] Hourly histogram (local time)'
 $hours = @{}
 foreach ($r in $Retries) {
     if ($r.TsLocal.Length -ge 8) {
@@ -226,8 +295,8 @@ if ($hours.Count -eq 0) {
     }
 }
 
-# ---- [3] per-session rollup ----------------------------------------------------
-Write-Hdr '[3] Per-session rollup'
+# ---- [4] per-session rollup ----------------------------------------------------
+Write-Hdr '[4] Per-session rollup'
 $sessions = @{}
 foreach ($r in $Retries) {
     if (-not $sessions.ContainsKey($r.SessionShort)) {
@@ -254,10 +323,33 @@ if ($sessions.Count -eq 0) {
     }
 }
 
-# ---- [4] verdict ----------------------------------------------------------------
-Write-Hdr '[4] Verdict'
+# ---- [5] verdict ----------------------------------------------------------------
+Write-Hdr '[5] Verdict'
 $exhaustedTotal = @($Failures | Where-Object { $_.Exhausted }).Count
 $retriesTotal = $Retries.Count
+$riskTotal = $riskAttemptsTotal + $riskTurnsTotal
+if ($riskTotal -gt 0) {
+    Write-Output ('   RISK-CONTROL BLOCK (405 / 3012): ' + $riskAttemptsTotal + ' refused attempt(s), ' + $riskTurnsTotal + ' failed turn(s), ' + $filesScanned + ' log file(s) scanned.')
+    Write-Output '   - The Z.ai gateway rejected the model request outright: HTTP 405,'
+    Write-Output '     non-retryable, body code 3012 "request has been blocked due to'
+    Write-Output '     unusual activity". This is NOT admission throttling (3008/3009) and'
+    Write-Output '     NOT a device/account ban: the JWT keeps refreshing and billing keeps'
+    Write-Output '     answering while every model request fails.'
+    Write-Output '   - The trigger is the usage PATTERN (token volume, parallel subagents,'
+    Write-Output '     many instances behind one egress IP), not a broken install. The flag'
+    Write-Output '     can land on the account, the egress IP, or both.'
+    Write-Output '   - Verified 2026-11-02 on this machine: the SAME trace that returned'
+    Write-Output '     405 on the direct line returned 200 minutes after the egress IP'
+    Write-Output '     changed - same account, same request, same model.'
+    Write-Output '   - Immediate: stop the instances (every retry just fails). Test ONE'
+    Write-Output '     instance with one short message; if it still 405s, change the egress'
+    Write-Output '     IP (router PPPoE reconnect on a dynamic line, or a VPN), then test'
+    Write-Output '     one instance again and add the rest gradually.'
+    Write-Output '   - Durable: open an issue at github.com/zai-org/feedback with user_id,'
+    Write-Output '     the first/last timestamps above, the endpoint and the model (public'
+    Write-Output '     template: issues/1322). Keep concurrency down meanwhile - the same'
+    Write-Output '     pattern re-flags a fresh IP within hours.'
+}
 if ($exhaustedTotal -gt 0 -or $retriesTotal -gt 0) {
     Write-Output ('   Start Plan admission throttling found: ' + $retriesTotal + ' refused admission retry(ies), ' + $exhaustedTotal + ' exhausted recovery loop(s), ' + $filesScanned + ' log file(s) scanned.')
     if ($ProviderCodes.Count -gt 0) {
@@ -287,7 +379,7 @@ if ($exhaustedTotal -gt 0 -or $retriesTotal -gt 0) {
     Write-Output '   Mitigations: stagger heavy parallel work off the burst hours above and'
     Write-Output '   keep fewer instances during peaks - every clone is still a Start Plan'
     Write-Output '   account behind the same admission control.'
-} else {
+} elseif ($riskTotal -eq 0) {
     Write-Output ('   no Start Plan throttling in the scanned window (last ' + $Days + ' day(s)).')
     Write-Output '   If the UI still shows "Reconnecting x/10" right now: it may recover on'
     Write-Output '   its own (the loop retries 11 times), or the failure has a different'

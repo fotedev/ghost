@@ -197,7 +197,9 @@ Never: fail the clone over icons; silently guess; leave a broken
       icons and, where the app supports it, the `<App> <Color>` window
       titles); the technical instance key (c1..cN) stays the `-Instance`
       value and the pre-rename names are cleaned up by the installer on
-      every run.
+      every run. The clone DIR names sit on the frozen side of that line:
+      they are plumbing (ZCode Second rule) and are never part of a display
+      unification — document them in the suite's alias map instead.
 - [ ] Env levers FIRST; CLI flags only as a second layer (ZCode overwrites
       `--user-data-dir` via `app.setPath` — EC-D02).
 - [ ] Port plan table: per-instance preferred ports spaced beyond the drift

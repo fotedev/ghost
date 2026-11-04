@@ -249,6 +249,17 @@ if ($out -notmatch '\[10\].*Import chats to clones') { $failures += 'U: AutoClaw
 if ($out -notmatch '\[11\].*Clone status')           { $failures += 'U: AutoClaw2 [11] Clone status not rendered' }
 if ($out -notmatch '\[12\].*Remove clone shortcuts') { $failures += 'U: AutoClaw2 [12] Remove shortcuts not rendered' }
 
+# T) System & GHOST Maintenance submenu (main [3]): renders clean incl. the
+#    MCP registry sync row (2026-11-04, gid 77); invalid chain id -> one
+#    legit Unknown task
+$out = Invoke-Scenario 'T_maint_render' @('3', '0', '0')
+if ($out -match 'Unknown task')                 { $failures += 'T: Unknown task on Maintenance submenu render' }
+if ($out -notmatch '\[ 3\].*Spoof WMI')         { $failures += 'T: Maintenance [3] WMI row not rendered' }
+if ($out -notmatch '\[ 4\].*Sync MCP registry') { $failures += 'T: Maintenance [4] MCP registry row not rendered' }
+$out = Invoke-Scenario 'T_maint_invalid' @('3 99', '0', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "99"')).Count
+if ($hits -ne 1)                                { $failures += "T: expected 1 Unknown task from Maintenance chain, got $hits" }
+
 if ($failures.Count -gt 0) {
     Write-Output 'HARNESS FAIL:'
     $failures | ForEach-Object { Write-Output "  - $_" }

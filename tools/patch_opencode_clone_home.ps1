@@ -51,8 +51,14 @@ $ErrorActionPreference = "Stop"
 # v3 (2026-11-01): re-derived for the 2.2.5.0 bundle (the updater replaced
 # app.asar wholesale on 2026-10-31; the v2 clone-home byte anchor - the 2.0.32
 # `isPackaged?void 0:...` ternary tail - has zero sites in the new bundle).
-$script:EngineVersion = 3
-$script:NpxExe = $null
+# v4 (2026-11-03): asar surgery via tools/asar_surgery.mjs - the extract/repack
+#     pipeline (npx extract to %TEMP%, full repack, one npx spawn per
+#     patched-file verify) is replaced by one node process: ranged reads of
+#     only the text entries, in-memory transforms, node --check in-engine,
+#     single-pass candidate rebuild + full header/region/content verify. The
+#     sidecar app.asar.unpacked is never touched (swap runs with
+#     -SkipUnpackedSwap). Patch anchors and output bytes unchanged from v3.
+$script:EngineVersion = 4
 function Resolve-OpenCodeInstallDir {
   param([string]$Override)
   $candidates = @()
@@ -136,31 +142,53 @@ function Find-OpenCodeTool {
   return $cmd.Source
 }
 
-function Invoke-OpenCodeAsar {
-  param([string[]]$NpxArgs)
-  & $script:NpxExe @NpxArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw ("asar command failed (exit {0}): npx {1}" -f $LASTEXITCODE, ($NpxArgs -join " "))
+function Assert-OpenCodeDiskFreeFor {
+  # Preflight for the big sequential writes (backup copy, candidate asar,
+  # restore staging): abort cleanly BEFORE anything is written when the
+  # target volume is short. Skips silently when the drive cannot be queried
+  # (not ready / unusual path) - never block the patch on a measurement.
+  # RequiredBytes should carry margin (callers pass ~1.25x the asar size:
+  # the candidate can be slightly LARGER than the source because patched
+  # content is appended while the original bytes stay in place).
+  param([string]$TargetPath, [long]$RequiredBytes, [string]$Purpose)
+  $free = $null
+  $root = $null
+  try {
+    $root = (Split-Path -Qualifier $TargetPath) + "\"
+    $drive = New-Object System.IO.DriveInfo($root)
+    if ($drive.IsReady) { $free = $drive.AvailableFreeSpace }
+  } catch { $free = $null }
+  if ($null -ne $free -and $free -lt $RequiredBytes) {
+    throw ("Not enough free disk space for {0}: {1:N0} MB free on {2}, need ~{3:N0} MB. Free up space and re-run - nothing was written yet." -f `
+      $Purpose, ($free / 1MB), $root, ($RequiredBytes / 1MB))
   }
 }
 
-function Get-OpenCodeRelPaths {
-  param([string]$Root)
-  $full = (Resolve-Path $Root).Path.TrimEnd("\")
-  $len = $full.Length + 1
-  $set = New-Object "System.Collections.Generic.HashSet[string]"
-  Get-ChildItem -LiteralPath $full -Recurse -File | ForEach-Object {
-    [void]$set.Add($_.FullName.Substring($len).Replace("\", "/"))
+function Test-OpenCodeSwapRetryableException {
+  # True when a swap failure is worth retrying: plain IO errors (sharing
+  # violations, briefly locked files) AND Access-denied - antivirus commonly
+  # throws either while scanning a just-written file. Cmdlets can wrap the
+  # real exception, so the InnerException chain is walked too.
+  param($ErrorRecord)
+  $ex = $ErrorRecord.Exception
+  while ($ex) {
+    if ($ex -is [System.IO.IOException] -or $ex -is [System.UnauthorizedAccessException]) { return $true }
+    $ex = $ex.InnerException
   }
-  return $set
+  return $false
 }
+
 function Invoke-OpenCodeAsarSwap {
+  # -SkipUnpackedSwap (engine v4 asar surgery): the candidate has no sidecar
+  # because surgery never touches app.asar.unpacked - the whole unpacked-dir
+  # swap/keep-verify block is skipped and the live sidecar stays in place.
   param(
     [string]$ResourcesDir,
     [string]$CandidateAsar,
     [string]$CandidateUnpacked,
     [long]$MinAsarBytes,
-    [string]$BackupDir
+    [string]$BackupDir,
+    [switch]$SkipUnpackedSwap
   )
   $asar = Join-Path $ResourcesDir "app.asar"
   $unpacked = Join-Path $ResourcesDir "app.asar.unpacked"
@@ -171,11 +199,32 @@ function Invoke-OpenCodeAsarSwap {
   # but WRITE access may still be shared - then an in-place overwrite of the
   # live file is used, allowed ONLY with a verified pristine backup on disk
   # (the fallback never runs backup-less; the backup is the rollback).
+  # Before the fallback engages, the swap is retried up to 6 times (300 ms
+  # apart): antivirus scanning the freshly written ~340 MB candidate holds it
+  # only briefly, so the plain path usually succeeds on retry 2-3.
   try {
-    Remove-Item $asar -Force
-    Move-Item $CandidateAsar $asar
+    $swapDone = $false
+    for ($swapTry = 1; $swapTry -le 6; $swapTry++) {
+      try {
+        if (Test-Path $asar) { Remove-Item $asar -Force -ErrorAction Stop }
+        Move-Item $CandidateAsar $asar -ErrorAction Stop
+        $swapDone = $true
+        break
+      } catch {
+        if (-not (Test-OpenCodeSwapRetryableException $_)) { throw }
+        if ($swapTry -lt 6) {
+          Write-Host ("      app.asar swap blocked (likely AV scanning the fresh candidate) - retry {0}/6 in 300 ms..." -f $swapTry)
+          Start-Sleep -Milliseconds 300
+        }
+      }
+    }
+    if (-not $swapDone) {
+      # Re-throw as IOException so the fallback dispatch below runs (the
+      # persistent-lock case the in-place overwrite was built for).
+      throw (New-Object System.IO.IOException("app.asar swap still blocked after 6 retries (persistent file lock)"))
+    }
   } catch {
-    if ($_.Exception -isnot [System.IO.IOException]) { throw }
+    if (-not (Test-OpenCodeSwapRetryableException $_)) { throw }
     if (-not (Test-Path $asar)) {
       # rare: delete succeeded, the move did not - retry the plain move
       Move-Item $CandidateAsar $asar
@@ -203,33 +252,44 @@ function Invoke-OpenCodeAsarSwap {
 
   # unpacked dir swap; if the ORIGINAL is locked too, keeping it is correct
   # (this engine changes no unpacked-file bytes) - verify equality instead.
+  # -SkipUnpackedSwap bypasses the whole block: surgery leaves the sidecar
+  # byte-identical, and renaming it away would only add a failure surface.
   $oldUnpacked = Join-Path $ResourcesDir "app.asar.unpacked.old"
   $unpackedKept = $false
-  if (Test-Path $CandidateUnpacked) {
-    try {
-      if (Test-Path $oldUnpacked) { Remove-Item $oldUnpacked -Recurse -Force }
-      if (Test-Path $unpacked) { Rename-Item $unpacked "app.asar.unpacked.old" }
-      Move-Item $CandidateUnpacked $unpacked
-      Remove-Item $oldUnpacked -Recurse -Force -ErrorAction SilentlyContinue
-    } catch {
-      if ($_.Exception -isnot [System.IO.IOException]) { throw }
-      if (-not (Test-Path $unpacked)) { throw }
-      $unpackedKept = $true
-      $orig = Get-ChildItem -LiteralPath $CandidateUnpacked -Recurse -File
-      foreach ($f in $orig) {
-        $rel = $f.FullName.Substring($CandidateUnpacked.Length).TrimStart("\")
-        $live = Join-Path $unpacked $rel
-        if (-not (Test-Path $live)) { throw "unpacked keep-verify FAILED: $rel missing from the live unpacked dir" }
-        if ((Get-Item $live).Length -ne $f.Length) { throw "unpacked keep-verify FAILED: $rel size mismatch" }
+  if (-not $SkipUnpackedSwap) {
+    if (Test-Path $CandidateUnpacked) {
+      try {
+        if (Test-Path $oldUnpacked) { Remove-Item $oldUnpacked -Recurse -Force }
+        if (Test-Path $unpacked) { Rename-Item $unpacked "app.asar.unpacked.old" }
+        Move-Item $CandidateUnpacked $unpacked
+        Remove-Item $oldUnpacked -Recurse -Force -ErrorAction SilentlyContinue
+      } catch {
+        if ($_.Exception -isnot [System.IO.IOException]) { throw }
+        if (-not (Test-Path $unpacked)) { throw }
+        $unpackedKept = $true
+        $orig = Get-ChildItem -LiteralPath $CandidateUnpacked -Recurse -File
+        foreach ($f in $orig) {
+          $rel = $f.FullName.Substring($CandidateUnpacked.Length).TrimStart("\")
+          $live = Join-Path $unpacked $rel
+          if (-not (Test-Path $live)) { throw "unpacked keep-verify FAILED: $rel missing from the live unpacked dir" }
+          if ((Get-Item $live).Length -ne $f.Length) { throw "unpacked keep-verify FAILED: $rel size mismatch" }
+        }
+        Remove-Item $CandidateUnpacked -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "      unpacked dir locked too - original kept (engine changes no unpacked bytes; $($orig.Count) files size-verified)"
       }
-      Remove-Item $CandidateUnpacked -Recurse -Force -ErrorAction SilentlyContinue
-      Write-Host "      unpacked dir locked too - original kept (engine changes no unpacked bytes; $($orig.Count) files size-verified)"
+    } elseif (-not (Test-Path $unpacked)) {
+      New-Item -ItemType Directory -Path $unpacked -Force | Out-Null
     }
-  } elseif (-not (Test-Path $unpacked)) {
-    New-Item -ItemType Directory -Path $unpacked -Force | Out-Null
   }
 
-  if (-not (Test-Path $asar) -or -not (Test-Path $unpacked)) { throw "post-swap verify FAILED: targets missing" }
+  if (-not $SkipUnpackedSwap) {
+    if (-not (Test-Path $asar) -or -not (Test-Path $unpacked)) { throw "post-swap verify FAILED: targets missing" }
+  } else {
+    if (-not (Test-Path $asar)) { throw "post-swap verify FAILED: app.asar missing" }
+    if (-not (Test-Path $unpacked)) {
+      Write-Warning "post-swap note: app.asar.unpacked is absent - surgery never touches the sidecar, so it was already absent before this run."
+    }
+  }
   if ((Get-Item $asar).Length -lt $MinAsarBytes) {
     throw "post-swap verify FAILED: app.asar suspiciously small. Run with -Restore."
   }
@@ -248,7 +308,6 @@ function Copy-OpenCodeBackupToStaging {
 }
 
 $NodeExe = Find-OpenCodeTool "node" "node not found on PATH (needed to run the patch engine)."
-$script:NpxExe = Find-OpenCodeTool "npx.cmd" "npx not found on PATH (needed for @electron/asar)."
 $OcInstall = Resolve-OpenCodeInstallDir -Override $InstallDir
 $OcResources = Join-Path $OcInstall "resources"
 $OcAsar = Join-Path $OcResources "app.asar"
@@ -265,8 +324,21 @@ if ($Restore) {
     Sort-Object Name -Descending | Where-Object { Test-Path (Join-Path $_.FullName "app.asar") } |
     Select-Object -First 1
   if (-not $backup) { throw "No backup found under $OcBackups - nothing to restore." }
-  $restoreFloor = [long]([IO.File]::ReadAllBytes((Join-Path $backup.FullName "app.asar")).Length / 2)
+  $backupLen = (Get-Item (Join-Path $backup.FullName "app.asar")).Length
+  $restoreFloor = [long]($backupLen / 2)
   Write-Host "[1/2] Restoring app.asar + app.asar.unpacked from $($backup.Name) (staged copy)"
+  # Peak-disk preflight for -Restore: the staged copy (~1.25x) lands in
+  # %TEMP%; the swap then moves it into resources - a pure rename when the
+  # volumes match, but a cross-volume move-in copy (~1.0x) on the install
+  # volume when they differ.
+  $OcTempRoot = (Split-Path -Qualifier $env:TEMP) + "\"
+  $OcInstallRoot = (Split-Path -Qualifier $OcResources) + "\"
+  if ($OcTempRoot -ieq $OcInstallRoot) {
+    Assert-OpenCodeDiskFreeFor -TargetPath $env:TEMP -RequiredBytes ([long]($backupLen * 1.3)) -Purpose "the -Restore staged copy"
+  } else {
+    Assert-OpenCodeDiskFreeFor -TargetPath $env:TEMP -RequiredBytes ([long]($backupLen * 1.3)) -Purpose "the -Restore staged copy (temp)"
+    Assert-OpenCodeDiskFreeFor -TargetPath $OcResources -RequiredBytes ([long]($backupLen * 1.1)) -Purpose "the -Restore move-in copy (install volume)"
+  }
   $stage = Copy-OpenCodeBackupToStaging -BackupDir $backup.FullName
   try {
     Invoke-OpenCodeAsarSwap -ResourcesDir $OcResources `
@@ -335,6 +407,9 @@ Assert-OpenCodeClosed -InstallPath $OcInstall
 
 $OcStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $OcUnpacked = Join-Path $OcResources "app.asar.unpacked"
+$OcAsarLen = (Get-Item $OcAsar).Length
+# Total wall clock for the mutating part (excludes -WaitForClose polling).
+$OcSwTotal = [System.Diagnostics.Stopwatch]::StartNew()
 # Backup selection: a re-patch of a STILL-PATCHED tree (current OR old engine)
 # keeps pointing at the ORIGINAL backup so -Restore returns to the pristine
 # asar. An update-wiped tree is a NEW app version - it gets a fresh timestamped
@@ -345,51 +420,70 @@ $OcReuseBackup = $false
 if ($OcCorePatched -and $existingMarker -and $existingMarker.backupDir -and (Test-Path (Join-Path $existingMarker.backupDir "app.asar"))) {
   $OcReuseBackup = $true
   $OcBackupDir = $existingMarker.backupDir
-  Write-Host "[1/7] Reusing original backup at $OcBackupDir"
+  Write-Host "[1/5] Reusing original backup at $OcBackupDir"
 }
 if (-not $OcReuseBackup) {
   if ($OcCorePatched) { Write-Host "WARNING: patched tree but no usable marker backup - the new backup captures the CURRENT (patched) asar; -Restore will return here, not to the vendor asar." }
-  Write-Host "[1/7] Backup to $OcBackupDir"
+  Write-Host "[1/5] Backup to $OcBackupDir"
+  # Peak-disk preflight (single check, before anything is written). The peak
+  # has TWO coexisting files - the backup copy and the engine's candidate:
+  #   - install volume == %TEMP% volume: backup (1.25x) + candidate (1.25x)
+  #     coexist and the swap is a pure rename -> require ~2.6x in total;
+  #   - different volumes: the install volume holds the backup (1.25x) PLUS
+  #     the cross-volume candidate move-in copy (~1.0x) at swap time -> ~2.3x
+  #     there, and the candidate alone (~1.3x) on the TEMP volume.
+  $OcTempRoot = (Split-Path -Qualifier $env:TEMP) + "\"
+  $OcInstallRoot = (Split-Path -Qualifier $OcBackupDir) + "\"
+  if ($OcTempRoot -ieq $OcInstallRoot) {
+    Assert-OpenCodeDiskFreeFor -TargetPath $OcBackupDir -RequiredBytes ([long]($OcAsarLen * 2.6)) -Purpose "backup + patched candidate (same volume as temp)"
+  } else {
+    Assert-OpenCodeDiskFreeFor -TargetPath $OcBackupDir -RequiredBytes ([long]($OcAsarLen * 2.3)) -Purpose "backup + candidate swap-in copy (install volume)"
+    Assert-OpenCodeDiskFreeFor -TargetPath $env:TEMP -RequiredBytes ([long]($OcAsarLen * 1.3)) -Purpose "the patched candidate asar (temp)"
+  }
+  $OcSwBackup = [System.Diagnostics.Stopwatch]::StartNew()
   New-Item -ItemType Directory -Path $OcBackupDir -Force | Out-Null
   Copy-Item $OcAsar (Join-Path $OcBackupDir "app.asar")
   if (Test-Path $OcUnpacked) {
     Copy-Item $OcUnpacked (Join-Path $OcBackupDir "app.asar.unpacked") -Recurse
   }
   if (-not (Test-Path (Join-Path $OcBackupDir "app.asar"))) { throw "backup verify FAILED: app.asar not copied" }
+  $OcSwBackup.Stop()
+  Write-Host ("      backup done in {0:N1}s" -f $OcSwBackup.Elapsed.TotalSeconds)
 }
 
 
 $OcWork = Join-Path $env:TEMP ("opencode-clone-home-patch-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
-$OcExtracted = Join-Path $OcWork "extracted"
 $OcCandidate = Join-Path $OcWork "app.asar.candidate"
-$OcCandidateUnpacked = "$OcCandidate.unpacked"
+$OcChecksDir = Join-Path $OcWork "checks"
 
 try {
   New-Item -ItemType Directory -Path $OcWork -Force | Out-Null
   # A rebuild of an ALREADY-PATCHED tree (engine upgrade via the marker, or
-  # -Force) must extract the PRISTINE backup, never the live asar: the engine
-  # treats already-patched anchors as done, so extracting the live (already-
+  # -Force) must read the PRISTINE backup, never the live asar: the engine
+  # treats already-patched anchors as done, so reading the live (already-
   # patched) file would keep the OLD injected code forever (caught live
   # 2026-10-24: the v1->v2 upgrade extracted the live tree, the engine
   # reported -1/-1 and the post-swap probe failed). After an app update the
-  # live asar is the new pristine version and must be the extract source (the
+  # live asar is the new pristine version and must be the surgery source (the
   # backup would roll the app back a version).
   $extractSource = $OcAsar
   if ($OcCorePatched -and $existingMarker -and $existingMarker.backupDir) {
     $backupAsar = Join-Path $existingMarker.backupDir "app.asar"
     if (Test-Path $backupAsar) {
       $extractSource = $backupAsar
-      Write-Host "[2/7] Extracting PRISTINE backup asar (live file is already engine-patched)..."
+      Write-Host "[2/5] Rebuilding from the PRISTINE backup asar (live file is already engine-patched)..."
     } else {
-      Write-Host "WARNING: marker's original backup is missing - extracting the live (patched) asar; the engine's done-anchors will skip already-patched sites."
+      Write-Host "WARNING: marker's original backup is missing - reading the live (patched) asar; the engine's done-anchors will skip already-patched sites."
     }
   }
-  if ($extractSource -eq $OcAsar) {
-    Write-Host "[2/7] Extracting app.asar (large file - takes a minute)..."
-  }
-  Invoke-OpenCodeAsar @("--yes", "@electron/asar", "extract", $extractSource, $OcExtracted)
-  Write-Host "[3/7] Running patch engine (clone-home + clone-identity)..."
-  $engineOut = & $NodeExe $OcEngine $OcExtracted
+
+  # [2/5] asar surgery (engine v4): ranged reads of only the text entries,
+  # in-memory transforms, node --check in-engine, single-pass candidate
+  # rebuild + full header/region/content verify. No extract-to-disk, no
+  # repack, no npx - one node process, a few seconds.
+  # (Candidate disk space was covered by the combined peak preflight above.)
+  Write-Host "[2/5] Patching asar in memory + rebuilding candidate (asar surgery)..."
+  $engineOut = & $NodeExe $OcEngine $extractSource $OcCandidate $OcChecksDir
   $engineJson = $null
   try { $engineJson = ($engineOut -join "`n") | ConvertFrom-Json } catch {
     throw ("patch engine returned invalid JSON: {0}" -f ($engineOut -join "`n"))
@@ -399,7 +493,7 @@ try {
   }
   if ($OcCorePatched -and $extractSource -ne $OcAsar) {
     # Pristine-backup rebuild: BOTH families must have applied fresh. All-done
-    # (-1) results here mean the extract source was not actually pristine.
+    # (-1) results here mean the surgery source was not actually pristine.
     if (($engineJson.totals.'clone-home' -eq 0) -and ($engineJson.totals.'clone-identity' -eq 0)) {
       throw "engine reported no fresh changes on a pristine-backup rebuild - the backup is not pristine. Investigate the backups before retrying."
     }
@@ -411,61 +505,17 @@ try {
     $countsText = ($counts.PSObject.Properties | ForEach-Object { "{0}={1}" -f $_.Name, $_.Value }) -join " "
     Write-Host ("      {0}: {1}" -f $file, $countsText)
   }
-  foreach ($r in $engineJson.results) {
-    if (-not $r.appliedMarkers -or @($r.appliedMarkers).Count -eq 0) { continue }
-    $patchedFile = Join-Path $OcExtracted ($r.file -replace "/", "\")
-    $content = [IO.File]::ReadAllText($patchedFile)
-    foreach ($marker in $r.appliedMarkers) {
-      if (-not $content.Contains($marker)) {
-        throw ("patch verify FAILED after write: marker '{0}' missing in {1}" -f $marker, $r.file)
-      }
-    }
+  if ($engineJson.timings) {
+    Write-Host ("      engine: patch {0}ms, node --check {1}ms, rebuild {2}ms, verify {3}ms" -f `
+      $engineJson.timings.readPatchMs, $engineJson.timings.syntaxMs, $engineJson.timings.rebuildMs, $engineJson.timings.verifyMs)
   }
-  foreach ($r in $engineJson.results) {
-    if ($r.file -notmatch "\.(js|cjs|mjs)$") { continue }
-    $syntaxFile = Join-Path $OcExtracted ($r.file -replace "/", "\")
-    $checkOut = cmd /c "`"$NodeExe`" --check `"$syntaxFile`" 2>&1" | Out-String
-    if ($LASTEXITCODE -ne 0) {
-      throw ("patch verify FAILED: node --check rejected {0}`n{1}" -f $r.file, $checkOut.Trim())
-    }
-    Write-Host ("      {0}: node --check OK" -f $r.file)
-  }
-  Write-Host "[4/7] Packing candidate asar..."
-  $unpackGlobs = New-Object "System.Collections.Generic.List[string]"
-  $unpackGlobs.Add("*.{node,dll,dylib,exe}")
-  if (Test-Path $OcUnpacked) { $null = Get-OpenCodeRelPaths -Root $OcUnpacked }
-  for ($try = 1; $try -le 4; $try++) {
-    $packArgs = @("--yes", "@electron/asar", "pack", $OcExtracted, $OcCandidate)
-    foreach ($g in $unpackGlobs) { $packArgs += "--unpack"; $packArgs += $g }
-    Invoke-OpenCodeAsar $packArgs
-    if (-not (Test-Path $OcCandidate)) { throw "repack FAILED: candidate not written" }
-    break
-  }
-  Write-Host "[5/7] Verifying candidate asar contents..."
-  $OcVerify = Join-Path $OcWork "verify"
-  foreach ($r in $engineJson.results) {
-    if (-not $r.appliedMarkers -or @($r.appliedMarkers).Count -eq 0) { continue }
-    New-Item -ItemType Directory -Path $OcVerify -Force | Out-Null
-    Get-ChildItem -LiteralPath $OcVerify -Recurse -File -ErrorAction SilentlyContinue | Remove-Item -Force
-    $relWin = $r.file -replace "/", "\"
-    Push-Location $OcVerify
-    try {
-      Invoke-OpenCodeAsar @("--yes", "@electron/asar", "extract-file", $OcCandidate, $relWin)
-    } finally { Pop-Location }
-    $verifyFile = Get-ChildItem -LiteralPath $OcVerify -Recurse -File |
-      Where-Object { $_.Name -eq (Split-Path -Leaf $relWin) } | Select-Object -First 1
-    if (-not $verifyFile) { throw "patch verify FAILED: could not extract $($r.file) from candidate" }
-    $vc = [IO.File]::ReadAllText($verifyFile.FullName)
-    foreach ($marker in $r.appliedMarkers) {
-      if (-not $vc.Contains($marker)) {
-        throw ("patch verify FAILED inside candidate asar: marker '{0}' missing in {1}" -f $marker, $r.file)
-      }
-    }
-    Write-Host ("      {0}: markers verified" -f $r.file)
-  }
-  Write-Host "[6/7] Swapping patched asar into install..."
+
+  Write-Host "[3/5] Swapping patched asar into install..."
   $patchFloor = [long]((Get-Item $OcAsar).Length / 2)
-  Invoke-OpenCodeAsarSwap -ResourcesDir $OcResources -CandidateAsar $OcCandidate -CandidateUnpacked $OcCandidateUnpacked -MinAsarBytes $patchFloor -BackupDir $OcBackupDir
+  $OcSwSwap = [System.Diagnostics.Stopwatch]::StartNew()
+  Invoke-OpenCodeAsarSwap -ResourcesDir $OcResources -CandidateAsar $OcCandidate -MinAsarBytes $patchFloor -BackupDir $OcBackupDir -SkipUnpackedSwap
+  $OcSwSwap.Stop()
+  Write-Host ("      swap done in {0:N1}s" -f $OcSwSwap.Elapsed.TotalSeconds)
   # verify-after-swap: the live file must carry every signature (covers the
   # in-place fallback path as well as the plain delete+move).
   $SwapProbeOut = & $NodeExe -e "const fs=require('fs');try{const b=fs.readFileSync(process.argv[1]);const need=['__opencodeCloneHome','__opencodeCloneIdentity','--opencode-clone-home','--opencode-clone-id'];const missing=need.filter(s=>!b.includes(s));if(missing.length){console.log('MISSING '+missing.join(','));process.exit(1)}console.log('OK all-present');process.exit(0)}catch(e){console.error('PROBE_ERROR '+String((e&&e.message)||e));process.exit(3)}" $OcAsar
@@ -474,7 +524,7 @@ try {
     throw ("post-swap verify FAILED: signatures not present in the live asar ({0}) - run with -Restore." -f $SwapProbeText)
   }
   Write-Host "      live asar carries all patch signatures."
-  Write-Host "[7/7] Writing marker..."
+  Write-Host "[4/5] Writing marker..."
   $marker = [ordered]@{
     appliedAt    = (Get-Date -Format "o")
     patchVersion = [int]$engineJson.engineVersion
@@ -482,9 +532,12 @@ try {
     backupDir    = $OcBackupDir
     patchedFiles = @($engineJson.results | ForEach-Object { $_.file })
     totals       = $engineJson.totals
+    timings      = $engineJson.timings
   }
   $marker | ConvertTo-Json -Depth 4 | Set-Content -Path $OcMarker -Encoding UTF8
   if (-not (Test-Path $OcMarker)) { throw "marker verify FAILED: not written" }
+  $OcSwTotal.Stop()
+  Write-Host ("      marker written - patch completed in {0:N1}s total" -f $OcSwTotal.Elapsed.TotalSeconds)
 } finally {
   if (Test-Path $OcWork) { Remove-Item $OcWork -Recurse -Force -ErrorAction SilentlyContinue }
 }
