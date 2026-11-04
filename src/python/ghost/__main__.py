@@ -7,6 +7,12 @@ bootstrap. Subcommands map 1:1 onto the PowerShell bridges:
   chat-check <mode> <db> [tasks_index]       refresh_zcode_second_chats bridge
   json-patch <path> <updates_b64>            Set-JsonIdentity twin (future)
   identity                                   New-IdentitySet one-shot
+  ac2-inventory / ac2-mcp-plan / ac2-mcp-apply
+  ac2-chat-inventory / ac2-chat-import / ac2-chat-revert
+                                             AutoClaw2 suite bridges
+                                             (tools/sync_autoclaw2_mcp.ps1,
+                                              tools/sync_autoclaw2_chats.ps1;
+                                              see ghost/autoclaw2.py)
 
 Print contracts are consumed by PowerShell (ConvertFrom-Json / line
 matching) -- see ghost/sqlite_keys.py docstrings before changing output.
@@ -19,11 +25,50 @@ import base64
 import json
 import sys
 
-from ghost import audit, backup, filesweep, identity, json_patch, restore, sqlite_keys, winstore
+from ghost import audit, autoclaw2, backup, filesweep, identity, json_patch, restore, sqlite_keys, winstore
 
 
 def _decode_updates(b64):
     return json.loads(base64.b64decode(b64).decode("utf-8"))
+
+
+def _run_ac2(fn, args):
+    """Shared ac2-* bridge: base64 JSON payload in, JSON verdict out.
+    Refusal -> JSON on stdout + exit 2 (a gate, not a crash); anything
+    else -> exception path (stderr + exit 1) from main()."""
+    payload = _decode_updates(args.payload_b64) if getattr(args, "payload_b64", None) else {}
+    try:
+        result = fn(payload)
+    except autoclaw2.Refusal as refusal:
+        print(json.dumps(refusal.as_dict(), ensure_ascii=False))
+        return 2
+    print(json.dumps(result, ensure_ascii=False))
+    ok = result.get("ok", True) if isinstance(result, dict) else True
+    return 0 if ok else 1
+
+
+def _cmd_ac2_inventory(args):
+    return _run_ac2(autoclaw2.profile_inventory, args)
+
+
+def _cmd_ac2_mcp_plan(args):
+    return _run_ac2(autoclaw2.mcp_plan, args)
+
+
+def _cmd_ac2_mcp_apply(args):
+    return _run_ac2(autoclaw2.mcp_apply, args)
+
+
+def _cmd_ac2_chat_inventory(args):
+    return _run_ac2(autoclaw2.chat_inventory_for_profile, args)
+
+
+def _cmd_ac2_chat_import(args):
+    return _run_ac2(autoclaw2.chat_import, args)
+
+
+def _cmd_ac2_chat_revert(args):
+    return _run_ac2(autoclaw2.chat_revert, args)
 
 
 def _cmd_sqlite_update(args):
@@ -332,6 +377,58 @@ def build_parser():
                    help='base64 of {"key": "a.b", "value": ..., '
                         '"skip_if_empty": false}')
     p.set_defaults(func=_cmd_json_set)
+
+    # ---- AutoClaw2 (zwork) suite: docs/AUTOCLAW2_SYNC_SPEC.md -------------
+    # All six take ONE base64 JSON payload (PowerShell 5.1 native-arg
+    # quoting is bypassed entirely, same contract as the bridges above).
+    # Exit codes: 0 ok, 1 failed verdict, 2 refused by a gate.
+    p = sub.add_parser(
+        "ac2-inventory",
+        help="read-only AutoClaw2 suite inventory (accounts, schema, "
+             "counts)")
+    p.add_argument("payload_b64", nargs="?", default=None,
+                   help='base64 of {"targets": ["c1", ...]}')
+    p.set_defaults(func=_cmd_ac2_inventory)
+
+    p = sub.add_parser(
+        "ac2-mcp-plan",
+        help="plan MCP (connected-source) sync; writes nothing")
+    p.add_argument("payload_b64",
+                   help='base64 of {"manifest_path": ..., "targets": [...], '
+                        '"from": "master|primary", "policy": "default|all"}')
+    p.set_defaults(func=_cmd_ac2_mcp_plan)
+
+    p = sub.add_parser(
+        "ac2-mcp-apply",
+        help="apply MCP sync per profile (one transaction, backup + "
+             "verify-after); dry_run flag in the payload")
+    p.add_argument("payload_b64",
+                   help='base64 of the ac2-mcp-plan payload + '
+                        '"dry_run": true|false')
+    p.set_defaults(func=_cmd_ac2_mcp_apply)
+
+    p = sub.add_parser(
+        "ac2-chat-inventory",
+        help="read-only chat inventory for one profile")
+    p.add_argument("payload_b64",
+                   help='base64 of {"profile": "c1"}')
+    p.set_defaults(func=_cmd_ac2_chat_inventory)
+
+    p = sub.add_parser(
+        "ac2-chat-import",
+        help="copy one session into a target profile as a NEW local "
+             "session (gated; dry_run supported)")
+    p.add_argument("payload_b64",
+                   help='base64 of {"source", "target", "session_id", '
+                        '"dry_run", "title_tag", "max_unresolved_pct"}')
+    p.set_defaults(func=_cmd_ac2_chat_import)
+
+    p = sub.add_parser(
+        "ac2-chat-revert",
+        help="tombstone + delete exactly one import (sidecar-driven)")
+    p.add_argument("payload_b64",
+                   help='base64 of {"target": "c1", "import_id": "..."}')
+    p.set_defaults(func=_cmd_ac2_chat_revert)
 
     return parser
 

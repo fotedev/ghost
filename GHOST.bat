@@ -207,9 +207,14 @@ call :Opt 5 "Launch Orange clone" ""
 call :Opt 6 "Launch ALL clones" "- Blue..Orange, one after another"
 call :Opt 7 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
 echo.
+call :Div "Sync + Chat Import"
+call :Opt 8 "Import MCPs to clones" "- from the central master manifest"
+call :Opt 9 "Chat inventory" "- read-only cross-profile report"
+call :Opt 10 "Import chats to clones" "- one-way Primary to clones - DB backed up first"
+echo.
 call :Div "Maintenance"
-call :Opt 8 "Clone status" "- all 5 - locks, device-id, sign-in state"
-call :Opt 9 "Remove clone shortcuts" "- Desktop + Start menu"
+call :Opt 11 "Clone status" "- all 5 - locks, device-id, sign-in state"
+call :Opt 12 "Remove clone shortcuts" "- Desktop + Start menu"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -402,7 +407,9 @@ rem Resolves an AutoClaw2 submenu-local id to its global task id and runs it.
 rem Rewired 2026-10-29 to the AutoClaw2 (zwork) suite: the v1.20 app was
 rem uninstalled from the host, so its launch/reset/patch/status items left the
 rem menu and dispatch cases 37-40 + 71 were retired; local ids 1-9 map to the
-rem reused gids 28-36. Old v1.20 map: CHANGELOG 2026-10-29.
+rem reused gids 28-36. Old v1.20 map: CHANGELOG 2026-10-29. 2026-11-04:
+rem locals 8-10 are the new Sync + Chat Import section (gids 73/75/76; the
+rem MCP watcher row is deferred and keeps gid 74), Maintenance moved to 11-12.
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=28"
 if "%~1"=="2" set "RESOLVED=29"
@@ -411,8 +418,11 @@ if "%~1"=="4" set "RESOLVED=31"
 if "%~1"=="5" set "RESOLVED=32"
 if "%~1"=="6" set "RESOLVED=33"
 if "%~1"=="7" set "RESOLVED=34"
-if "%~1"=="8" set "RESOLVED=35"
-if "%~1"=="9" set "RESOLVED=36"
+if "%~1"=="8" set "RESOLVED=73"
+if "%~1"=="9" set "RESOLVED=75"
+if "%~1"=="10" set "RESOLVED=76"
+if "%~1"=="11" set "RESOLVED=35"
+if "%~1"=="12" set "RESOLVED=36"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -458,7 +468,8 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-72; 63 unused). Unknown ids print an error. Returns to caller.
+rem Runs one task by global id (1-76; 63 unused; 74 reserved for the deferred
+rem AutoClaw2 MCP watcher). Unknown ids print an error. Returns to caller.
 if "%~1"=="1"  (call :Run "src\windows\change_device_id.ps1" & exit /b)
 if "%~1"=="2"  (call :Run "src\windows\reset_cursor.ps1" & exit /b)
 if "%~1"=="3"  (call :Run "src\windows\reset_devin.ps1" & exit /b)
@@ -529,6 +540,9 @@ if "%~1"=="69" (call :Run "tools\watch_zcode_mcp_sync.ps1" -RunOnce -ApplyLive -
 if "%~1"=="70" (call :Detached "ZCode Light Worker" "-NoProfile" "src\windows\launch_zcode_cli_light.ps1" "" "Light worker opened in a separate window - type tasks there, empty input exits." "Headless: about a quarter of the RAM of a full instance. Read the model note it prints on first run." & exit /b)
 if "%~1"=="71" (call :Detached "ZCode Clone Login" "-NoProfile" "src\windows\launch_zcode_cli_light.ps1" "-Login" "Login window opened - a browser will ask you to sign in with THIS clone's account." "One-time per clone home: it routes light workers and the T3 bridge to the Start Plan instead of the free model." & exit /b)
 if "%~1"=="72" (call :Run "tools\install_zcode_second_shortcuts.ps1" -Remove & exit /b)
+if "%~1"=="73" (call :Run "tools\sync_autoclaw2_mcp.ps1" -Target All & exit /b)
+if "%~1"=="75" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Inventory -Target All & exit /b)
+if "%~1"=="76" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Import -Apply -Target All & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
 if "%~1"=="46" (call :Detached "Cline Yellow" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)

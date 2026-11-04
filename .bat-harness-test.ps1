@@ -240,12 +240,21 @@ $out = Invoke-Scenario 'S_light_worker_render' @('2', '0', '0')
 if ($out -notmatch '\[ 7\].*Launch light headless worker') { $failures += 'S: ZCode [7] light worker not rendered' }
 if ($out -notmatch '\[28\].*Login clone account')           { $failures += 'S: ZCode [28] login helper not rendered' }
 
+# U) AutoClaw2 Sync + Chat Import rows render (2026-11-04): [8] Import MCPs,
+#    [9] Chat inventory, [10] Import chats; Maintenance shifted to [11]/[12]
+$out = Invoke-Scenario 'U_autoclaw_sync_render' @('4', '0', '0')
+if ($out -notmatch '\[ 8\].*Import MCPs to clones')  { $failures += 'U: AutoClaw2 [8] Import MCPs not rendered' }
+if ($out -notmatch '\[ 9\].*Chat inventory')         { $failures += 'U: AutoClaw2 [9] Chat inventory not rendered' }
+if ($out -notmatch '\[10\].*Import chats to clones') { $failures += 'U: AutoClaw2 [10] Import chats not rendered' }
+if ($out -notmatch '\[11\].*Clone status')           { $failures += 'U: AutoClaw2 [11] Clone status not rendered' }
+if ($out -notmatch '\[12\].*Remove clone shortcuts') { $failures += 'U: AutoClaw2 [12] Remove shortcuts not rendered' }
+
 if ($failures.Count -gt 0) {
     Write-Output 'HARNESS FAIL:'
     $failures | ForEach-Object { Write-Output "  - $_" }
     exit 1
 }
-Write-Output 'HARNESS PASS: all 19 scenarios clean'
+Write-Output 'HARNESS PASS: all scenarios clean'
 # Explicit exit: pwsh -File propagates the last native \$LASTEXITCODE, and the
 # scenarios' cmd exit code inherits GHOST.bat's `timeout` calls, which fail on
 # CI consoles (no interactive stdin) AFTER the PASS line was already printed.

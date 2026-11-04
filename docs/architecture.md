@@ -31,6 +31,8 @@ tools/
 ├── sync_zcode_assets.ps1              # Primary→clone MCP-definitions / skills / plugin-cache sync (-McpOnly is live-safe)
 ├── zcode_mcp_merge.ps1                # the pure MCP merge core, unit-tested; consumed by the sync tool + watcher
 ├── watch_zcode_mcp_sync.ps1           # resident watcher: sync_zcode_assets -McpOnly on every Primary config.json change
+├── sync_autoclaw2_mcp.ps1             # AutoClaw2 orchestrator: master manifest/Primary -> closed-clone connected sources (SQLite via the Python core)
+├── sync_autoclaw2_chats.ps1           # AutoClaw2 chat inventory + guarded one-way import + sidecar revert (closed profiles only)
 ├── patch_zcode_icon_override.ps1/.mjs # app.asar icon/accent/AUMID/bidi patch (engine v8)
 ├── install_zcode_second_shortcuts.ps1 # clone shortcuts (Desktop + Start menu)
 ├── refresh_zcode_second_chats.ps1     # cross-instance chat refresh + -Watch watcher
