@@ -4,8 +4,8 @@ Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 **`./ghost.sh`** (Linux). This page is the direct-command cheat sheet for
 scripts and CI. `GHOST.bat` groups its tasks into six submenus with
 continuous local numbering (IDE Resets [1]-[8] / ZCode Multi-Instance &
-Clones [1]-[29] / System & GHOST Maintenance [1]-[3] / AutoClaw2
-Multi-Instance & Clones [1]-[9] / Cline Multi-Instance & Clones
+Clones [1]-[29] / System & GHOST Maintenance [1]-[4] / AutoClaw2
+Multi-Instance & Clones [1]-[12] / Cline Multi-Instance & Clones
 [1]-[9] / OpenCode Multi-Instance & Clones [1]-[10]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
 from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
@@ -318,6 +318,28 @@ powershell -ExecutionPolicy Bypass -File "tools\install_autoclaw2_clone_shortcut
 powershell -ExecutionPolicy Bypass -File "tools\install_autoclaw2_clone_shortcuts.ps1" -Remove
 ```
 
+### AutoClaw2 MCP + chat sync (AutoClaw2 [8]-[10])
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_mcp.ps1"                   # [8] — apply tools\autoclaw2-mcp.master.json to closed clones (LIVE)
+powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_mcp.ps1" -Target c1 -DryRun # plan only
+powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_mcp.ps1" -RestoreBackup -Target c1  # restore the newest pre-run backup
+powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Inventory  # [9] — read-only cross-profile chat report
+powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Import -SessionId <uuid> -Target c1          # [10] dry-run plan
+powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Import -SessionId <uuid> -Target c1 -Apply   # guarded one-way copy
+powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Revert -ImportId <uuid> -Target c1                # undo one import
+```
+
+Definitions only (no credentials travel): the master manifest
+`tools\autoclaw2-mcp.master.json` is the source of truth, merge preserves
+clone-local `enabled` toggles and never deletes clone-only sources, written
+rows stay `pending` for the app to test (D5), and every write happens on a
+CLOSED profile (D7 — the launcher's pre-launch step [2b] is the primary path).
+Chat import copies a session as a NEW local session with an `[import]` title
+prefix (D11), refuses IM-bound sessions (D12), and is revertible by import id.
+Spec: `docs\AUTOCLAW2_SYNC_SPEC.md`. The live acceptance runs (A1-A7, C2-C7)
+are still gated on the supervised Phase 0 spikes.
+
 Isolation is 100% env-based and needs NO patching: `ZWORK_USER_DATA` pins
 the whole Electron userData per clone BEFORE the per-profile
 single-instance lock (N copies coexist natively), and
@@ -325,8 +347,9 @@ single-instance lock (N copies coexist natively), and
 clone ever reads a live Primary's state. The app generates a fresh
 `device\device-id.json` per profile (no identity seeding, no credential
 copying). First run per clone: ONE manual sign-in. Menu equivalents: launch
-c1/c2/c3/c4/c5 = AutoClaw2 [1]-[5]; all five = [6]; shortcuts = [7]
-(`-Remove` = [9]); status = [8].
+c1/c2/c3/c4/c5 = AutoClaw2 [1]-[5]; all five = [6]; shortcuts = [7];
+Import MCPs = [8]; chat inventory = [9]; import chats = [10]
+(`-Remove` = [12]); status = [11].
 
 ## Linux
 

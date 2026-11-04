@@ -173,6 +173,24 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     tests/zcode_mcp_merge.Tests.ps1 (clone-local enabled
                                    #     survives, clone-only servers kept, new servers inherit
                                    #     Primary enabled, Primary definitions win);
+                                   #   sync_autoclaw2_mcp.ps1 — AutoClaw2 MCP
+                                   #     orchestrator (AutoClaw2 [8] / gid 73;
+                                   #     launcher pre-launch step [2b] is the
+                                   #     primary path): applies
+                                   #     tools/autoclaw2-mcp.master.json (or
+                                   #     -From Primary) to CLOSED clone profiles'
+                                   #     connected-sources SQLite via the Python
+                                   #     core; D6 merge keeps clone-local
+                                   #     enabled toggles, backup +
+                                   #     -RestoreBackup, verify-after, JSONL
+                                   #     audit; live acceptance pending spikes;
+                                   #   sync_autoclaw2_chats.ps1 — AutoClaw2 chat
+                                   #     inventory ([9] / gid 75) + guarded
+                                   #     one-way import ([10] / gid 76) +
+                                   #     -Revert -ImportId; [import] title
+                                   #     prefix (D11), IM sessions refused
+                                   #     (D12), work_events copied with fresh
+                                   #     UUIDv4 ids, sidecar provenance;
                                    #   watch_zcode_mcp_sync.ps1 — resident MCP sync watcher
                                    #     (ZCode submenu [19] resident / [20] one-shot + live
                                    #     apply; -RunOnce, -DryRun, -IntervalSeconds, -ApplyLive,
@@ -493,7 +511,10 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   Primary, Both, ALL SIX) / Sync + Chat Refresh [17]-[23] / Watchers +
   Diagnostics [24]-[26] / Maintenance [27]-[29] (patch, login helper,
   shortcuts remove); AutoClaw2: Launch Clones [1]-[7]
-  (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9] (rewired to the AutoClaw2
+  (Blue..Orange, ALL, shortcuts) / Sync + Chat Import [8]-[10] (Import MCPs
+  gid 73, Chat inventory gid 75, Import chats gid 76 — the MCP watcher row is
+  deferred to the follow-up PR and keeps its reserved gid 74) / Maintenance
+  [11]-[12] (rewired to the AutoClaw2
   suite the same day — born display-ordered); Cline: Launch Clones [1]-[7]
   (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9]; OpenCode: Launch Clones
   [1]-[7] (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[10] (patch, status,

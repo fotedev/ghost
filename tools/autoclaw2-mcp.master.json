@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "comment": [
+    "Device-level MCP definitions for AutoClaw2 (zwork) - docs/AUTOCLAW2_SYNC_SPEC.md.",
+    "Definitions ONLY: no credentials, no tokens, no env values (names via envKeys at most).",
+    "Seeded 2026-11-04 from the ZCode Primary working set (the same servers the central",
+    "registry tools/mcp/master-mcp.json carries) - review and trim here freely; per-clone",
+    "'enabled' toggles survive every sync: toggle servers off in the app's UI and the sync",
+    "will not re-enable them. Run GHOST.bat > AutoClaw2 > [8] Import MCPs to clones",
+    "(or tools\\sync_autoclaw2_mcp.ps1); '-From Primary' reads the Primary profile instead.",
+    "Everything in '_samples' is documentation and is ignored by the loader."
+  ],
+  "defaults": {
+    "enabled": true,
+    "sourcePermission": "allowed"
+  },
+  "servers": [
+    {
+      "slug": "chrome-devtools",
+      "name": "Chrome DevTools",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--auto-connect", "--slim"],
+      "cwd": "",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": false,
+      "notes": "local stdio server, no auth"
+    },
+    {
+      "slug": "playwright",
+      "name": "Playwright",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.70"],
+      "cwd": "",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": false,
+      "notes": "local stdio server, no auth"
+    },
+    {
+      "slug": "upstash",
+      "name": "Upstash",
+      "transport": "http",
+      "endpoint": "https://mcp.upstash.com/mcp",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": false,
+      "credentialHint": "the remote endpoint handles its own OAuth per app"
+    },
+    {
+      "slug": "sentry",
+      "name": "Sentry",
+      "transport": "http",
+      "endpoint": "https://mcp.sentry.dev/mcp",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": true,
+      "credentialHint": "SENTRY_ACCESS_TOKEN header is configured per app - sign in once per clone"
+    },
+    {
+      "slug": "github",
+      "name": "GitHub (Copilot MCP)",
+      "transport": "http",
+      "endpoint": "https://api.githubcopilot.com/mcp/",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": true,
+      "credentialHint": "Authorization header is per account - sign in once per clone in the app"
+    },
+    {
+      "slug": "vercel",
+      "name": "Vercel",
+      "transport": "http",
+      "endpoint": "https://mcp.vercel.com",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": true,
+      "credentialHint": "Authorization header is per account - sign in once per clone in the app"
+    },
+    {
+      "slug": "supabase",
+      "name": "Supabase (eysuvsof)",
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+        "--project-ref",
+        "eysuvsofdluvzhlxdzkv"
+      ],
+      "cwd": "",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": true,
+      "envKeys": ["SUPABASE_ACCESS_TOKEN"],
+      "credentialHint": "SUPABASE_ACCESS_TOKEN must exist in the machine env (setx); the sync writes env keys by name only"
+    },
+    {
+      "slug": "supabase-masarx",
+      "name": "Supabase (jcufigo)",
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+        "--project-ref",
+        "jcufigozkhxazjbwhjjm"
+      ],
+      "cwd": "",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": true,
+      "envKeys": ["SUPABASE_ACCESS_TOKEN"],
+      "credentialHint": "SUPABASE_ACCESS_TOKEN must exist in the machine env (setx); the sync writes env keys by name only"
+    },
+    {
+      "slug": "cloudinary",
+      "name": "Cloudinary",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@cloudinary/asset-management-mcp", "start"],
+      "cwd": "",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": true,
+      "envKeys": ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"],
+      "credentialHint": "the three CLOUDINARY_* vars must exist in the machine env (setx)"
+    },
+    {
+      "slug": "obsidian",
+      "name": "Obsidian",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-obsidian"],
+      "cwd": "",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": true,
+      "envKeys": ["OBSIDIAN_API_KEY", "OBSIDIAN_PROTOCOL", "OBSIDIAN_HOST", "OBSIDIAN_PORT"],
+      "credentialHint": "OBSIDIAN_* vars must exist in the machine env (setx); the API key is per vault"
+    }
+  ],
+  "_samples": [
+    {
+      "slug": "filesystem",
+      "name": "Filesystem (example stdio)",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\work"],
+      "cwd": "",
+      "enabled": true,
+      "sourcePermission": "allowed",
+      "requiresCredential": false,
+      "notes": "local stdio server, no auth"
+    },
+    {
+      "slug": "remote-docs",
+      "name": "Docs gateway (example http)",
+      "transport": "http",
+      "endpoint": "https://example.invalid/mcp",
+      "enabled": true,
+      "sourcePermission": "approval_required",
+      "requiresCredential": true,
+      "credentialHint": "sign in once per clone in the app's sources UI"
+    }
+  ]
+}

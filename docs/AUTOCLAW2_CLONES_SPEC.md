@@ -129,6 +129,12 @@ READ (AUMID discovery), never written.
   per clone is by design (identity isolation), not a defect.
 - Telegram/IM polling across clones follows the one-credential-one-instance
   rule: sign clones into separate accounts/bots to avoid 409 cross-polling.
+- MCP + chat sync across the suite exists since 2026-11-04:
+  `tools/sync_autoclaw2_mcp.ps1` (device manifest `tools/autoclaw2-mcp.master.json`
+  → closed-clone connected sources) + `tools/sync_autoclaw2_chats.ps1`
+  (inventory, guarded one-way import, revert) — spec
+  `docs/AUTOCLAW2_SYNC_SPEC.md`; live acceptance is still gated on the
+  supervised Phase 0 spikes (E1-E5).
 
 ## 8. Operational rules
 

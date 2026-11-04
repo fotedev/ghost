@@ -8,6 +8,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **AutoClaw2 MCP + chat sync suite** (2026-11-04): the dead-session design
+  (docs/AUTOCLAW2_SYNC_{SPEC,PLAN,TASKS}.md) is implemented on closed profiles
+  only — `tools/autoclaw2-mcp.master.json` (device MCP manifest, definitions
+  only, seeded from the ZCode Primary working set) + `tools/sync_autoclaw2_mcp.ps1`
+  (GHOST.bat AutoClaw2 [8] / gid 73, launcher pre-launch step [2b]) writing
+  connected-sources rows via the new `src/python/ghost/autoclaw2.py` core
+  (merge preserves clone-local `enabled` toggles and never deletes; rows stay
+  `pending` for the app to test; clean backup + `-RestoreBackup`; verify-after
+  + JSONL audit), and `tools/sync_autoclaw2_chats.ps1` (AutoClaw2 [9]/[10] =
+  gids 75/76) for the read-only cross-profile chat inventory and the guarded
+  one-way history import (fresh UUIDv4 ids incl. `work_events`, `[import]`
+  title prefix, IM sessions refused, sidecar idempotency + `-Revert
+  -ImportId`). 39 unittests + lean Pester orchestrator suite + harness scenario
+  U green. Live acceptance (A1-A7 / C2-C7) stays gated on the supervised
+  Phase 0 spikes; the MCP watcher row is deferred with gid 74 reserved.
 - **ZCode clone launches persist their console output to a log** (2026-11-03):
   `launch_zcode_second_instance.ps1` appends every run to
   `tools\logs\launch_zcode_<Instance>.log` via a PowerShell transcript (one
