@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 <#
 .SYNOPSIS
   Machine-level MCP registry importer: tools\mcp\master-mcp.json -> every app's own config.
