@@ -13,8 +13,11 @@
   Primary ZCode never sets these vars, so it is untouched behaviorally.
 
   Idempotent: re-running after a patch is a no-op unless -Force. Every write is
-  verified by re-read/re-extract (no silent success). A backup of app.asar and
-  app.asar.unpacked is taken before any change; -Restore rolls back.
+  verified (no silent success). Engine v9 applies the patch set with asar
+  surgery (tools/asar_surgery.mjs) - no extract/repack; the candidate is
+  verified by header walk + full payload-region byte compare + patched-content
+  compare inside one node process. A backup of app.asar and app.asar.unpacked
+  is taken before any change; -Restore rolls back.
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\patch_zcode_icon_override.ps1
@@ -67,7 +70,23 @@ $ErrorActionPreference = "Stop"
 #     which made the v7 exact anchor find zero sites and abort the patch.
 #     Engine v8 matches both shapes; marker carries patchVersion 8 so older
 #     markers auto-upgrade on the next run.
-$script:EngineVersion = 8
+# v9 (2026-11-03): asar surgery - the extract/repack pipeline (npx @electron/asar
+#     extract of the ~340 MB/~32k-file archive to %TEMP%, up to 4 repacks in a
+#     sidecar-convergence loop, one npx spawn per patched-file verify) is
+#     replaced by tools/asar_surgery.mjs: the engine ranges-reads only the text
+#     entries, patches them in memory, and rebuilds the candidate asar in one
+#     streaming pass (untouched payload region copied byte-for-byte, patched
+#     contents appended at the tail, only patched header entries rewritten,
+#     integrity recomputed). Full verification stays: header walk + whole-region
+#     byte compare + patched-content compare, all in the single node process.
+#     v9 also fixed a pre-existing perf bug found while measuring: preload-blue's
+#     per-position regex backtracking cost ~290s across the bundle (the silent
+#     bulk of the old [3/7] step); it now uses a literal indexOf + backward
+#     receiver scan, byte-identical output (proven against the v8-patched live
+#     asar). The sidecar app.asar.unpacked is never touched by surgery, so the
+#     swap runs with -SkipUnpackedSwap and the pack-convergence machinery is
+#     gone. Patch time drops from minutes to seconds.
+$script:EngineVersion = 9
 
 function Resolve-InstallDir {
   param([string]$Override)
@@ -153,58 +172,137 @@ function Find-ToolCmd {
   return $cmd.Source
 }
 
-function Invoke-AsarCli {
-  # & npx with native PowerShell argument passing - no cmd.exe quoting pitfalls.
-  param([string[]]$NpxArgs)
-  & $script:NpxExe @NpxArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw ("asar command failed (exit {0}): npx {1}" -f $LASTEXITCODE, ($NpxArgs -join " "))
+function Assert-DiskFreeFor {
+  # Preflight for the big sequential writes (backup copy, candidate asar,
+  # restore staging): abort cleanly BEFORE anything is written when the
+  # target volume is short. Skips silently when the drive cannot be queried
+  # (not ready / unusual path) - never block the patch on a measurement.
+  # RequiredBytes should carry margin (the callers pass ~1.25x the asar size:
+  # the candidate can be slightly LARGER than the source because patched
+  # content is appended while the original bytes stay in place).
+  param([string]$TargetPath, [long]$RequiredBytes, [string]$Purpose)
+  $free = $null
+  $root = $null
+  try {
+    $root = (Split-Path -Qualifier $TargetPath) + "\"
+    $drive = New-Object System.IO.DriveInfo($root)
+    if ($drive.IsReady) { $free = $drive.AvailableFreeSpace }
+  } catch { $free = $null }
+  if ($null -ne $free -and $free -lt $RequiredBytes) {
+    throw ("Not enough free disk space for {0}: {1:N0} MB free on {2}, need ~{3:N0} MB. Free up space and re-run - nothing was written yet." -f `
+      $Purpose, ($free / 1MB), $root, ($RequiredBytes / 1MB))
   }
 }
 
-function Get-RelFilePaths {
-  param([string]$Root)
-  $full = (Resolve-Path $Root).Path.TrimEnd("\")
-  $len = $full.Length + 1
-  $set = New-Object "System.Collections.Generic.HashSet[string]"
-  Get-ChildItem -LiteralPath $full -Recurse -File | ForEach-Object {
-    [void]$set.Add($_.FullName.Substring($len).Replace("\", "/"))
+function Test-SwapRetryableException {
+  # True when a swap failure is worth retrying: plain IO errors (sharing
+  # violations, briefly locked files) AND Access-denied - antivirus commonly
+  # throws either while scanning a just-written file. Cmdlets can wrap the
+  # real exception, so the InnerException chain is walked too.
+  param($ErrorRecord)
+  $ex = $ErrorRecord.Exception
+  while ($ex) {
+    if ($ex -is [System.IO.IOException] -or $ex -is [System.UnauthorizedAccessException]) { return $true }
+    $ex = $ex.InnerException
   }
-  return $set
+  return $false
 }
 
 function Invoke-AsarSwap {
-  # Move candidate asar+unpacked into the install resources dir; rollback on failure.
+  # Move candidate asar (and, unless -SkipUnpackedSwap, the unpacked sidecar)
+  # into the install resources dir; rollback on failure.
   # MinAsarBytes: sanity floor - candidate must keep at least half the original size,
   # so a truncated/corrupted swap is refused (recover afterwards with -Restore).
+  # -SkipUnpackedSwap (engine v9 asar surgery): the candidate has no sidecar
+  # because surgery never touches app.asar.unpacked - renaming the live sidecar
+  # away would break native-module loading. The swap is asar-only; the rollback
+  # and verify mirror that (the pre-existing sidecar is only warned about if
+  # absent, since its absence cannot be caused by this swap).
   param(
     [string]$ResourcesDir,
     [string]$CandidateAsar,
     [string]$CandidateUnpacked,
     [long]$MinAsarBytes,
-    [string]$BackupAsar
+    [string]$BackupAsar,
+    [switch]$SkipUnpackedSwap
   )
   $asar = Join-Path $ResourcesDir "app.asar"
+  $oldAsar = Join-Path $ResourcesDir "app.asar.old"
   $unpacked = Join-Path $ResourcesDir "app.asar.unpacked"
   $oldUnpacked = Join-Path $ResourcesDir "app.asar.unpacked.old"
 
-  if (Test-Path $oldUnpacked) { Remove-Item $oldUnpacked -Recurse -Force }
-  if (Test-Path $unpacked) { Rename-Item $unpacked "app.asar.unpacked.old" }
-  if (-not (Test-Path $CandidateUnpacked)) {
-    New-Item -ItemType Directory -Path $unpacked -Force | Out-Null
-  } else {
-    Move-Item $CandidateUnpacked $unpacked
+  if (-not $SkipUnpackedSwap) {
+    if (Test-Path $oldUnpacked) { Remove-Item $oldUnpacked -Recurse -Force }
+    if (Test-Path $unpacked) { Rename-Item $unpacked "app.asar.unpacked.old" }
+    if (-not (Test-Path $CandidateUnpacked)) {
+      New-Item -ItemType Directory -Path $unpacked -Force | Out-Null
+    } else {
+      Move-Item $CandidateUnpacked $unpacked
+    }
   }
+  # Precondition: never start mutating without a candidate to move in.
+  if (-not (Test-Path $CandidateAsar)) { throw "candidate asar missing before swap: $CandidateAsar" }
+
   try {
-    Remove-Item $asar -Force
-    Move-Item $CandidateAsar $asar
+    # Rename-based swap - the install is never left without an app.asar:
+    #   1. rename the live asar aside to app.asar.old (same-volume rename;
+    #      the original stays recoverable in place the whole time),
+    #   2. move the candidate in (same volume = rename; cross-volume = copy,
+    #      which is why the disk preflight carries the extra ~1x term),
+    #   3. delete .old only after the move succeeded.
+    # AV-protected machines: antivirus can hold the freshly written ~340 MB
+    # candidate (or the just-renamed live file) for a few seconds - the whole
+    # rename+move sequence is retried up to 6 times, 300 ms apart; the catch
+    # below (rename .old back, then backup restore) stays the last resort.
+    if (Test-Path $oldAsar) {
+      # Leftover from a crashed earlier run; a locked one blocks the rename,
+      # so fail with a clear message instead of a confusing Rename-Item error.
+      try { Remove-Item $oldAsar -Force -ErrorAction Stop } catch {
+        throw ("app.asar.old from an earlier run is locked and cannot be cleaned - close the locking process and re-run. ({0})" -f $_.Exception.Message)
+      }
+    }
+    $swapDone = $false
+    for ($swapTry = 1; $swapTry -le 6; $swapTry++) {
+      try {
+        if ((Test-Path $asar) -and (Test-Path $oldAsar)) {
+          # partial cross-volume copy from a failed move attempt - discard it
+          Remove-Item $asar -Force -ErrorAction Stop
+        }
+        if ((Test-Path $asar) -and -not (Test-Path $oldAsar)) {
+          Rename-Item -LiteralPath $asar -NewName "app.asar.old" -ErrorAction Stop
+        }
+        Move-Item -Force $CandidateAsar $asar -ErrorAction Stop
+        $swapDone = $true
+        break
+      } catch {
+        if (-not (Test-SwapRetryableException $_)) { throw }
+        if ($swapTry -lt 6) {
+          Write-Host ("      app.asar swap blocked (likely AV scanning the fresh candidate) - retry {0}/6 in 300 ms..." -f $swapTry)
+          Start-Sleep -Milliseconds 300
+        }
+      }
+    }
+    if (-not $swapDone) { throw "app.asar swap still blocked after 6 retries - run this again (or -Restore if the install is incomplete)." }
+    # The swap itself succeeded; a still-locked .old is only wasted space, not
+    # a failure - warn and move on (the next patch run cleans it up).
+    try { Remove-Item $oldAsar -Force } catch {
+      Write-Warning ("app.asar.old could not be deleted yet (still locked) - it will be cleaned up on the next patch run: {0}" -f $_.Exception.Message)
+    }
   } catch {
-    # Roll the unpacked sidecar back first, then make sure app.asar itself
-    # exists again: a failed Move-Item after a successful Remove-Item used to
-    # leave the install with NO app.asar (hard brick until a manual -Restore;
-    # bug sweep 15 HIGH).
-    Remove-Item $unpacked -Recurse -Force
-    Rename-Item $oldUnpacked "app.asar.unpacked"
+    # Roll app.asar.old back FIRST: a failed move after a successful rename
+    # must never leave the install without an app.asar (bug sweep 15 HIGH).
+    if (-not (Test-Path $asar) -and (Test-Path $oldAsar)) {
+      try { Rename-Item -LiteralPath $oldAsar -NewName "app.asar" } catch {
+        Write-Warning ("could not rename app.asar.old back to app.asar: {0}" -f $_.Exception.Message)
+      }
+    }
+    if (-not $SkipUnpackedSwap) {
+      # Roll the unpacked sidecar back next (it was swapped before the asar),
+      # then make sure app.asar itself exists again via the backup - the last
+      # resort if the rename-back above could not run (bug sweep 15 HIGH).
+      Remove-Item $unpacked -Recurse -Force
+      Rename-Item $oldUnpacked "app.asar.unpacked"
+    }
     if (-not (Test-Path $asar)) {
       if ($BackupAsar -and (Test-Path $BackupAsar)) {
         try {
@@ -223,9 +321,16 @@ function Invoke-AsarSwap {
     }
     throw
   }
-  Remove-Item $oldUnpacked -Recurse -Force -ErrorAction SilentlyContinue
-  # verify-after swap: targets exist, asar has a plausible size
-  if (-not (Test-Path $asar) -or -not (Test-Path $unpacked)) { throw "post-swap verify FAILED: targets missing" }
+  if (-not $SkipUnpackedSwap) {
+    Remove-Item $oldUnpacked -Recurse -Force -ErrorAction SilentlyContinue
+    # verify-after swap: targets exist, asar has a plausible size
+    if (-not (Test-Path $asar) -or -not (Test-Path $unpacked)) { throw "post-swap verify FAILED: targets missing" }
+  } else {
+    if (-not (Test-Path $asar)) { throw "post-swap verify FAILED: app.asar missing" }
+    if (-not (Test-Path $unpacked)) {
+      Write-Warning ("post-swap note: app.asar.unpacked is absent - surgery never touches the sidecar, so it was already absent before this run.")
+    }
+  }
   if ((Get-Item $asar).Length -lt $MinAsarBytes) {
     throw ("post-swap verify FAILED: app.asar suspiciously small ({0:N0} < {1:N0} bytes). Run this script with -Restore." -f (Get-Item $asar).Length, $MinAsarBytes)
   }
@@ -247,7 +352,6 @@ function Copy-BackupToStaging {
 
 # ── entry ──────────────────────────────────────────────────────────────────────
 $NodeExe = Find-ToolCmd "node" "node not found on PATH (needed to run the patch engine)."
-$script:NpxExe = Find-ToolCmd "npx.cmd" "npx not found on PATH (needed for @electron/asar)."
 $Install = Resolve-InstallDir -Override $InstallDir
 $Resources = Join-Path $Install "resources"
 $Asar = Join-Path $Resources "app.asar"
@@ -277,8 +381,21 @@ if ($Restore) {
       Select-Object -First 1
   }
   if (-not $backup) { throw "No backup found under $BackupsRoot - nothing to restore." }
-  $restoreFloor = [long]([IO.File]::ReadAllBytes((Join-Path $backup.FullName "app.asar")).Length / 2)
+  $backupLen = (Get-Item (Join-Path $backup.FullName "app.asar")).Length
+  $restoreFloor = [long]($backupLen / 2)
   Write-Host "[1/2] Restoring app.asar + app.asar.unpacked from $($backup.Name) (staged copy)"
+  # Peak-disk preflight for -Restore: the staged copy (~1.25x) lands in
+  # %TEMP%; the swap then moves it into resources - a pure rename when the
+  # volumes match, but a cross-volume move-in copy (~1.0x) on the install
+  # volume when they differ.
+  $TempRoot = (Split-Path -Qualifier $env:TEMP) + "\"
+  $InstallRoot = (Split-Path -Qualifier $Resources) + "\"
+  if ($TempRoot -ieq $InstallRoot) {
+    Assert-DiskFreeFor -TargetPath $env:TEMP -RequiredBytes ([long]($backupLen * 1.3)) -Purpose "the -Restore staged copy"
+  } else {
+    Assert-DiskFreeFor -TargetPath $env:TEMP -RequiredBytes ([long]($backupLen * 1.3)) -Purpose "the -Restore staged copy (temp)"
+    Assert-DiskFreeFor -TargetPath $Resources -RequiredBytes ([long]($backupLen * 1.1)) -Purpose "the -Restore move-in copy (install volume)"
+  }
   $stage = Copy-BackupToStaging -BackupDir $backup.FullName
   try {
     Invoke-AsarSwap -ResourcesDir $Resources `
@@ -302,7 +419,7 @@ if ($Restore) {
 # patched). Keep this list in sync with the engine's patch-site strings.
 $AsarPatchedProbe = $null
 if (-not $Restore) {
-  Write-Host "[0/7] Probing app.asar for patch signatures..."
+  Write-Host "[0/5] Probing app.asar for patch signatures..."
   $probeOut = & $NodeExe -e "const fs=require('fs');try{const b=fs.readFileSync(process.argv[1]);const need=['ZCODE_ICON_DIR','ZCODE_AUMID_SUFFIX','zcode-bidi-auto-style'];const missing=need.filter(s=>!b.includes(s));if(missing.length){console.log('MISSING '+missing.join(','));process.exit(1)}console.log('OK all-present');process.exit(0)}catch(e){console.error('PROBE_ERROR '+String((e&&e.message)||e));process.exit(3)}" $Asar
   # Exit codes alone are ambiguous (node also exits 1 on uncaught exceptions),
   # so the probe's text must corroborate the code before either branch is
@@ -337,8 +454,12 @@ if (Test-Path $MarkerPath) {
 
 Assert-ZCodeClosed -InstallPath $Install
 
+# Total wall clock for the mutating part (excludes -WaitForClose polling).
+$SwTotal = [System.Diagnostics.Stopwatch]::StartNew()
+
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $UnpackedDir = Join-Path $Resources "app.asar.unpacked"
+$AsarLen = (Get-Item $Asar).Length
 # Backup selection. Re-patch of a STILL-PATCHED tree (engine upgrade, asar
 # probe present): keep pointing at the ORIGINAL backup captured by the first
 # run so -Restore always returns to the pristine asar, not to an intermediate
@@ -351,52 +472,73 @@ $ReuseOriginalBackup = $false
 if ($AsarPatchedProbe -and $existing -and $existing.backupDir -and (Test-Path (Join-Path $existing.backupDir "app.asar"))) {
   $ReuseOriginalBackup = $true
   $BackupDir = $existing.backupDir
-  Write-Host "[1/7] Reusing original backup at $BackupDir"
+  Write-Host "[1/5] Reusing original backup at $BackupDir"
 }
 if (-not $ReuseOriginalBackup) {
   if ($existing -and -not $AsarPatchedProbe) { Write-Host "App-update recovery - backing up the new pristine asar." }
   elseif ($existing) { Write-Host "Original backup missing - creating fresh backup of current state." }
-  Write-Host "[1/7] Backup to $BackupDir"
+  Write-Host "[1/5] Backup to $BackupDir"
+  # Peak-disk preflight (single check, before anything is written). The peak
+  # has TWO coexisting files - the backup copy and the engine's candidate:
+  #   - install volume == %TEMP% volume: backup (1.25x) + candidate (1.25x)
+  #     coexist and the swap is a pure rename -> require ~2.6x in total;
+  #   - different volumes: the install volume holds the backup (1.25x) PLUS
+  #     the cross-volume candidate move-in copy (~1.0x) at swap time -> ~2.3x
+  #     there, and the candidate alone (~1.3x) on the TEMP volume.
+  $TempRoot = (Split-Path -Qualifier $env:TEMP) + "\"
+  $InstallRoot = (Split-Path -Qualifier $BackupDir) + "\"
+  if ($TempRoot -ieq $InstallRoot) {
+    Assert-DiskFreeFor -TargetPath $BackupDir -RequiredBytes ([long]($AsarLen * 2.6)) -Purpose "backup + patched candidate (same volume as temp)"
+  } else {
+    Assert-DiskFreeFor -TargetPath $BackupDir -RequiredBytes ([long]($AsarLen * 2.3)) -Purpose "backup + candidate swap-in copy (install volume)"
+    Assert-DiskFreeFor -TargetPath $env:TEMP -RequiredBytes ([long]($AsarLen * 1.3)) -Purpose "the patched candidate asar (temp)"
+  }
+  $swBackup = [System.Diagnostics.Stopwatch]::StartNew()
   New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
   Copy-Item $Asar (Join-Path $BackupDir "app.asar")
   if (Test-Path $UnpackedDir) {
     Copy-Item $UnpackedDir (Join-Path $BackupDir "app.asar.unpacked") -Recurse
   }
   if (-not (Test-Path (Join-Path $BackupDir "app.asar"))) { throw "backup verify FAILED: app.asar not copied" }
+  $swBackup.Stop()
+  Write-Host ("      backup done in {0:N1}s" -f $swBackup.Elapsed.TotalSeconds)
 }
 $Work = Join-Path $env:TEMP ("zcode-icon-patch-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
-$Extracted = Join-Path $Work "extracted"
 $CandidateAsar = Join-Path $Work "app.asar.candidate"
-$CandidateUnpacked = "$CandidateAsar.unpacked"
+$ChecksDir = Join-Path $Work "checks"
 
 try {
   New-Item -ItemType Directory -Path $Work -Force | Out-Null
 
   # -Force re-patch must rebuild from the PRISTINE backup, never the live
   # asar: the engine's done-anchors treat already-patched sites as done, so
-  # extracting the live (already-patched) file ships the OLD injected code
+  # reading the live (already-patched) file ships the OLD injected code
   # while still printing SUCCESS (2026-10-18 AutoClaw: two -Force runs shipped
   # no changes; bug sweep 15). Only rebuild from a backup when the LIVE asar
   # is still engine-patched; after an app update the live asar is the new
-  # pristine version and must be the extract source (the backup would roll
+  # pristine version and must be the surgery source (the backup would roll
   # the app back a version).
   $extractSource = $Asar
   if ($Force -and $AsarPatchedProbe -and $existing -and $existing.backupDir) {
     $pristineAsar = Join-Path $existing.backupDir "app.asar"
     if (Test-Path $pristineAsar) {
       $extractSource = $pristineAsar
-      Write-Host "[2/7] Extracting PRISTINE backup asar (live file is already engine-patched)..."
+      Write-Host "[2/5] Rebuilding from the PRISTINE backup asar (live file is already engine-patched)..."
     } else {
-      Write-Host "WARNING: marker's original backup is missing - extracting the live (patched) asar; the engine's done-anchors will skip already-patched sites."
+      Write-Host "WARNING: marker's original backup is missing - reading the live (patched) asar; the engine's done-anchors will skip already-patched sites."
     }
   }
-  if ($extractSource -eq $Asar) {
-    Write-Host "[2/7] Extracting app.asar (~370 MB, takes a minute)..."
-  }
-  Invoke-AsarCli @("--yes", "@electron/asar", "extract", $extractSource, $Extracted)
 
-  Write-Host "[3/7] Applying icon/AUMID overrides..."
-  $engineOut = & $NodeExe $PatchEngine $Extracted
+  # [2/5] asar surgery (engine v9): the engine ranges-reads only the text
+  # entries of the source asar, applies the patch set in memory, writes the
+  # patched js through node --check, rebuilds the candidate (untouched payload
+  # region copied byte-for-byte, patched contents appended at the tail, only
+  # patched header entries rewritten) and verifies it (header walk + whole-
+  # region byte compare + patched-content compare). No extract-to-disk, no
+  # repack, no npx - one node process, a few seconds.
+  # (Candidate disk space was covered by the combined peak preflight above.)
+  Write-Host "[2/5] Patching asar in memory + rebuilding candidate (asar surgery)..."
+  $engineOut = & $NodeExe $PatchEngine $extractSource $CandidateAsar $ChecksDir
   $engineJson = $null
   try { $engineJson = ($engineOut -join "`n") | ConvertFrom-Json } catch {
     throw ("patch engine returned invalid JSON: {0}" -f ($engineOut -join "`n"))
@@ -407,104 +549,19 @@ try {
   $engineJson.results | ForEach-Object {
     Write-Host ("      {0}: window={1} tray={2} aumid={3}" -f $_.file, $_.counts."icon-window", $_.counts."icon-tray", $_.counts."aumid-suffix")
   }
-
-  # verify-after patch: re-read each patched file from the extracted tree and
-  # require every marker the engine reported for that file
-  foreach ($r in $engineJson.results) {
-    if (-not $r.appliedMarkers -or @($r.appliedMarkers).Count -eq 0) { continue }
-    $patchedFile = Join-Path $Extracted ($r.file -replace "/", "\")
-    $content = [IO.File]::ReadAllText($patchedFile)
-    foreach ($marker in $r.appliedMarkers) {
-      if (-not $content.Contains($marker)) {
-        throw ("patch verify FAILED after write: marker '{0}' missing in {1}" -f $marker, $r.file)
-      }
-    }
+  if ($engineJson.timings) {
+    Write-Host ("      engine: patch {0}ms, node --check {1}ms, rebuild {2}ms, verify {3}ms" -f `
+      $engineJson.timings.readPatchMs, $engineJson.timings.syntaxMs, $engineJson.timings.rebuildMs, $engineJson.timings.verifyMs)
   }
 
-  # Syntax gate: markers alone cannot catch a structurally broken bundle.
-  # (v3 main-args bug dropped a template-literal backtick; every marker was
-  # present yet the main process died with "Unexpected identifier 'blocked'".)
-  foreach ($r in $engineJson.results) {
-    if ($r.file -notmatch "\.(js|cjs|mjs)$") { continue }
-    $syntaxFile = Join-Path $Extracted ($r.file -replace "/", "\")
-    # cmd /c so node stderr can't trigger PS 5.1 NativeCommandError under EAP=Stop
-    $checkOut = cmd /c "`"$NodeExe`" --check `"$syntaxFile`" 2>&1" | Out-String
-    if ($LASTEXITCODE -ne 0) {
-      throw ("patch verify FAILED: node --check rejected {0} - aborting before swap`n{1}" -f $r.file, $checkOut.Trim())
-    }
-    Write-Host ("      {0}: node --check OK" -f $r.file)
-  }
-
-  Write-Host "[4/7] Packing candidate asar..."
-  $unpackGlobs = New-Object "System.Collections.Generic.List[string]"
-  $unpackGlobs.Add("*.{node,dll,dylib,exe}")
-  $unpackDirs = New-Object "System.Collections.Generic.List[string]"
-  # mirror upstream repack: explicit prebuilds dirs present in the original sidecar
-  $origUnpacked = if (Test-Path $UnpackedDir) { Get-RelFilePaths -Root $UnpackedDir } else {
-    New-Object "System.Collections.Generic.HashSet[string]"
-  }
-  $origUnpacked | ForEach-Object {
-    if ($_ -match "^(node_modules/[^/]+/prebuilds/[^/]+)/") {
-      $d = $Matches[1]
-      if (-not $unpackDirs.Contains($d)) { [void]$unpackDirs.Add($d) }
-    }
-  }
-
-  $maxTries = 4
-  for ($try = 1; $try -le $maxTries; $try++) {
-    $packArgs = @("--yes", "@electron/asar", "pack", $Extracted, $CandidateAsar)
-    foreach ($g in $unpackGlobs) { $packArgs += "--unpack"; $packArgs += $g }
-    foreach ($d in $unpackDirs) { $packArgs += "--unpack-dir"; $packArgs += $d }
-    Invoke-AsarCli $packArgs
-
-    $candUnpackedSet = if (Test-Path $CandidateUnpacked) { Get-RelFilePaths -Root $CandidateUnpacked } else {
-      New-Object "System.Collections.Generic.HashSet[string]"
-    }
-    $missing = @($origUnpacked | Where-Object { -not $candUnpackedSet.Contains($_) })
-    if ($missing.Count -eq 0) { break }
-    if ($try -eq $maxTries) {
-      throw ("repack verify FAILED: files missing from candidate unpacked sidecar: {0}" -f ($missing -join ", "))
-    }
-    # converge: unpack every extension the sidecar still lacks, then repack
-    $newExts = @($missing | ForEach-Object { [IO.Path]::GetExtension($_).TrimStart(".") } | Sort-Object -Unique)
-    foreach ($e in $newExts) {
-      $glob = "*.$e"
-      if (-not $unpackGlobs.Contains($glob)) { [void]$unpackGlobs.Add($glob) }
-    }
-    Write-Host ("      repack retry {0}: adding unpack for {1}" -f $try, ($newExts -join ","))
-  }
-  $candCount = if (Test-Path $CandidateUnpacked) { (Get-RelFilePaths -Root $CandidateUnpacked).Count } else { 0 }
-  Write-Host ("      unpacked sidecar files: {0} (original {1})" -f $candCount, $origUnpacked.Count)
-
-  Write-Host "[5/7] Verifying candidate asar contents..."
-  $VerifyDir = Join-Path $Work "verify"
-  foreach ($r in $engineJson.results) {
-    if (-not $r.appliedMarkers -or @($r.appliedMarkers).Count -eq 0) { continue }
-    New-Item -ItemType Directory -Path $VerifyDir -Force | Out-Null
-    Get-ChildItem -LiteralPath $VerifyDir -Recurse -File -ErrorAction SilentlyContinue | Remove-Item -Force
-    $relWin = $r.file -replace "/", "\"
-    Push-Location $VerifyDir
-    try {
-      # NB: on Windows @electron/asar extract-file expects backslash archive paths.
-      Invoke-AsarCli @("--yes", "@electron/asar", "extract-file", $CandidateAsar, $relWin)
-    } finally { Pop-Location }
-    $verifyFile = Get-ChildItem -LiteralPath $VerifyDir -Recurse -File |
-      Where-Object { $_.Name -eq (Split-Path -Leaf $relWin) } | Select-Object -First 1
-    if (-not $verifyFile) { throw "patch verify FAILED: could not extract $($r.file) from candidate" }
-    $vc = [IO.File]::ReadAllText($verifyFile.FullName)
-    foreach ($marker in $r.appliedMarkers) {
-      if (-not $vc.Contains($marker)) {
-        throw ("patch verify FAILED inside candidate asar: marker '{0}' missing in {1}" -f $marker, $r.file)
-      }
-    }
-    Write-Host ("      {0}: {1} marker(s) verified" -f $r.file, @($r.appliedMarkers).Count)
-  }
-
-  Write-Host "[6/7] Swapping patched asar into install..."
+  Write-Host "[3/5] Swapping patched asar into install..."
   $patchFloor = [long]((Get-Item $Asar).Length / 2)
-  Invoke-AsarSwap -ResourcesDir $Resources -CandidateAsar $CandidateAsar -CandidateUnpacked $CandidateUnpacked -MinAsarBytes $patchFloor -BackupAsar (Join-Path $BackupDir "app.asar")
+  $swSwap = [System.Diagnostics.Stopwatch]::StartNew()
+  Invoke-AsarSwap -ResourcesDir $Resources -CandidateAsar $CandidateAsar -MinAsarBytes $patchFloor -BackupAsar (Join-Path $BackupDir "app.asar") -SkipUnpackedSwap
+  $swSwap.Stop()
+  Write-Host ("      swap done in {0:N1}s" -f $swSwap.Elapsed.TotalSeconds)
 
-  Write-Host "[7/7] Writing marker..."
+  Write-Host "[4/5] Writing marker..."
   $marker = [ordered]@{
     appliedAt    = (Get-Date -Format "o")
     patchVersion = [int]$engineJson.engineVersion
@@ -512,9 +569,12 @@ try {
     backupDir    = $BackupDir
     patchedFiles = @($engineJson.results | ForEach-Object { $_.file })
     totals       = $engineJson.totals
+    timings      = $engineJson.timings
   }
   $marker | ConvertTo-Json -Depth 4 | Set-Content -Path $MarkerPath -Encoding UTF8
   if (-not (Test-Path $MarkerPath)) { throw "marker verify FAILED: not written" }
+  $SwTotal.Stop()
+  Write-Host ("      marker written - patch completed in {0:N1}s total" -f $SwTotal.Elapsed.TotalSeconds)
 } finally {
   if (Test-Path $Work) { Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue }
 }

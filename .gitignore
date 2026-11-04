@@ -78,6 +78,9 @@ block_qoder_domains.ps1
 # Local env — tokens, secrets, machine-specific values. Never commit.
 .envlocal
 
+# MCP registry — local overrides/values overlay (never commit).
+tools/mcp/master-mcp.local.json
+
 # Local-only: agent context/settings (per-machine) — never commit.
 .context/
 

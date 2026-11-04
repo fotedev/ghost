@@ -1,8 +1,12 @@
 #!/usr/bin/env node
-// OpenCode desktop patch engine - pure text transforms on an EXTRACTED asar tree.
-// Usage: node patch_opencode_clone_home.mjs <extractedDir>
-// Prints a JSON result on stdout; exit 0 = all patches applied or already applied,
-// exit 1 = any patch found zero sites (tree left untouched).
+// OpenCode desktop patch engine - text transforms applied DIRECTLY inside the
+// app.asar via tools/asar_surgery.mjs (no extract-to-disk, no repack).
+// Usage: node patch_opencode_clone_home.mjs <sourceAsar> <candidateOut> <checksDir>
+// Prints a JSON result on stdout; exit 0 = all patches applied or already applied
+// (candidate asar written and fully verified), exit 1 = any patch found zero
+// sites, a marker check failed, node --check rejected a patched file, or the
+// rebuild verification failed (no candidate is swapped by this script - the
+// PS driver owns the swap).
 //
 // Engine v1 patch set (all anchors byte-verified against the installed
 // OpenCode 2.0.32 app.asar, 2026-10-24 - see docs/OPENCODE_CLONES_SPEC.md).
@@ -56,13 +60,29 @@
 //                   touches fs and works in ESM and CJS alike. The launcher
 //                   still writes .opencode-clone-identity.json beside the icon
 //                   for human/-Status introspection only.
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+// Engine v4 (2026-11-03): patch sites unchanged from v3. v4 swaps the IO layer
+//   to asar surgery (tools/asar_surgery.mjs) - ranged reads of only the text
+//   entries, in-memory transforms, one streaming rebuild + full verify - and
+//   fixes the same pre-existing perf bug found in the ZCode engine: the
+//   clone-identity per-position regex scan. The patch anchors and output
+//   bytes are identical.
+import { mkdirSync, writeFileSync, openSync, closeSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+import {
+  parseAsarHeader,
+  listSourceEntries,
+  readEntryBytes,
+  rebuildAsar,
+  verifyRebuild,
+} from "./asar_surgery.mjs";
 
-const ENGINE_VERSION = 3;
-const extractedDir = process.argv[2];
-if (!extractedDir) {
-  console.error(JSON.stringify({ ok: false, error: "usage: patch_opencode_clone_home.mjs <extractedDir>" }));
+const ENGINE_VERSION = 4;
+const sourceAsar = process.argv[2];
+const candidateOut = process.argv[3];
+const checksDir = process.argv[4];
+if (!sourceAsar || !candidateOut || !checksDir) {
+  console.error(JSON.stringify({ ok: false, error: "usage: patch_opencode_clone_home.mjs <sourceAsar> <candidateOut> <checksDir>" }));
   process.exit(1);
 }
 
@@ -82,10 +102,15 @@ const CLONE_HOME_SCAN = `(globalThis.__opencodeCloneHome ??= (() => { let __h = 
 
 // ── clone-identity (F2+F3) ───────────────────────────────────────────────────
 // Pristine anchor: any `<recv>.setAppUserModelId(<bareIdent>)` call (1 site in
-// 2.0.32, receiver captured so the listener can attach to the same app
-// object; the wrapped output's argument is an expression, so it can never
-// re-match this regex - idempotence by construction).
-const AUMID_CALL_RE = /([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.setAppUserModelId\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
+// 2.0.32 AND 2.2.5.0, receiver captured so the listener can attach to the same
+// app object; the wrapped output's argument is an expression - IDENT+((__i)=>..)
+// - so it can never re-match the anchor: idempotence by construction).
+// v4 perf: matched by literal-needle indexOf + backward receiver scan instead
+// of the v1-v3 global regex, whose per-position word-run backtracking is the
+// same ~minutes-class cost the ZCode engine's preload-blue regex had. The
+// scan is byte-equivalent: receiver = maximal dotted [\w$] chain ending right
+// before ".setAppUserModelId(" whose segments start with [A-Za-z_$] (the
+// regex's leftmost capture); ident = \s*IDENT\s* between the parens.
 // Done anchor: the resolver's cache assignment.
 const IDENTITY_DONE = "globalThis.__opencodeCloneIdentity ??=";
 // Self-contained resolver: PURE ARGV (no fs, no require - the app's main
@@ -101,17 +126,6 @@ const IDENTITY_RESOLVER = `(globalThis.__opencodeCloneIdentity ??= (() => { let 
 // updates (page-title-updated preventDefault + re-assert on show).
 function windowStampIife(recv, baseExpr) {
   return `,${recv}.on("browser-window-created", (__e, __w) => { try { const __id = globalThis.__opencodeCloneIdentity; if (!__id) return; const __aumid = ${baseExpr} + (__id.aumidSuffix ? "." + __id.aumidSuffix : ""); const __stamp = () => { try { if (typeof __w.setAppDetails === "function") __w.setAppDetails({ appId: __aumid }); } catch (__s1) {} }; __stamp(); if (__id.iconPath) { try { __w.setIcon(__id.iconPath); } catch (__s2) {} } if (__id.title) { try { if (__w.getTitle() !== __id.title) __w.setTitle(__id.title); } catch (__s3) {} try { __w.on("page-title-updated", (__e2) => { try { __e2.preventDefault(); } catch (__s4) {} try { if (__w.getTitle() !== __id.title) __w.setTitle(__id.title); } catch (__s5) {} __stamp(); }); } catch (__s6) {} } try { __w.on("show", () => { __stamp(); }); } catch (__s7) {} } catch (__s8) {} })`;
-}
-
-function listSourceFiles(dir) {
-  const out = [];
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name);
-    const st = statSync(full);
-    if (st.isDirectory()) out.push(...listSourceFiles(full));
-    else if (/\.(js|cjs|mjs|html)$/.test(name)) out.push(full);
-  }
-  return out;
 }
 
 // Patch definitions. apply(src) returns {src, count}; count -1 = already applied.
@@ -132,17 +146,55 @@ const PATCHES = [
     name: "clone-identity",
     apply: (src) => {
       if (src.includes(IDENTITY_DONE)) return { src, count: -1 };
-      let count = 0;
-      AUMID_CALL_RE.lastIndex = 0;
-      const out = src.replace(AUMID_CALL_RE, (m, recv, ident) => {
-        count++;
-        return (
-          `${recv}.setAppUserModelId(${ident}+((__i)=>__i&&__i.aumidSuffix?"."+__i.aumidSuffix:"")(${IDENTITY_RESOLVER}))` +
-          windowStampIife(recv, ident)
-        );
-      });
-      if (count === 0) return { src, count: 0 };
-      return { src: out, count };
+      const CALL = ".setAppUserModelId(";
+      const isIdentStart = (ch) => /[A-Za-z_$]/.test(ch);
+      const isWordChar = (ch) => /[\w$]/.test(ch);
+      const hits = [];
+      let from = 0;
+      for (;;) {
+        const callAt = src.indexOf(CALL, from);
+        if (callAt === -1) break;
+        // backward dotted-receiver scan from the '.' before the call
+        let start = callAt;
+        let hasRecv = true;
+        for (;;) {
+          let s = start;
+          while (s > 0 && isWordChar(src[s - 1])) s--;
+          if (s === start) { hasRecv = false; break; } // empty segment - no regex match here
+          start = s;
+          if (start > 0 && src[start - 1] === "." && start - 1 > 0 && isIdentStart(src[start - 2])) {
+            start--; // continue the dotted chain (regex: (?:\.[A-Za-z_$][\w$]*)*)
+          } else break;
+        }
+        if (!hasRecv) { from = callAt + CALL.length; continue; }
+        // the regex receiver starts with [A-Za-z_$]: trim any leading digits
+        // the backward [\w$] sweep collected (unreachable in valid JS)
+        while (start < callAt && /[0-9]/.test(src[start])) start++;
+        const recv = src.slice(start, callAt);
+        // ident tail: \s* IDENT \s* )
+        let p = callAt + CALL.length;
+        while (p < src.length && /\s/.test(src[p])) p++;
+        if (p >= src.length || !isIdentStart(src[p])) { from = p > callAt ? p : callAt + CALL.length; continue; }
+        let q = p;
+        while (q < src.length && isWordChar(src[q])) q++;
+        let r = q;
+        while (r < src.length && /\s/.test(src[r])) r++;
+        if (src[r] !== ")") { from = callAt + CALL.length; continue; }
+        hits.push({ start, end: r + 1, recv, ident: src.slice(p, q) });
+        from = r + 1;
+      }
+      if (hits.length === 0) return { src, count: 0 };
+      let out = src;
+      // splice from last to first so earlier indices stay valid
+      for (let i = hits.length - 1; i >= 0; i--) {
+        const h = hits[i];
+        const replacement =
+          h.recv + ".setAppUserModelId(" + h.ident +
+          '+((__i)=>__i&&__i.aumidSuffix?"."+__i.aumidSuffix:"")(' + IDENTITY_RESOLVER + "))" +
+          windowStampIife(h.recv, h.ident);
+        out = out.slice(0, h.start) + replacement + out.slice(h.end);
+      }
+      return { src: out, count: hits.length };
     },
   },
 ];
@@ -163,27 +215,58 @@ function markersForPatch(name) {
   }
 }
 
+const T0 = process.hrtime.bigint();
+const lap = (from) => Number(process.hrtime.bigint() - from) / 1e6;
+const timings = {};
+const DEBUG = process.env.GHOST_PATCH_DEBUG === "1";
+const patchTimings = {};
+const debugLog = (...a) => { if (DEBUG) console.error("[debug]", ...a); };
+
+// 1. Parse header + ranged-read/patch every text entry in memory.
+const { header, payloadBase } = parseAsarHeader(sourceAsar);
 const results = [];
-const files = listSourceFiles(extractedDir);
-for (const file of files) {
-  const before = readFileSync(file, "utf8");
-  let src = before;
-  const counts = {};
-  const appliedMarkers = [];
-  for (const patch of PATCHES) {
-    const r = patch.apply(src);
-    src = r.src;
-    counts[patch.name] = r.count;
-    if (r.count > 0) {
-      appliedMarkers.push(...markersForPatch(patch.name));
+const patchedContents = new Map(); // rel -> new utf8 content (only changed files)
+const srcFd = openSync(sourceAsar, "r");
+try {
+  let seen = 0;
+  for (const { rel, node } of listSourceEntries(header)) {
+    const before = readEntryBytes(srcFd, payloadBase, node).toString("utf8");
+    let src = before;
+    const counts = {};
+    const appliedMarkers = [];
+    for (const patch of PATCHES) {
+      const pT = DEBUG ? process.hrtime.bigint() : null;
+      const r = patch.apply(src);
+      if (DEBUG) patchTimings[patch.name] = (patchTimings[patch.name] || 0) + Number(process.hrtime.bigint() - pT) / 1e6;
+      src = r.src;
+      counts[patch.name] = r.count;
+      if (r.count > 0) {
+        appliedMarkers.push(...markersForPatch(patch.name));
+      }
     }
+    if (src !== before) {
+      patchedContents.set(rel, src);
+      // verify-after-patch on the in-memory content (the markers the PS
+      // driver used to re-check by re-reading the extracted tree)
+      for (const marker of appliedMarkers) {
+        if (!src.includes(marker)) {
+          console.log(JSON.stringify({ ok: false, engineVersion: ENGINE_VERSION, error: `patch verify FAILED after write: marker '${marker}' missing in ${rel}` }));
+          process.exit(1);
+        }
+      }
+    }
+    if (PATCHES.some((p) => counts[p.name] !== 0)) {
+      results.push({ file: rel, counts, appliedMarkers });
+    }
+    seen++;
+    if (DEBUG && seen % 5000 === 0) debugLog("scanned", seen, "entries");
   }
-  if (src !== before) {
-    writeFileSync(file, src);
-  }
-  if (PATCHES.some((p) => counts[p.name] !== 0)) {
-    results.push({ file: relative(extractedDir, file).split(sep).join("/"), counts, appliedMarkers });
-  }
+} finally {
+  closeSync(srcFd);
+}
+timings.readPatchMs = Math.round(lap(T0));
+if (DEBUG) {
+  for (const [name, ms] of Object.entries(patchTimings)) debugLog("patch", name, Math.round(ms) + "ms");
 }
 
 const totals = {};
@@ -204,4 +287,76 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(JSON.stringify({ ok: true, engineVersion: ENGINE_VERSION, totals, results }));
+// 2. Syntax gate: node --check every patched js/cjs/mjs BEFORE rebuilding
+// (markers alone cannot catch a structurally broken bundle). Only files that
+// changed in this run are checked; already-applied sites carry the previous
+// engine's verified output.
+const tSyntax = process.hrtime.bigint();
+mkdirSync(checksDir, { recursive: true });
+const syntaxFailures = [];
+for (const r of results) {
+  if (!/\.(js|cjs|mjs)$/.test(r.file)) continue;
+  const content = patchedContents.get(r.file);
+  if (content === undefined) continue;
+  const checkPath = join(checksDir, r.file.replace(/\//g, "__"));
+  writeFileSync(checkPath, content, "utf8");
+  try {
+    execFileSync(process.execPath, ["--check", checkPath], { stdio: ["ignore", "pipe", "pipe"] });
+  } catch (e) {
+    syntaxFailures.push({ file: r.file, output: String((e && (e.stderr || e.stdout)) || e).trim() });
+  }
+}
+timings.syntaxMs = Math.round(lap(tSyntax));
+if (syntaxFailures.length) {
+  const f = syntaxFailures[0];
+  console.log(JSON.stringify({
+    ok: false,
+    engineVersion: ENGINE_VERSION,
+    totals,
+    results,
+    error: "node --check rejected " + f.file + " - aborting before rebuild: " + f.output,
+    syntaxFailures,
+  }));
+  process.exit(1);
+}
+
+// 3. Rebuild: copy the untouched payload region byte-for-byte, append the
+// patched contents at the tail, rewrite only the patched header entries.
+const tRebuild = process.hrtime.bigint();
+const expected = new Map();
+for (const [rel, content] of patchedContents) expected.set(rel, Buffer.from(content, "utf8"));
+const meta = rebuildAsar({
+  sourcePath: sourceAsar,
+  outPath: candidateOut,
+  transform: (rel) => patchedContents.get(rel) ?? null,
+});
+timings.rebuildMs = Math.round(lap(tRebuild));
+
+// 4. Verify the candidate: header walk + full payload-region byte compare +
+// exact patched-content compare (stronger than the old per-file extract).
+const tVerify = process.hrtime.bigint();
+const v = verifyRebuild({ sourcePath: sourceAsar, outPath: candidateOut, expected, meta });
+timings.verifyMs = Math.round(lap(tVerify));
+timings.totalMs = Math.round(lap(T0));
+if (!v.ok) {
+  console.log(JSON.stringify({
+    ok: false,
+    engineVersion: ENGINE_VERSION,
+    totals,
+    results,
+    error: "candidate asar verification FAILED: " + v.errors.join("; "),
+    verifyErrors: v.errors,
+  }));
+  process.exit(1);
+}
+
+console.log(JSON.stringify({
+  ok: true,
+  engineVersion: ENGINE_VERSION,
+  totals,
+  results,
+  timings,
+  patchedSizes: meta.patched,
+  outSize: meta.outSize,
+  verifyChecked: v.checked,
+}));

@@ -39,6 +39,21 @@ powershell -ExecutionPolicy Bypass -File "src\windows\spoof_wmi_serials.ps1"    
 powershell -ExecutionPolicy Bypass -File "src\windows\spoof_wmi_serials.ps1" -DryRun     # plan only, no writes
 ```
 
+## MCP central registry (Maintenance [4])
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "tools\sync_mcp_registry.ps1"                   # Maintenance [4] — sync master-mcp.json to all apps (LIVE)
+powershell -ExecutionPolicy Bypass -File "tools\sync_mcp_registry.ps1" -DryRun           # preview only — writes nothing
+powershell -ExecutionPolicy Bypass -File "tools\sync_mcp_registry.ps1" -Target zcode,windsurf  # subset (cursor, windsurf, vscode, zcode, minimax, opencode, all)
+powershell -ExecutionPolicy Bypass -File "tools\mcp\collect_mcp_inventory.ps1"           # harvest: read-only scan of every app -> mcp-inventory.json
+```
+
+Author MCPs once in `tools\mcp\master-mcp.json` (device-specific values in the
+gitignored `master-mcp.local.json` overlay) and run the sync — every target app
+gets the definitions in its own config shape. App-local enable/disable state
+survives; app-only servers are never deleted. Secrets ride `${VAR}` names
+resolved from machine env. Plan: `docs/MCP_CENTRAL_REGISTRY_PLAN.md`.
+
 Menu equivalents for the reset targets: `reset_zcode.ps1 -Target Primary` =
 IDE Resets [7] **and** ZCode [14] (the same task from both menus);
 `-Target Secondary` / `Both` / `Third` / `Fourth` / `Fifth` / `Sixth` / `All` =
@@ -72,7 +87,9 @@ Or double-click: `src\windows\Launch-ZCode-Blue.bat` / `-Yellow.bat` /
 
 First launch of each clone copies history into its own home
 (`%USERPROFILE%\ZCodeSecondHome | ZCodeThirdHome | ZCodeFourthHome |
-ZCodeFifthHome | ZCodeSixthHome`), scrubs
+ZCodeFifthHome | ZCodeSixthHome` — frozen plumbing dir names: Second = the
+Blue clone, Third = Yellow, Fourth = Green, Fifth = Red, Sixth = Orange; only
+the shortcut/window display layer uses colors), scrubs
 it to fresh IDs, and reconciles Telegram channel bots via sha8 credential
 comparison (duplicates of Primary disabled, unique clone bots preserved —
 see [docs/ZCODE_TELEGRAM_BOTS.md](ZCODE_TELEGRAM_BOTS.md)). Colors ARE the
@@ -87,7 +104,13 @@ identity watcher — you never have to start them from GHOST manually.
 All instances share one install, so one update covers all — but re-run the
 icon patch (`tools\patch_zcode_icon_override.ps1`, ZCode [27]) after every app
 update; it is what makes the `ZCODE_ICON_DIR` / `ZCODE_AUMID_SUFFIX` /
-`ZCODE_ACCENT_HEX` / `ZCODE_INSTANCE_NAME` branding overrides work.
+`ZCODE_ACCENT_HEX` / `ZCODE_INSTANCE_NAME` branding overrides work. Since
+engine v9 the patch runs in-place asar surgery (`tools/asar_surgery.mjs`) —
+a few seconds on a clean box (no AV); roughly 10–60 s on AV-protected
+machines (estimate, not measured) — still far below the old minutes. The
+surgery writes one big file instead of ~32k small ones, so per-file AV
+overhead is mostly gone, and the swap retries briefly if antivirus holds
+the fresh candidate. Close the app first or pass -WaitForClose.
 
 ### ZCode light headless worker (no desktop window; ZCode [7])
 

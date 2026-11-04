@@ -74,14 +74,28 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     server-side Start Plan admission control, NOT a device/IP ban
                                    #     (auth + billing unaffected; started that day, bursty, different
                                    #     accounts failed in the same minute);
-                                   #   patch_zcode_icon_override.ps1 (+ .mjs engine v8) — one-time
+                                   #   patch_zcode_icon_override.ps1 (+ .mjs engine v9, shared
+                                   #     tools/asar_surgery.mjs IO layer) — one-time
                                    #     app.asar patch enabling ZCODE_ICON_DIR / ZCODE_AUMID_SUFFIX /
                                    #     ZCODE_ACCENT_HEX / ZCODE_INSTANCE_NAME env overrides +
                                    #     __ZCODE_BLUE__/__ZCODE_ACCENT__/__ZCODE_TITLE__ renderer flags
                                    #     (per-clone accent color + window title); v7+ also injects
                                    #     bidi auto-direction into the chat (per-paragraph Arabic RTL /
                                    #     English LTR via unicode-bidi:plaintext + dir="auto" stamping,
-                                   #     code blocks stay LTR; ZCODE_BIDI_OFF=1 opts out); marker carries
+                                   #     code blocks stay LTR; ZCODE_BIDI_OFF=1 opts out); v9 (2026-11-03)
+                                   #     replaced the extract/repack pipeline (npx extract of the
+                                   #     ~340 MB/~32k-file asar to %TEMP%, up to 4 repacks, one npx
+                                   #     spawn per verify) with IN-PLACE asar surgery: ranged reads of
+                                   #     only the text entries, in-memory transforms, candidate
+                                   #     rebuilt in one streaming pass (untouched payload region
+                                   #     copied byte-for-byte + patched contents appended at the
+                                   #     tail + only patched header entries rewritten, integrity
+                                   #     recomputed) + full header/region/content verify in the
+                                   #     same node process; also fixed a pre-existing ~290s regex
+                                   #     backtracking bug in preload-blue (literal indexOf + backward
+                                   #     receiver scan, output proven byte-identical to v8); patch
+                                   #     time minutes -> ~5s; the sidecar is never touched (swap
+                                   #     runs -SkipUnpackedSwap); marker carries
                                    #     patchVersion so ZCode submenu [27] auto-upgrades after engine changes;
                                    #     re-run after app updates; after an app update the stale marker is
                                    #     auto-detected (asar byte-probe of the engine's signature strings) and
@@ -191,6 +205,32 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     prefix (D11), IM sessions refused
                                    #     (D12), work_events copied with fresh
                                    #     UUIDv4 ids, sidecar provenance;
+                                   #   sync_mcp_registry.ps1 — MCP central registry importer
+                                   #     (Maintenance [4] / gid 77; -DryRun, -Target
+                                   #     cursor|windsurf|vscode|zcode|minimax|opencode|all —
+                                   #     LIVE is the default without -DryRun): pushes the single
+                                   #     source of truth tools/mcp/master-mcp.json (25 servers,
+                                   #     Claude-Desktop mcpServers format) + the gitignored
+                                   #     overlay master-mcp.local.json (device values, local
+                                   #     wins) into each app's own config in its own shape
+                                   #     (windsurf serverUrl, minimax streamable-http, opencode
+                                   #     remote/local array-command); merge = registry
+                                   #     definition wins, app-local enabled/disabled state
+                                   #     survives, app-only servers never deleted; secrets =
+                                   #     ${VAR} names only — the env-guard resolves them from
+                                   #     machine env (all 20 setx'd 2026-11-04 from the app
+                                   #     configs' own working values), an unresolved key is
+                                   #     omitted loudly, never written empty; backup ->
+                                   #     MCP_Backups\<ts>\, verify-after deep-compare, JSONL
+                                   #     audit at %LOCALAPPDATA%\mcp-registry-sync\; ZCode
+                                   #     target = Primary only (clones converge via
+                                   #     sync_zcode_assets -McpOnly / the watcher); harvest
+                                   #     direction = tools/mcp/collect_mcp_inventory.ps1
+                                   #     (read-only -> mcp-inventory.json, 109 defs) — never
+                                   #     auto-merges into the master, promotion is a per-name
+                                   #     human decision; plan: docs/MCP_CENTRAL_REGISTRY_PLAN.md
+                                   #     (live-verified 2026-11-04: windsurf +17, vscode +18,
+                                   #     zcode +7, minimax +19 adds, second run idempotent);
                                    #   watch_zcode_mcp_sync.ps1 — resident MCP sync watcher
                                    #     (ZCode submenu [19] resident / [20] one-shot + live
                                    #     apply; -RunOnce, -DryRun, -IntervalSeconds, -ApplyLive,
@@ -243,8 +283,14 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     overwrite-edits prompt); GHOST.bat replaced by either path
                                    #     prints a close-and-relaunch note (cmd reads the .bat
                                    #     incrementally)
-                                   #   patch_opencode_clone_home.ps1 (+ .mjs engine v3 — re-derived
-                                   #     2026-11-01 for the 2.2.5.0 bundle) — one-time
+                                   #   patch_opencode_clone_home.ps1 (+ .mjs engine v4, shared
+                                   #     tools/asar_surgery.mjs IO layer — v4 (2026-11-03) swaps the
+                                   #     extract/repack pipeline for the same in-place asar surgery as
+                                   #     the ZCode v9 patch: minutes -> ~2.5s, output byte-identical to
+                                   #     v3, sidecar untouched via -SkipUnpackedSwap; clone-identity
+                                   #     also switched from the per-position regex to a literal-indexOf
+                                   #     + backward receiver scan, regex-equivalence unit-proven;
+                                   #     anchors re-derived 2026-11-01 for the 2.2.5.0 bundle) — one-time
                                    #     OpenCode desktop app.asar patch (OpenCode submenu [8]):
                                    #     clone-home (packaged bootstrap hardcodes userData =
                                    #     %APPDATA%\ai.opencode.desktop — the patch swaps the
@@ -476,6 +522,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 - **"File existed" is not "value changed".** A backup existing does not mean the new ID is in place. Always verify.
 - **Clobber old `.backup` before renaming.** If `target.backup` already exists, remove it first — otherwise `Rename-Item` fails.
 - **Never re-add dead SMBIOS/build registry writes.** `SystemManufacturer`, `SystemProductName`, `BIOSVersion`, `CurrentBuild`, `CurrentBuildNumber` — WMI ignores them. See `IMPLEMENTATION_GUIDE.md §5`.
+- **The dev machine is best-case (no Defender, Windows Update off, firewall off, cleaned temp).** Design for typical users: AV on, slower disks, locked files, low RAM. Never treat timings measured on this box as proof of acceptable performance — hedge public numbers as estimates (the asar-surgery CHANGELOG entry is the model to follow).
 
 ## PowerShell 5.1 compatibility
 
@@ -539,9 +586,17 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   stay FROZEN: ZCode instance keys Second..Sixth (clone dirs `ZCode<Name>Home`
   / roaming `ZCode-<Name>`, AUMID suffixes `2..6` — the Primary carries the
   bare base), newer suites `c1..cN` (dirs `<Home>\cN`, AUMID `.cN`); window
-  titles are app-driven and frozen. Alias map: Second↔c1↔Blue `#066BCB`,
-  Third↔c2↔Yellow `#D4AA10`, Fourth↔c3↔Green `#13826A`, Fifth↔c4↔Red
-  `#CA0607`, Sixth↔c5↔Orange `#CB5D06`; `clone` is the unified docs term.
+  titles are app-driven and frozen. Alias map (position ↔ key ↔ display ↔
+  FROZEN plumbing dirs): Second↔c1↔Blue `#066BCB`↔`ZCodeSecondHome` +
+  `ZCode-Second`, Third↔c2↔Yellow `#D4AA10`↔`ZCodeThirdHome` + `ZCode-Third`,
+  Fourth↔c3↔Green `#13826A`↔`ZCodeFourthHome` + `ZCode-Fourth`, Fifth↔c4↔Red
+  `#CA0607`↔`ZCodeFifthHome` + `ZCode-Fifth`, Sixth↔c5↔Orange
+  `#CB5D06`↔`ZCodeSixthHome` + `ZCode-Sixth`; the newer suites keep
+  `ClineClonesHome\c1..c5` / `OpenCodeClonesHome\c1..c5` /
+  `AutoClaw2ClonesHome\c1..c5`. **Directory names are FROZEN plumbing, NOT
+  part of the display layer and never renamed** (2026-11-01 decision — a dir
+  rename would orphan installed profiles; the alias map above bridges them to
+  the color display vocabulary); `clone` is the unified docs term.
   Old→new for citations written before 2026-10-29:
   ZCode launches [1,3,4,18,22]→[1,2,3,4,5], ALL [5]→[6], light [27]→[7],
   shortcuts [2]→[8], resets [6,8,9,19,23,21,7,10]→
@@ -562,7 +617,9 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   `%APPDATA%\ZCode-Second`
   / `ZCode-Third` / `ZCode-Fourth` / `ZCode-Fifth` / `ZCode-Sixth`; AUMID suffixes
   `2`/`3`/`4`/`5`/`6`. The Second row
-  is FROZEN (never rename its dirs — an installed profile must keep working).
+  is FROZEN (never rename its dirs — an installed profile must keep working);
+  the 2026-11-01 display unification deliberately stopped at the shortcut/
+  title layer and left every dir name untouched for the same reason.
 - Isolation lever is **env vars, never CLI flags**: the app overwrites
   `--user-data-dir` via `app.setPath`, so `ZCODE_DATA_BASE_DIR` /
   `ZCODE_DESKTOP_USER_DATA_DIR` / `ZCODE_DESKTOP_SESSION_DATA_DIR` /
@@ -614,8 +671,8 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
 - Clone visual identity rides on `ZCODE_ICON_DIR` + `ZCODE_AUMID_SUFFIX` +
   `ZCODE_ACCENT_HEX` + `ZCODE_INSTANCE_NAME` (branded window/tray icon +
   separate taskbar button + accent recolor + "ZCode <Color>" window title).
-  These only work because `tools/patch_zcode_icon_override.ps1` (engine v8)
-  patched the installed `app.asar` — an app update silently reverts them; re-run
+  These only work because `tools/patch_zcode_icon_override.ps1` (engine v9,
+  asar surgery) patched the installed `app.asar` — an app update silently reverts them; re-run
   the patch (ZCode submenu [27]) whenever a clone loses its look. Primary never sets any
   of the four vars. The patched main derives a `--zcode-blue` flag
   (additionalArguments → contextBridge `__ZCODE_BLUE__`) that switches the
@@ -887,7 +944,8 @@ are already stated in the live suites' sections where they apply.
   `OPENCODE_TEST_ONBOARDING` rmSync-wipes its root every boot, and the
   channel map only has beta/prod. Isolation therefore needs the ONE-TIME
   **clone-home asar patch** (`tools/patch_opencode_clone_home.ps1` +
-  `.mjs`, engine v3 — re-derived 2026-11-01 for the 2.2.5.0 bundle after
+  `.mjs`, engine v4 — asar surgery since 2026-11-03; anchors re-derived
+  2026-11-01 for the 2.2.5.0 bundle after
   the updater replaced app.asar wholesale on 2026-10-31): the argv flag
   `--opencode-clone-home=<dir>` slots into the app's OWN test-root read
   (the bootstrap `ue()` — was the `ye()` ternary tail in 2.0.32) →
