@@ -130,6 +130,10 @@ ghost/
 │                   #   sync; -McpOnly is safe against RUNNING instances),
 │                   #   zcode_mcp_merge.ps1 (unit-tested MCP merge core),
 │                   #   watch_zcode_mcp_sync.ps1 (resident MCP sync watcher),
+│                   #   sync_autoclaw2_mcp.ps1 (AutoClaw2: master manifest →
+│                   #   closed-clone connected sources) + sync_autoclaw2_chats.ps1
+│                   #   (chat inventory / guarded one-way import / revert),
+│                   #   autoclaw2-mcp.master.json (AutoClaw2 device MCP manifest),
 │                   #   zcode-{blue,yellow,green,red,orange}-branding/ (icon assets);
 │                   #   cline-{blue,yellow,green,red,orange}-branding/ (clone icons,
 │                   #   wired via install_cline_clone_shortcuts.ps1);
