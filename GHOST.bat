@@ -216,6 +216,7 @@ echo.
 call :Div "Maintenance"
 call :Opt 11 "Clone status" "- all 5 - locks, device-id, sign-in state"
 call :Opt 12 "Remove clone shortcuts" "- Desktop + Start menu"
+call :Opt 13 "Apply clone identity patch" "- colored taskbar buttons - waits for AutoClaw2 to close"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -281,12 +282,14 @@ call :Opt 3 "Launch Green clone" ""
 call :Opt 4 "Launch Red clone" ""
 call :Opt 5 "Launch Orange clone" ""
 call :Opt 6 "Launch ALL clones" "- Blue..Orange, one after another"
-call :Opt 7 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
+call :Opt 7 "Launch light headless worker" "- CLI only - no desktop window - low RAM"
+call :Opt 8 "Login clone account" "- one-time setup for the light worker"
+call :Opt 9 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
 echo.
 call :Div "Maintenance"
-call :Opt 8 "Apply clone-home patch" "- required once - waits until OpenCode closes"
-call :Opt 9 "Clone status" "- all 5 - locks, identity, sign-in state"
-call :Opt 10 "Remove clone shortcuts" "- Desktop + Start menu"
+call :Opt 10 "Apply clone-home patch" "- required once - waits until OpenCode closes"
+call :Opt 11 "Clone status" "- all 5 - locks, identity, sign-in state"
+call :Opt 12 "Remove clone shortcuts" "- Desktop + Start menu"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -412,6 +415,8 @@ rem menu and dispatch cases 37-40 + 71 were retired; local ids 1-9 map to the
 rem reused gids 28-36. Old v1.20 map: CHANGELOG 2026-10-29. 2026-11-04:
 rem locals 8-10 are the new Sync + Chat Import section (gids 73/75/76; the
 rem MCP watcher row is deferred and keeps gid 74), Maintenance moved to 11-12.
+rem 2026-11-06: local 13 = the window identity patch (gid 78) - colored
+rem taskbar buttons for the running clone windows.
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=28"
 if "%~1"=="2" set "RESOLVED=29"
@@ -425,6 +430,7 @@ if "%~1"=="9" set "RESOLVED=75"
 if "%~1"=="10" set "RESOLVED=76"
 if "%~1"=="11" set "RESOLVED=35"
 if "%~1"=="12" set "RESOLVED=36"
+if "%~1"=="13" set "RESOLVED=78"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -451,8 +457,9 @@ exit /b
 
 :OpenCodeOne
 rem Resolves an OpenCode submenu-local id to its global task id and runs it.
-rem 2026-10-31: shortcuts moved into Launch Clones ([7], gid 60) matching the
-rem other suites; the patch row moved to Maintenance [8] (gid 59). Gids unchanged.
+rem 2026-11-07: light worker [7] (gid 79) + login [8] (gid 80) added to Launch
+rem Clones on the ZCode LIGHT pattern; shortcuts/patch/status/remove shifted
+rem to [9]-[12]. Local ids renumbered, gids 53-62 unchanged (gids NEVER move).
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=53"
 if "%~1"=="2" set "RESOLVED=54"
@@ -460,18 +467,22 @@ if "%~1"=="3" set "RESOLVED=55"
 if "%~1"=="4" set "RESOLVED=56"
 if "%~1"=="5" set "RESOLVED=57"
 if "%~1"=="6" set "RESOLVED=58"
-if "%~1"=="7" set "RESOLVED=60"
-if "%~1"=="8" set "RESOLVED=59"
-if "%~1"=="9" set "RESOLVED=61"
-if "%~1"=="10" set "RESOLVED=62"
+if "%~1"=="7" set "RESOLVED=79"
+if "%~1"=="8" set "RESOLVED=80"
+if "%~1"=="9" set "RESOLVED=60"
+if "%~1"=="10" set "RESOLVED=59"
+if "%~1"=="11" set "RESOLVED=61"
+if "%~1"=="12" set "RESOLVED=62"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-77; 63 unused; 74 reserved for the deferred
-rem AutoClaw2 MCP watcher). Unknown ids print an error. Returns to caller.
+rem Runs one task by global id (1-80; 63 unused; 74 reserved for the deferred
+rem AutoClaw2 MCP watcher; 78 = the AutoClaw2 identity patch; 79/80 = the
+rem OpenCode light worker + clone login). Unknown ids
+rem print an error. Returns to caller.
 if "%~1"=="1"  (call :Run "src\windows\change_device_id.ps1" & exit /b)
 if "%~1"=="2"  (call :Run "src\windows\reset_cursor.ps1" & exit /b)
 if "%~1"=="3"  (call :Run "src\windows\reset_devin.ps1" & exit /b)
@@ -546,6 +557,7 @@ if "%~1"=="73" (call :Run "tools\sync_autoclaw2_mcp.ps1" -Target All & exit /b)
 if "%~1"=="75" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Inventory -Target All & exit /b)
 if "%~1"=="76" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Import -Apply -Target All & exit /b)
 if "%~1"=="77" (call :Run "tools\sync_mcp_registry.ps1" & exit /b)
+if "%~1"=="78" (call :RunWith "tools\patch_autoclaw2_identity.ps1" "Patch finished - relaunch the clones via their AutoClaw2 shortcuts for colored taskbar buttons." -WaitForClose & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
 if "%~1"=="46" (call :Detached "Cline Yellow" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
@@ -581,6 +593,8 @@ if "%~1"=="61" (
     exit /b
 )
 if "%~1"=="62" (call :Run "tools\install_opencode_clone_shortcuts.ps1" -Remove & exit /b)
+if "%~1"=="79" (call :Detached "OpenCode Light Worker" "-NoProfile" "src\windows\launch_opencode_cli_light.ps1" "" "Light worker opened in a separate window - type tasks there, empty input exits." "Headless CLI on the clone's own state. A fresh clone runs the FREE model - the Login row attaches its account." & exit /b)
+if "%~1"=="80" (call :Detached "OpenCode Clone Login" "-NoProfile" "src\windows\launch_opencode_cli_light.ps1" "-Login" "Login window opened - follow the interactive flow for THIS clone's account." "One-time per clone home: it writes the clone's own auth.json instead of running on the free model." & exit /b)
 if "%~1"=="66" (call :ConfirmRun "Spoof WMI hardware serials - BIOS, motherboard, disk, RAM + Bluetooth MAC" "src\windows\spoof_wmi_serials.ps1" & exit /b)
 call :UnknownTask "%~1"
 exit /b
