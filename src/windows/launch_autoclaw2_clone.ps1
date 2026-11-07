@@ -32,11 +32,18 @@
   cross-account billing (ZCode rule, generalized).
 
   Deliberate non-goals in v1 of this suite (2026-10-23): no auto-update
-  disabling, no port patching, no taskbar AUMID patch - the v2.1.1 engine
-  runs in-process (no shared-port conflict observed with 3 concurrent
-  copies) and no asar patch is needed for isolation. Running windows all
-  share the base AUMID com.zhipuai.autoclaw2; clone SHORTCUTS carry
-  suffixed AUMIDs (com.zhipuai.autoclaw2.cN) so pins stay distinct.
+  disabling, no port patching - the v2.1.1 engine runs in-process (no
+  shared-port conflict observed with 3 concurrent copies) and no patch is
+  needed for isolation. Taskbar identity was the one deferred item
+  (spec §7) and shipped 2026-11-06 as an OPTIONAL env patch: AutoClaw2
+  4.0.0 ships unpacked (plain-text main.cjs), and
+  tools\patch_autoclaw2_identity.ps1 (GHOST.bat AutoClaw2 [13]) makes the
+  AUMID + window icon read ZWORK_AUMID / ZWORK_CLONE_ICON, which this
+  launcher sets per clone below (matching the SHORTCUT AUMIDs
+  com.zhipuai.autoclaw2.cN, so pins and running windows group together).
+  A stock bundle simply IGNORES the two env vars - cosmetic degradation
+  only, warned loudly - so unlike the OpenCode patch gate there is no
+  correctness hazard and the launch always proceeds.
 
   Launch instances SEQUENTIALLY (use launch_autoclaw2_clones_all.ps1);
   never elevated (UIPI rule applies even though the app itself is
@@ -65,6 +72,10 @@ $ExePath    = Join-Path $env:LOCALAPPDATA 'Programs\AutoClaw2\AutoClaw2.exe'
 $ClonesRoot = Join-Path $env:USERPROFILE 'AutoClaw2ClonesHome'
 $ProfileDir = Join-Path $ClonesRoot $Instance
 
+# Clone color identity - MUST stay in sync with the BrandingRepo map in
+# tools\install_autoclaw2_clone_shortcuts.ps1 (one installer, one vocabulary).
+$InstanceColor = @{ c1 = 'blue'; c2 = 'yellow'; c3 = 'green'; c4 = 'red'; c5 = 'orange' }
+
 # --- Status mode ------------------------------------------------------------
 if ($Status) {
     Write-Host "=== AutoClaw2 clone '$Instance' status ==="
@@ -87,6 +98,10 @@ if ($Status) {
     if (Test-Path (Join-Path $ProfileDir 'accounts')) {
         Write-Host 'sign-in     : accounts dir present (verify in-app)'
     } else { Write-Host 'sign-in     : no accounts dir yet (fresh profile)' }
+    $identityMarker = Join-Path (Split-Path -Parent $ExePath) 'resources\app\autoclaw2-identity-patch.marker.json'
+    $cloneIcon = (Resolve-Path (Join-Path $PSScriptRoot "..\..\tools\autoclaw2-$($InstanceColor[$Instance])-branding\tray_icon.ico") -ErrorAction SilentlyContinue).ProviderPath
+    Write-Host "identity    : window patch $(if (Test-Path -LiteralPath $identityMarker) { 'APPLIED' } else { 'stock - one-time fix: GHOST.bat AutoClaw2 [13]' })"
+    Write-Host "              AUMID com.zhipuai.autoclaw2.$Instance  icon $(if ($cloneIcon) { $cloneIcon } else { "MISSING: tools\autoclaw2-$($InstanceColor[$Instance])-branding\tray_icon.ico" })"
     $procCount = @(Get-Process -Name AutoClaw2 -ErrorAction SilentlyContinue).Count
     Write-Host "processes   : $procCount AutoClaw2 process(es) TOTAL (all copies - per-clone attribution is not externally observable)"
     return
@@ -156,9 +171,34 @@ if (Test-Path -LiteralPath $ac2McpSync) {
 $env:ZWORK_USER_DATA       = $ProfileDir
 $env:AUTOCLAW_PROFILE_ROOT = Join-Path $ClonesRoot "$Instance-migration-root"
 
+# Clone taskbar identity (tools\patch_autoclaw2_identity.ps1, AutoClaw2 [13]):
+# the patch makes the bundle read ZWORK_AUMID / ZWORK_CLONE_ICON. The AUMID
+# matches the SHORTCUT AUMID (com.zhipuai.autoclaw2.cN) so a pinned clone and
+# its running window group together; the icon is the same tinted tray_icon.ico
+# the shortcuts carry. A stock bundle ignores both vars - degraded cosmetics
+# only (EC-C06), warned below, launch always proceeds.
+$env:ZWORK_AUMID = "com.zhipuai.autoclaw2.$Instance"
+$cloneIcon = (Resolve-Path (Join-Path $PSScriptRoot "..\..\tools\autoclaw2-$($InstanceColor[$Instance])-branding\tray_icon.ico") -ErrorAction SilentlyContinue).ProviderPath
+if ($cloneIcon) {
+    $env:ZWORK_CLONE_ICON = $cloneIcon
+} else {
+    Remove-Item Env:ZWORK_CLONE_ICON -ErrorAction SilentlyContinue
+    Write-Warning "clone icon missing (tools\autoclaw2-$($InstanceColor[$Instance])-branding\tray_icon.ico) - this launch uses the stock window icon (EC-B02)."
+}
+$identityMarker = Join-Path (Split-Path -Parent $ExePath) 'resources\app\autoclaw2-identity-patch.marker.json'
+if (Test-Path -LiteralPath $identityMarker) {
+    $identityNote = 'window identity patch: APPLIED'
+} else {
+    $identityNote = 'window identity patch: STOCK BUNDLE - taskbar buttons stay grouped'
+    Write-Warning "$identityNote. One-time fix: GHOST.bat > AutoClaw2 > [13] (tools\patch_autoclaw2_identity.ps1)."
+}
+
 Write-Host "launching AutoClaw2 clone '$Instance' ..."
 Write-Host "  ZWORK_USER_DATA       = $env:ZWORK_USER_DATA"
 Write-Host "  AUTOCLAW_PROFILE_ROOT = $env:AUTOCLAW_PROFILE_ROOT"
+Write-Host "  ZWORK_AUMID           = $env:ZWORK_AUMID"
+Write-Host "  ZWORK_CLONE_ICON      = $(if ($env:ZWORK_CLONE_ICON) { $env:ZWORK_CLONE_ICON } else { '<unset>' })"
+Write-Host "  $identityNote"
 
 Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath)
 

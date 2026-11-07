@@ -46,7 +46,7 @@ scrub). AutoClaw2 inverts most of that:
 | Gateway | separate process + port patch needed | in-process engine, no port conflict observed |
 | Device identity | seed-scrub + rotate | **generated fresh per profile** (no seeding) |
 | Credentials | copy profile minus credentials | **nothing copied** — fresh sign-in |
-| Taskbar identity | asar patch engine v12 | not patched (known limitation, see §7) |
+| Taskbar identity | asar patch engine v12 | env-driven plain-text patch (2026-11-06, §7) |
 
 ## 3. Mechanism (verified)
 
@@ -115,14 +115,56 @@ READ (AUMID discovery), never written.
 - `src/windows/launch_autoclaw2_clone.ps1` — per-clone launcher (+`-Status`).
 - `src/windows/launch_autoclaw2_clones_all.ps1` — sequential all-five.
 - `tools/install_autoclaw2_clone_shortcuts.ps1` — Desktop + Start Menu
-  shortcuts, per-clone icons + suffixed AUMIDs, `-Remove` support.
+  shortcuts, per-clone icons + suffixed AUMIDs, `-Remove` support,
+  `-RepairPrimaryAumid` (EC-C01) since 2026-11-06.
+- `tools/patch_autoclaw2_identity.ps1` — window identity patch (2026-11-06,
+  §7); tested by `tests/autoclaw2_identity_patch.Tests.ps1`.
 - `tools/autoclaw2-{blue,yellow,green,red,orange}-branding\` — icons.
 
 ## 7. Known limitations / future work
 
-- Running windows all declare the base AUMID (one taskbar button when
-  grouping); shortcut pins stay per-clone. A window-level patch would need
-  the asar route the v1 suite uses — deferred until actually needed.
+- **Window-level taskbar identity — SHIPPED 2026-11-06** (was "deferred
+  until actually needed"). The 4.0.0 bundle turned out to ship UNPACKED:
+  the whole main process is the plain-text
+  `resources\app\dist\main.cjs` (14.3 MB) — no `app.asar`, no runtime
+  integrity check (the bootstrap does a bare `require()` of it and
+  `dist\installer\payload-verify.cjs` is an existence-only check the app
+  never spawns), so no asar-surgery route was needed.
+  `tools\patch_autoclaw2_identity.ps1` (AutoClaw2 [13] / gid 78) splices
+  THREE byte-anchors — each verified to occur exactly once in the
+  4.0.0 bundle — so the AUMID and window icon become env-driven,
+  following the app's own `ZWORK_*` convention (it never parses argv
+  flags):
+  1. `setAppUserModelId(Kqn)` → `setAppUserModelId(process.env.ZWORK_AUMID||Kqn)`
+     (process-level AUMID, also covers transient windows);
+  2. `appId:Kqn,appIconPath:e,` →
+     `appId:process.env.ZWORK_AUMID||Kqn,appIconPath:process.env.ZWORK_CLONE_ICON||e,`
+     (the per-window `setAppDetails` helper; the following
+     `relaunchCommand:`"${e}"`` backtick template literal is NEVER
+     touched);
+  3. `Uf.app.isPackaged&&Xqn(l,process.execPath)` →
+     `Uf.app.isPackaged&&(process.env.ZWORK_CLONE_ICON&&l.setIcon(process.env.ZWORK_CLONE_ICON),Xqn(l,process.execPath))`
+     (main-window title-bar/taskbar icon).
+  The launcher then sets `ZWORK_AUMID=com.zhipuai.autoclaw2.cN`
+  (matching the SHORTCUT AUMIDs, so pins and running windows group
+  together) + `ZWORK_CLONE_ICON=tools\autoclaw2-<color>-branding\tray_icon.ico`
+  per clone; with no env (the Primary, bare launches) the patched bundle
+  is behaviourally stock. Idempotent; sibling backup
+  `main.cjs.bak-zwork-identity-<stamp>`; marker
+  `resources\app\autoclaw2-identity-patch.marker.json` (sha256
+  before/after); `node --check` gate through the app's own vendor node;
+  verify-after re-read with auto-restore; `-Restore`; after an app update
+  wipes the patch the script detects the stock bundle and re-applies with
+  a FRESH backup. The installer gained `-RepairPrimaryAumid` (EC-C01) in
+  the same pass. Inherited quirk (stock behaviour, unchanged): the
+  window's `relaunchCommand` still points at AutoClaw2.exe, so a taskbar
+  "relaunch" on a clone button would open the Primary profile. The new
+  env vars are deliberately NOT added to the bundle's agent-shell env
+  allowlist (`HX`, the `safeEnvironment` array) — they are main-process
+  reads and must not leak into agent shells. Window TITLE stays the
+  shared "AutoClaw" (the renderer `<title>` would re-override it;
+  `page-title-updated` suppression is out of scope — playbook feature #6
+  remains degraded, reported).
 - If a future AutoClaw2 update adds a shared-port listener, revisit a port
   lever (none observed through v2.1.1.262 with 5 copies).
 - Each clone's first window shows first-run onboarding: one manual sign-in

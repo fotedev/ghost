@@ -24,11 +24,12 @@
   falls back to the AutoClaw2.exe icon - never a set-but-absent path.
 
   AUMID: each shortcut gets System.AppUserModel.ID =
-  com.zhipuai.autoclaw2.cN (base com.zhipuai.autoclaw2 is declared by the
-  app itself in main.cjs; read from the stock AutoClaw.lnk when present).
-  Known limitation (shared with v1 suite): RUNNING windows declare the
-  base AUMID, so taskbar GROUPING shows one button while pins stay
-  per-clone until a window-level patch exists. Do not regress the
+  com.zhipuai.autoclaw2.cN. The base constant wins - deriving it from the
+  v1 Desktop lnk once contaminated every v2 shortcut (cross-suite bug,
+  fixed 2026). Since 2026-11-06 the RUNNING windows carry the same
+  suffixed AUMID + colored icon via the window identity patch
+  (tools\patch_autoclaw2_identity.ps1, ZWORK_AUMID/ZWORK_CLONE_ICON) -
+  see spec §7 - so pins and windows group together. Do not regress the
   Shell.Application ExtendedProperty read rule (no raw .lnk regex).
 
   Per-user locations only -> NO admin rights needed.
@@ -39,13 +40,23 @@
 .PARAMETER Instance
   Install/Remove a single clone (c1..c5) instead of all five.
 
+.PARAMETER RepairPrimaryAumid
+  EC-C01 repair: pinning a clone window (or taskbar pin maintenance) can
+  rewrite a STOCK AutoClaw2 shortcut with a clone AUMID
+  (com.zhipuai.autoclaw2.cN) and wipe its IconLocation. Scans every
+  shortcut in the Desktop + Start-menu Programs locations that targets
+  AutoClaw2.exe, strips a clone-suffixed AUMID back to the base and
+  restores the exe icon. Nothing else is touched.
+
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\install_autoclaw2_clone_shortcuts.ps1
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\install_autoclaw2_clone_shortcuts.ps1 -Instance c3
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\install_autoclaw2_clone_shortcuts.ps1 -Remove
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\install_autoclaw2_clone_shortcuts.ps1 -RepairPrimaryAumid
 #>
 param(
     [switch]$Remove,
+    [switch]$RepairPrimaryAumid,
     [ValidateSet('c1','c2','c3','c4','c5','')]
     [string]$Instance = ''
 )
@@ -182,6 +193,45 @@ $sh = New-Object -ComObject WScript.Shell
 # AUMID-less). The constant wins; no lnk read.
 $BaseAumid = 'com.zhipuai.autoclaw2'
 $script:Failed = $false
+
+if ($RepairPrimaryAumid) {
+    # EC-C01 (P0): only a SUFFIXED base.<cN> value is a hijack; the base itself
+    # and foreign AUMIDs are left untouched. AUMIDs are read via Shell
+    # ExtendedProperty - never by decoding the .lnk bytes (EC-C09).
+    $exe = Join-Path $env:LOCALAPPDATA 'Programs\AutoClaw2\AutoClaw2.exe'
+    if (-not (Test-Path -LiteralPath $exe)) { Write-Error "AutoClaw2.exe not found: $exe - cannot restore the stock icon" }
+    $repaired = 0
+    foreach ($root in @($Desktop, $StartMenu)) {
+        foreach ($lnkFile in @(Get-ChildItem -LiteralPath $root -Filter *.lnk -File -ErrorAction SilentlyContinue)) {
+            $t = $sh.CreateShortcut($lnkFile.FullName)
+            if (-not $t.TargetPath -or ($t.TargetPath -ine $exe)) { continue }
+            $aumid = Get-ShortcutAumid $lnkFile.FullName
+            if (-not $aumid) { Write-Host "no AUMID  : $($lnkFile.FullName)"; continue }
+            if ($aumid -eq $BaseAumid) { Write-Host "clean    : $($lnkFile.FullName) ($aumid)"; continue }
+            if (-not $aumid.StartsWith($BaseAumid + '.')) {
+                Write-Host "foreign  : $($lnkFile.FullName) AUMID '$aumid' does not start with '$BaseAumid.' - leaving untouched"
+                continue
+            }
+            Set-ShortcutAumid -LnkPath $lnkFile.FullName -Aumid $BaseAumid
+            $s2 = $sh.CreateShortcut($lnkFile.FullName)
+            $s2.IconLocation = "$exe,0"
+            $s2.Save()
+            $back = Get-ShortcutAumid $lnkFile.FullName
+            $chk = $sh.CreateShortcut($lnkFile.FullName)
+            $ok = ($back -eq $BaseAumid) -and ($chk.IconLocation -like "$exe*")
+            Write-Host ("{0} : repaired {1} -> aumid={2} icon={3}" -f $(if ($ok) {'OK  '} else {'FAIL'}), $lnkFile.FullName, $(if ($back) { $back } else { '<none>' }), $chk.IconLocation)
+            if ($ok) { $repaired++ } else { $script:Failed = $true }
+        }
+    }
+    if ($repaired -gt 0) {
+        Write-Host ""
+        Write-Host "repaired $repaired shortcut(s). Re-pin from a running STOCK AutoClaw2 window if a pin still resolves to a clone identity."
+    } else {
+        Write-Host "nothing needed repairing."
+    }
+    if ($script:Failed) { Write-Host 'FAILED - see FAIL lines above.' -ForegroundColor Red; exit 1 }
+    return
+}
 
 foreach ($id in $TargetIds) {
     $def       = $InstanceDefs[$id]
