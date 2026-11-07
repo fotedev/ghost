@@ -1,4 +1,4 @@
-# Harness: exercises GHOST.bat menu input handling on a TEST COPY.
+﻿# Harness: exercises GHOST.bat menu input handling on a TEST COPY.
 # Runs locally and in CI (ci.yml windows job, "GHOST.bat menu harness");
 # derives the repo root from its own location so it works on any checkout.
 # stdin redirection is unusable here (the launcher's ESC-capture powershell
@@ -206,15 +206,18 @@ $hits = ([regex]::Matches($out, 'Unknown task "77"')).Count
 if ($hits -ne 1)                              { $failures += "N: expected 1 Unknown task from Cline chain, got $hits" }
 
 # O) OpenCode submenu (main [6]): main menu lists it, renders clean, entries
-#    listed incl. the two-digit [10], no chain leak
+#    listed incl. the two-digit [12], no chain leak. 2026-11-07: light worker
+#    [7] + login [8] added; shortcuts/patch/status/remove shifted to [9]-[12].
 $out = Invoke-Scenario 'O_opencode_render' @('6', '0', '0')
 if ($out -match 'Unknown task')                  { $failures += 'O: Unknown task on OpenCode submenu render' }
 if ($out -match '%PENDING_CHAIN%')               { $failures += 'O: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'OpenCode Multi-Instance')    { $failures += 'O: OpenCode submenu not shown' }
 if ($out -notmatch '\[ 1\].*Launch Blue clone')  { $failures += 'O: OpenCode [1] Launch Blue clone not rendered' }
-if ($out -notmatch '\[ 7\].*Install clone shortcuts') { $failures += 'O: OpenCode [7] Install shortcuts not rendered' }
-if ($out -notmatch '\[ 8\].*Apply clone-home patch') { $failures += 'O: OpenCode [8] Apply clone-home patch not rendered' }
-if ($out -notmatch '\[10\].*Remove clone shortcuts') { $failures += 'O: OpenCode [10] Remove shortcuts not rendered' }
+if ($out -notmatch '\[ 7\].*Launch light headless worker') { $failures += 'O: OpenCode [7] light worker not rendered' }
+if ($out -notmatch '\[ 8\].*Login clone account') { $failures += 'O: OpenCode [8] Login clone account not rendered' }
+if ($out -notmatch '\[ 9\].*Install clone shortcuts') { $failures += 'O: OpenCode [9] Install shortcuts not rendered' }
+if ($out -notmatch '\[10\].*Apply clone-home patch') { $failures += 'O: OpenCode [10] Apply clone-home patch not rendered' }
+if ($out -notmatch '\[12\].*Remove clone shortcuts') { $failures += 'O: OpenCode [12] Remove shortcuts not rendered' }
 
 # P) invalid OpenCode chain id "6 77" -> exactly one legit Unknown task
 $out = Invoke-Scenario 'P_opencode_invalid' @('6 77', '0', '0')
@@ -241,13 +244,15 @@ if ($out -notmatch '\[ 7\].*Launch light headless worker') { $failures += 'S: ZC
 if ($out -notmatch '\[28\].*Login clone account')           { $failures += 'S: ZCode [28] login helper not rendered' }
 
 # U) AutoClaw2 Sync + Chat Import rows render (2026-11-04): [8] Import MCPs,
-#    [9] Chat inventory, [10] Import chats; Maintenance shifted to [11]/[12]
+#    [9] Chat inventory, [10] Import chats; Maintenance shifted to [11]/[12];
+#    [13] identity patch added 2026-11-06 (gid 78)
 $out = Invoke-Scenario 'U_autoclaw_sync_render' @('4', '0', '0')
 if ($out -notmatch '\[ 8\].*Import MCPs to clones')  { $failures += 'U: AutoClaw2 [8] Import MCPs not rendered' }
 if ($out -notmatch '\[ 9\].*Chat inventory')         { $failures += 'U: AutoClaw2 [9] Chat inventory not rendered' }
 if ($out -notmatch '\[10\].*Import chats to clones') { $failures += 'U: AutoClaw2 [10] Import chats not rendered' }
 if ($out -notmatch '\[11\].*Clone status')           { $failures += 'U: AutoClaw2 [11] Clone status not rendered' }
 if ($out -notmatch '\[12\].*Remove clone shortcuts') { $failures += 'U: AutoClaw2 [12] Remove shortcuts not rendered' }
+if ($out -notmatch '\[13\].*Apply clone identity patch') { $failures += 'U: AutoClaw2 [13] identity patch not rendered' }
 
 # T) System & GHOST Maintenance submenu (main [3]): renders clean incl. the
 #    MCP registry sync row (2026-11-04, gid 77); invalid chain id -> one
