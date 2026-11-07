@@ -76,7 +76,7 @@ and Primary is read-only.
 | G5 | **Credentials are separate objects, never in the row.** `credential_version` is nullable; staged refs look like `desktop-credential-stage:v1:<uuid>`. Secrets sit encrypted in `<account>\account-credentials.enc` and `<account>\runtime\owner-secrets.enc`; MCP OAuth token files would live in `<userData>\mcp-oauth\` (dir absent — no OAuth source configured yet). | Bundle + file probe. |
 | G6 | **Chat entries are append-only by construction.** Triggers abort `UPDATE` (`neutral_session_entry_immutable`) and abort `DELETE` unless the session is tombstoned first (`deleted_at` set). | Live `sqlite_master` trigger text. |
 | G7 | **Chat surface = 5 tables + FTS + events.** Per profile today: Primary 9 sessions / 9 heads / 2003 entries / 84 FTS rows / 6088 events / 52 runs / 482 artifacts; `c1` 4 / 4 / 929 / 36 / 2698 / 22 / 194; `c3` all zeros. FTS is a **standalone** FTS5 table (`session_id`, `entry_id` UNINDEXED, `body`, `tokenize='trigram'`), not external-content. | Live counts + DDL. |
-| G8 | **Schema version is uniform**: `schema_migrations` = `0001_clean_dogfood_baseline`, order 80, same sha256 on Primary, `c1`, `c3`. | Live query. |
+| G8 | **Schema history is append-only multi-row**: up to 2026-11-04 it was a single row (`0001_clean_dogfood_baseline`, order 80, same sha256 on Primary, `c1`, `c3`); the 4.0.0 update (2026-11-05, ledger migration 80→85) appended `0081_agent_default_project` … `0085_session_goals` on top of the intact baseline. The sync gate therefore requires the baseline tuple to be present + our column sets; the max sequence is deliberately not pinned (86+ stay acceptable). | Live query + the 2026-11-05 gate-refusal verdict (all six rows printed verbatim). |
 | G9 | **Zero MCP sources exist on this host** — `governed_connected_sources` and `…_revisions` are empty in Primary, `c1`, `c3`. A Primary→clone copy would currently be a no-op. | Live counts. |
 | G10 | **Cross-profile workspace identity is `root_path`, not id.** The same repo path is workspace `f00dd839-…` in Primary and `197b9021-…` in `c1`. `c3` has only the default workspace (1 row). | Live `work_workspaces` dump. |
 | G11 | **The app is asInvoker and in-process**: no app-server child to recycle (unlike ZCode). A running instance holds `<ProfileDir>\lockfile` exclusively and keeps `runtime.sqlite` in WAL with live handles. | Launcher design + live `-wal`/`-shm` presence + open probe. |
@@ -251,7 +251,7 @@ WARN, never the write. Env-var *names* may be listed (`envKeys`), values never.
 |---|---|---|
 | F1 | Target clone running (lockfile held) | Pre-launch path: not possible; one-shot/watcher: SKIP + WARN, exit 0 (nothing attempted), re-run suggested |
 | F2 | `accounts\` empty (fresh clone, G1) | SKIP with "sign in once first" — never invent an account dir |
-| F3 | Schema version or column set differs | Refuse (exit 2) with both versions printed; no partial write |
+| F3 | Schema drift: baseline row edited/removed, or a required column missing | Refuse (exit 2) with the expected baseline + found rows printed; no partial write. Forward-appended migrations on top of an INTACT baseline are accepted (2026-11-05: the old single-row check refused every post-4.0.0 profile for a whole day — launcher 2b became a silent no-op, now warned loudly) |
 | F4 | Source workspace has no `root_path` match | SKIP that workspace + WARN; default workspace still targeted |
 | F5 | Copied session references a missing artifact file/row | Drop the referencing entry, count it, surface in the report; abort if ratio > threshold (default 5%) |
 | F6 | App rewrites/repairs imported rows on next start | Detected by post-run verify (second read after launch in the acceptance run); documented, not hidden |
@@ -308,6 +308,203 @@ WARN, never the write. Env-var *names* may be listed (`envKeys`), values never.
 
 Each spike is **read-only outside a sacrificial profile copy** and must end with a
 one-line verdict appended to this document.
+
+**Spike verdict E5 (empirical, 2026-11-04 — before the formal Phase 0 run):** manifest-driven
+rows written to `c1` exactly per D5 (10 rows verified: `status='pending'`, `error_code=NULL`,
+`revision='sync-v1:*'`, `tools_json='[]'`, one default workspace) are **NOT usable as-is**:
+the sources UI shows "The server returned an invalid response." for every source (stdio and
+http alike) and the runtime logs `sourceDeferredCount: 0` (zero tools from connected sources,
+while the app's own cloud-side `mcp_legal_*` connectors keep working). The servers themselves
+are healthy — a manual MCP `initialize` handshake against the playwright stdio server
+succeeded. The sync layer is therefore exonerated; the failure is in the app's adoption of
+externally-written rows. Next probes: (1) click the UI **Reconnect** on a credential-free
+stdio source (playwright) — if it adopts, document reconnect-per-source; (2) if it still
+fails, the E5 fallback applies: GUI-author sources in Primary once, then distribute with
+`-From Primary`; (3) for http sources, expect per-clone sign-in regardless (D4 imports them
+unauthenticated).
+
+**E5 RESOLVED (2026-11-05 evening — root cause mined from the 4.0.0 `main.cjs`):** the app
+parses every `governed_connected_sources` row STRICTLY (`Gxn` → the `A_` zod schema):
+`status` must be `'connected'|'failed'` — the sync's `'pending'` is an ILLEGAL value. Every
+pending row fails the parse and renders through the fallback decoder `fFi` with a hardcoded
+`error:"invalid_response"` — exactly the "The server returned an invalid response." UI text —
+and `test()`/Reconnect throw in `require()` before any network call. This matches the live
+evidence perfectly: zero stdio spawns, zero MCP network calls and zero log traces all day in
+c1/c3 while the red list showed. The source test itself is **LOCAL** (child_process spawn for
+stdio with MCP `initialize` protocolVersion 2025-03-26 + `tools/list`; direct Streamable-HTTP
+fetch for http endpoints; the cloud only serves the whitelisted official connectors and
+api.github.com). Mined row contracts: slug `^[a-z][a-z0-9_]{0,39}$` (no '-');
+`error_code` ∈ {authentication_failed, connection_failed, invalid_response} or NULL;
+`tools_json` = JSON array of `{name: ^[a-z][a-z0-9_]{0,63}$, description: non-empty string,
+remoteName?, inputSchema? ≤16384 serialized chars}`; `updated_at` = ISO-8601 with `Z`. Tools
+are only USABLE when the row is `status='connected'` + the tool name is in `tools_json` +
+the workspace is trusted (`work_workspaces.trust_status='trusted'`).
+`governed_connected_source_revisions` is a post-success cache, NOT a gate. No entitlement
+gate exists on user-added sources. The GUI has no import/export for tools (command/endpoint
+are immutable after creation; a clone must delete + re-create via the GUI).
+
+**Fix (implemented 2026-11-05):** the sync now replicates the app's own local test per source
+(stdlib-only `discover_stdio`/`discover_http` in `ghost/autoclaw2.py`) and writes PRE-TESTED
+rows the app accepts natively — `status='connected'` + real `tools_json` (IL-mapped:
+vme-normalized tool names kept consistent with the app's permission lookups, synthesized
+descriptions, oversized schemas dropped) + a `native.<sha256[:16]>` revision (T5 replica,
+contract `connected-source-tool@2`) on success; `status='failed'` + a legal error_code on
+failure (honest — and since the row now parses, the GUI's own Reconnect works on it). Legacy
+`pending` rows are rewritten even when the definition is unchanged; sync-authored rows with
+illegal slugs migrate in place (`chrome-devtools` → `chrome_devtools`,
+`supabase-masarx` → `supabase_masarx`). Verify-after re-reads every row and requires the
+strict shape. http sources behind OAuth (Vercel / GitHub Copilot / Sentry / Upstash) test as
+`authentication_failed` — sign in once per clone via the GUI (Edit → token), then Reconnect.
+The sync warns loudly when the target workspace is untrusted, because tools will not be
+offered in new runs until it is trusted in the GUI.
+
+### 9.1 Incident 2026-11-05 — one corrupt CAS blob bricked every clone run (HEALED)
+
+One content-addressed blob in the per-account declarative-resources store
+(`accounts\<hash>\runtime\pi-resources\blobs\sha256\`) had content sha256 ≠ its file name:
+`c30d9cd48561accc401a04ad079237b43223e3550ba3ff2a712d944be10baa63.r` (7,906,728 B). Every run
+start loads the current revision manifest → verifies the blob → `resource_revision_corrupt
+(cause: content)` → run failed in ~1–2 s before any model request. The 4.0.0 updater detects
+it and attempts a quarantine, but every file/dir in the CAS tree is Windows-ReadOnly, so
+`zwork.resource.snapshot_quarantine_failed … code EPERM` fires and the app can never
+self-heal. All five top-level `revisions\<hash>\manifest.json` in c1 (and all three in c3)
+reference the blob, so no revision loads.
+
+Verified facts (full hash audits + logs, 2026-11-05):
+- c1 (2031 blobs): exactly 1 mismatch — this blob, mtime 2026-10-29T12:11Z. c3 (1680 blobs):
+  same single mismatch, mtime 2026-11-02T04:46Z. Primary's DORMANT account `27e33829…`: same
+  single mismatch (that account is equally bricked if ever reactivated).
+- All corrupt copies share ONE wrong-content fingerprint (`e6fc9d1a55b0f171…`, identical byte
+  count) — a deterministic bad fetch written under the declared hash, i.e. the app's CAS
+  writer accepted content that never matched its name (missing write-time integrity check).
+  The Primary's fresh account `68f7331f…` (signed in 2026-11-05) fetched a CLEAN copy of the
+  same blob — the upstream source was fixed by then.
+- The corruption predates the 4.0.0 update (2.1.1-era runs on 11-05 01:01Z fail identically);
+  the update is not the cause and could not heal it.
+
+Heal procedure (executed 2026-11-05, live-verified):
+1. Close the clone (lockfile probe). 2. Full CAS hash-audit (content sha256 vs filename) to
+enumerate ALL corrupt blobs. 3. Backup the blob + TOP-LEVEL `revisions\<hash>\manifest.json`
+copies to `ID_Backups\<ts>\` (never recurse into `revisions\` — it contains dangling
+junctions that abort enumeration). 4. Clear ReadOnly on the corrupt blob, overwrite it with a
+verified-clean copy from a healthy store (verify the source's hash first), restore ReadOnly,
+re-hash to verify. 5. Relaunch via the launcher; send one ping. c1: run completed 18:02 local
+(model request issued, answer rendered, zero corrupt events in the log). Fallbacks when no
+clean copy exists: rename the blob `.corrupt-bak` (4.0.0 rebuilds the revision), then move
+the whole `pi-resources` aside (`pi-resources.bad-<ts>`) — the app re-fetches a fresh catalog
+(proven by every fresh account snapshot verifying clean).
+
+**Warning:** never `-RestoreBackup` across the 4.0.0 migration — the
+`.autoclaw2-sync-backups` are whole-DB schema-80 copies; restoring one down-migrates the
+runtime DB below the app's own migrations.
+
+### 9.2 Incident 2026-11-06 — the last flipped source (cloudinary) + the Primary's two surprises (RESOLVED)
+
+After the E5 fix landed, blue (c1) and green (c3) converged to identical UIs —
+Playwright ·21, Chrome DevTools ·3, Obsidian ·15, Supabase ×2 ·20 all green — with
+exactly ONE stdio source still flipping to `invalid_response` at every app start:
+**cloudinary**, despite the sync's own pre-test reporting `connected(42)` and the
+written row passing every check the sync knew about.
+
+**Root cause (bundle + live-DB proven):** the stored-row zod (`IL`, refined from
+main.cjs) is STRICTER than the gL registration walk the sanitizer mirrored:
+`inputSchema: u.record(...).refine(n => JSON.stringify(n).length <= 16384,
+"inputSchema_too_large")` — **16384 chars serialized, per tool**, measured AFTER
+keyword stripping. One over-limit tool fails the WHOLE row parse at startup
+(`registerOrFail` → fallback renderer). Cloudinary's `upload_asset` serializes to
+**20,024 chars** — the only violation in the whole suite (every other connected
+source's largest schema is ≤2 KB). The sanitizer's old fast-reject (65536, the gL
+walk bound) let it through; `A_` (the row zod) has NO tools-count or total-size cap,
+so `max(32)`/`256*1024` caps seen elsewhere in the bundle belong to the app's own
+live-discover path, not to rows we write.
+
+**Fix:** `_sanitize_input_schema` now measures the CLEANED schema (UTF-16-exact,
+`JSON.stringify` units) and drops the tool when it still exceeds 16384 — raw size is
+irrelevant because stripping unsupported keys shrinks schemas. `strict_row_problems`
+mirrors the refine (per-tool `inputSchema_too_large` + `remoteName` 1..128) so the
+verify-after gate can never wave such a row through again. Live: c1 re-synced
+`cloudinary: connected (41 tool(s))` — `upload_asset` is the honest cost.
+
+**Primary surprise 1 — empty profile:** the Primary had NO sources at all (the sync
+never targeted it), and `-Target Primary` refused with `ambiguous-account`: the
+Primary carries TWO account dirs (dormant `27e33829…` + live `68f7331f…`) and
+`resolve_profile` was built to refuse guessing. New rule: an explicit account hint
+(exact 64-hex or unique prefix, `-Account <hint>` on the PS side) wins; without one
+the account whose `runtime.sqlite` was written most recently is selected, LOUDLY
+(stderr WARN). A genuine tie (<60 s apart) still refuses.
+
+**Primary surprise 2 — fresh-account schema stamp:** the live `68f7331f` account was
+bootstrap-created (not migrated), and its `schema_migrations` holds a SINGLE row —
+`('0001_clean_dogfood_baseline', 85, sha256:2e8dc336…)` — the app's bootstrap
+creates the schema directly at the current version and re-stamps the baseline id at
+the current sequence. A legitimate second history encoding. `check_schema` accepts
+it at exactly that tuple (`FRESH_STAMP_BASELINE`, verdict `history:
+"fresh-stamp-85"`, column gate unchanged); any other single-row shape still refuses
+as drift.
+
+First Primary sync (2026-11-06): 10 rows written + verified — 6 connected
+(playwright ·21, chrome_devtools ·3, supabase ·20, supabase_masarx ·20, cloudinary
+·41, obsidian ·15) + 4 honest auth failures (upstash/sentry/github/vercel — OAuth
+sign-in per profile, same as clones).
+
+**§9.2.1 — the http-auth contract (mined 2026-11-06, answers "Reconnect does
+nothing"):** clicking Reconnect on a token-less http source is EXPECTED to look
+like nothing happened — the app re-runs its live test, the endpoint answers 401,
+the row is re-recorded `authentication_failed`, and the chip stays red with NO
+toast (progress over the E5 era, where Reconnect threw before any network). The
+app's OAuth machinery (`integrations.start_oauth`, `authKind:"mcp_oauth"`, PKCE
+loopback redirects, `/.well-known/oauth-protected-resource` discovery) belongs to
+the BUILT-IN connectors only — user MCP sources never auto-OAuth. The user fix
+path is the **"Bearer token (optional)" password field in the "+ Add tool"
+dialog** (`tools-mcp-add-credential`) — the Edit dialog deliberately exposes NO
+connection parameters ("Connection parameters are set when added. To change the
+address, remove and add it again."), so the token is supplied at ADD time: delete
+the bare row, re-add the same URL with the token, keeping the SAME source name so
+the sync's merge matches the manifest slug and never re-creates a bare duplicate.
+The token is stored in the app's per-(workspace, slug) CUSTODY store
+(`storeCredential`, row `credential_version` links to it) and injected via an
+injected `authHeaders` hook at request time — the row's `endpoint` locator stays
+the bare URL. This makes
+the sync structurally safe for credentials: `merge_sources` compares
+name/endpoint/source_permission only, so a signed-in row is `unchanged` on every
+later sync (the launcher's pre-launch [2b] cannot wipe tokens). Bearer values for
+GitHub/Vercel already exist machine-wide from the MCP registry sync
+(`GITHUB_MCP_AUTHORIZATION` / `VERCEL_MCP_AUTHORIZATION`, full "Bearer …" header
+values — strip the `Bearer ` prefix for the dialog field); Sentry and Upstash
+need a token created in each service's console per profile. After sign-in +
+Reconnect the row reads `status=connected` with a non-NULL `credential_version`
+(verifiable live — WAL reads are safe against a running app).
+
+**§9.2.2 — programmatic credential wiring + the app's wire caps (2026-11-06,
+"run them now" session):** the credential custody is fully replicable without
+the UI: `<account>/runtime/credentials.enc` = Electron safeStorage(file) =
+**`b"v10" + nonce(12) + AES-256-GCM(key, nonce, JSON.stringify(dict))`** where
+`key` = DPAPI-decrypt(base64decode(Local State → os_crypt.encrypted_key)[5:])
+(per-profile, Chromium OSCrypt — .NET ProtectedData does NOT read these files
+directly because of the v10+GCM layer; python `cryptography` + ctypes DPAPI
+does, proven by decrypting the app's own `model-connection-command-claims.enc`).
+Key = `JSON.stringify([ownerId, "source:<workspaceId>:<slug>", version])`
+(ownerId = the rows' owner_id UUID), value = the credential STRING — a raw token
+becomes `Authorization: Bearer <token>` (mined `EJ`), or a JSON object passes as
+a literal headers record. Row `credential_version` must equal the key's version.
+The app RE-TESTS every source at startup and rewrites rows natively on success
+(omniroute flipped to a `native.` revision the moment its router came up).
+Outcomes: github + vercel authenticated THROUGH the wired custody (the app got
+past 401 — `invalid_response`, not `authentication_failed`) but its own
+discovery then failed: **vercel's raw catalog is 633 KB — 2.4× the app's hard
+`JSON.stringify(tools).length > 256*1024` discover cap** (no toolset header
+shrinks it) → impossible on v4.0.0; **github fails the startup test
+deterministically** while the exact same handshake replays clean externally
+(136 KB, max schema 3.5 KB, no dups, no pagination, gL-clean schemas) — an
+app-side quirk left unresolved; a runtime Reconnect may still succeed. Stale
+tokens (sentry `sntryu_…`, cloudflare `cfut_…`) fail auth honestly until
+recreated in each console; upstash/stripe/resend/openseo are OAuth-only.
+`discover_http` gained an optional `headers` parameter so the sync can pre-test
+credentialed http sources. Final state after the full merge + wiring session:
+**10 connected / 10 honest-failed per signed-in profile** (the 10 green include
+omniroute ·110 with its local router running, linkedin ·5, github_local ·26;
+notion stays connected·0 — the current server exposes no tools with the legacy
+`NOTION_TOKEN` even via `OPEN_API_MCP_TOKEN`).
 
 ## 10. Provenance
 

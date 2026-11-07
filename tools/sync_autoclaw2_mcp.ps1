@@ -80,11 +80,22 @@ param(
     [ValidateSet('Master', 'Primary')]
     [string]$From = 'Master',
 
+    # Account disambiguation for profiles carrying more than one account dir
+    # (the Primary ships a dormant + a live account): exact 64-hex dir name or
+    # a unique prefix. Without it the Python core picks the account whose
+    # runtime.sqlite was written most recently (the live one), loudly.
+    [string]$Account = '',
+
     [switch]$IncludePrimary,
 
     [switch]$AllWorkspaces,
 
     [switch]$DryRun,
+
+    # Seconds per live MCP discover (stdio spawn / http fetch) before a
+    # source is written as failed/connection_failed. Cold npx/uvx installs
+    # can be slow - raise this if a package must download first.
+    [int]$DiscoverTimeoutSeconds = 60,
 
     [switch]$Quiet,
 
@@ -225,7 +236,9 @@ $payload = @{
     from    = $From.ToLower()
     policy  = if ($AllWorkspaces) { 'all' } else { 'default' }
     dry_run = [bool]$DryRun
+    discover_timeout = $DiscoverTimeoutSeconds
 }
+if ($Account) { $payload.account_hint = $Account }
 if ($From -eq 'Master') {
     $manifest = Join-Path $repoRoot 'tools\autoclaw2-mcp.master.json'
     if (-not (Test-Path -LiteralPath $manifest)) {
@@ -272,6 +285,14 @@ foreach ($profile in $call.verdict.profiles) {
                 if ($ws.manifest_absent) {
                     Write-Tag 'DRY' ("  = kept local: {0}" -f ($ws.manifest_absent -join ', ')) 'Cyan'
                 }
+                foreach ($mig in ($ws.slug_migrations | ForEach-Object { $_ })) {
+                    Write-Tag 'DRY' ("  ~ slug migrate: {0} -> {1}" -f $mig.from, $mig.to) 'Cyan'
+                }
+            }
+            foreach ($warn in @($profile.workspace_warnings)) {
+                if ($warn) {
+                    Write-Tag 'WARN' ("{0} - {1} ({2})" -f $name, $warn.reason, $warn.root_path) 'Yellow'
+                }
             }
             continue
         }
@@ -284,9 +305,21 @@ foreach ($profile in $call.verdict.profiles) {
         'ok' {
             Write-Tag 'ok' ("{0} - {1} row(s) written + verified; backup {2}" -f
                 $name, $profile.written, (Split-Path $profile.backup -Leaf)) 'Green'
+            foreach ($src in ($profile.sources | ForEach-Object { $_ })) {
+                if ($src.status -eq 'connected') {
+                    Write-Tag 'ok' ("  {0}: connected ({1} tool(s))" -f
+                        $src.slug, $src.test.tool_count) 'Green'
+                } else {
+                    Write-Tag 'WARN' ("  {0}: live test FAILED ({1}) - fix the cause or sign in via the GUI, then Reconnect" -f
+                        $src.slug, $src.test.error_code) 'Yellow'
+                }
+            }
             Write-AuditLine $name @{
                 status = 'ok'; written = $profile.written
                 backup = $profile.backup
+                sources = (($profile.sources | ForEach-Object {
+                    "{0}={1}({2})" -f $_.slug, $_.status, $_.test.tool_count
+                }) -join ',')
             }
             continue
         }

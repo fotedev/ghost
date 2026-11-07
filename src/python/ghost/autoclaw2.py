@@ -20,14 +20,28 @@ on stdout with a specific remedy).
 import hashlib
 import json
 import os
+import queue
 import re
 import shutil
 import sqlite3
+import subprocess
+import sys
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 STDIO_PREFIX = "stdio+v1:"
-SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+# The app's own validators (main.cjs `By` / `IL`, mined 2026-11-05): a slug or
+# tool name outside these shapes fails the app's strict row parse and the row
+# renders as the hardcoded "invalid response" fallback (spec §9 E5 root cause).
+SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+# The only error_code values the app's row schema (FHr enum) accepts.
+ERROR_CODES = ("authentication_failed", "connection_failed", "invalid_response")
+REVISION_TOOL_CONTRACT = "connected-source-tool@2"
 REVISION_PREFIX = "sync-v1:"
 SIDECAR_NAME = ".autoclaw2-chat-imports.json"
 BACKUP_DIR_NAME = ".autoclaw2-sync-backups"
@@ -35,6 +49,15 @@ SOURCE_TABLE = "governed_connected_sources"
 MIGRATION_ID = "0001_clean_dogfood_baseline"
 MIGRATION_SEQUENCE = 80
 MIGRATION_CHECKSUM = "sha256:63f45a379d39b0956d8818a33d23d2f71ef4dd3d1b82bf87cbd5e1d4a2f7718c"
+# The app's fresh-account bootstrap (observed on the Primary's live 68f7331f
+# account, 2026-11-06) does NOT replay the migration history: it creates the
+# schema directly at the current version and stamps ONE schema_migrations row
+# with the baseline id, the current sequence and that schema's checksum. A
+# legitimate second history encoding - accepted only at this exact tuple;
+# any other shape still refuses as drift.
+FRESH_STAMP_BASELINE = (
+    "0001_clean_dogfood_baseline", 85,
+    "sha256:2e8dc3362ea60ef6c867f530895a305345c47e14295a6dc88173f444ece1cc53")
 # FTS indexes exactly these two entry types (verified: 84 rows for 2003
 # entries in the Primary, all of type request|answer).
 FTS_ENTRY_TYPES = ("request", "answer")
@@ -116,16 +139,59 @@ def probe_running(profile_dir):
     return not _exclusive_open_ok(lockfile)
 
 
-def resolve_profile(name, require_account=False):
+_ACCOUNT_TIE_SECONDS = 60.0
+
+
+def _pick_account(name, acc_root, accounts, hint):
+    """Choose one account dir among several (the Primary's dormant
+    27e33829 + live 68f7331f case). An explicit hint - exact 64-hex dir name
+    or unique prefix - wins; without one, the account whose runtime.sqlite
+    was written most recently wins (the live account is the one the running
+    app keeps writing), loudly. Returns (path, how), or None when the caller
+    should report ambiguous-account (no hint and the two newest runtimes
+    were written within the tie window). A bad hint raises regardless of
+    require_account: a wrong hint is a caller error, not a guessable state."""
+    if hint:
+        matches = [a for a in accounts if a == hint]
+        if not matches:
+            matches = [a for a in accounts if a.startswith(hint)]
+        if not matches:
+            raise Refusal("account-hint-no-match",
+                          "{0}: no account dir matches hint {1!r}".format(
+                              name, hint))
+        if len(matches) > 1:
+            raise Refusal("account-hint-ambiguous",
+                          "{0}: hint {1!r} matches {2} account dirs".format(
+                              name, hint, len(matches)))
+        return os.path.join(acc_root, matches[0]), "hint"
+    mtimes = []
+    for acc in accounts:
+        try:
+            mtimes.append((os.path.getmtime(
+                os.path.join(acc_root, acc, "runtime", "runtime.sqlite")), acc))
+        except OSError:
+            continue
+    if not mtimes:
+        return None
+    mtimes.sort(reverse=True)
+    if len(mtimes) > 1 and mtimes[0][0] - mtimes[1][0] < _ACCOUNT_TIE_SECONDS:
+        return None
+    print("[autoclaw2] WARN: {0}: {1} account dirs; selecting {2}... "
+          "(newest runtime.sqlite)".format(
+              name, len(accounts), mtimes[0][1][:12]), file=sys.stderr)
+    return os.path.join(acc_root, mtimes[0][1]), "newest-mtime"
+
+
+def resolve_profile(name, require_account=False, account_hint=None):
     """Resolve one profile to its account runtime DB. Returns a dict with
     status fields; raises Refusal only for hard errors (unknown name,
-    ambiguous account) -- missing accounts come back as status so the
-    caller can SKIP+WARN instead of failing a whole run."""
+    ambiguous account, bad account hint) -- missing accounts come back as
+    status so the caller can SKIP+WARN instead of failing a whole run."""
     pdir = profile_path(name)
     info = {
         "profile": name, "path": pdir, "exists": os.path.isdir(pdir),
         "account_dir": None, "account_status": None, "db_path": None,
-        "running": False,
+        "account_selected_by": None, "running": False,
     }
     if not info["exists"]:
         info["account_status"] = "profile-missing"
@@ -146,10 +212,18 @@ def resolve_profile(name, require_account=False):
     if len(accounts) == 0:
         info["account_status"] = "not-signed-in"
     elif len(accounts) > 1:
-        info["account_status"] = "ambiguous-account"
-        if require_account:
-            raise Refusal("ambiguous-account",
-                          "{0}: {1} account dirs, refusing to guess".format(name, len(accounts)))
+        picked = _pick_account(name, acc_root, accounts, account_hint)
+        if picked is None:
+            info["account_status"] = "ambiguous-account"
+            if require_account:
+                raise Refusal("ambiguous-account",
+                              "{0}: {1} account dirs, refusing to guess".format(name, len(accounts)))
+        else:
+            acc, how = picked
+            info["account_status"] = "ok"
+            info["account_dir"] = acc
+            info["db_path"] = os.path.join(acc, "runtime", "runtime.sqlite")
+            info["account_selected_by"] = how
     else:
         info["account_status"] = "ok"
         acc = os.path.join(acc_root, accounts[0])
@@ -177,19 +251,38 @@ def rw_connect(path):
 
 
 def check_schema(conn):
-    """Schema gate (spec F3/R4): the migration row must match the version
-    this module was written against, and every column we touch must exist."""
+    """Schema gate (spec F3/R4): the baseline migration row this module was
+    written against must still be present, and every column we touch must
+    exist. schema_migrations is an APPEND-ONLY history -- since the 4.0.0
+    update (2026-11-05) it holds the baseline/80 row plus forward migrations
+    (0081..0085 and future 86+), so a single-row requirement is wrong and the
+    max sequence is deliberately not pinned. Forward drift is acceptable as
+    long as the baseline tuple survives intact and the column sets hold;
+    editing or removing the baseline row itself is drift and refuses.
+    EXCEPTED: a FRESH account (bootstrap-created, e.g. the Primary's live
+    68f7331f) carries a single re-stamped baseline row at the current
+    sequence - accepted only at the exact FRESH_STAMP_BASELINE tuple."""
     rows = conn.execute(
         "SELECT migration_id, sequence, checksum FROM schema_migrations").fetchall()
-    expected = (MIGRATION_ID, MIGRATION_SEQUENCE, MIGRATION_CHECKSUM)
-    if len(rows) != 1 or (rows[0][0], rows[0][1], rows[0][2]) != expected:
+    baseline = (MIGRATION_ID, MIGRATION_SEQUENCE, MIGRATION_CHECKSUM)
+    found = [{"migration_id": r[0], "sequence": r[1], "checksum": r[2]}
+             for r in rows]
+    tuples = [(r[0], r[1], r[2]) for r in rows]
+    if baseline not in tuples:
+        if tuples == [FRESH_STAMP_BASELINE]:
+            return _column_gate(conn, "fresh-stamp-85")
         return {
             "ok": False,
-            "expected": {"migration_id": expected[0], "sequence": expected[1],
-                         "checksum": expected[2]},
-            "found": [{"migration_id": r[0], "sequence": r[1], "checksum": r[2]}
-                      for r in rows],
+            "expected_baseline": {"migration_id": baseline[0],
+                                  "sequence": baseline[1],
+                                  "checksum": baseline[2]},
+            "found": found,
         }
+    return _column_gate(conn, "baseline+forward")
+
+
+def _column_gate(conn, history):
+    """Every column the module touches must exist (see check_schema)."""
     required = {
         "work_sessions": ["session_id", "owner_id", "workspace_id", "title",
                           "deleted_at", "archived_at", "external_provider",
@@ -223,7 +316,7 @@ def check_schema(conn):
             missing[table] = absent
     if missing:
         return {"ok": False, "missing_columns": missing}
-    return {"ok": True}
+    return {"ok": True, "history": history}
 
 
 def _require_schema(conn, profile):
@@ -240,9 +333,9 @@ def _require_schema(conn, profile):
 def read_workspaces(conn):
     return [{
         "workspace_id": r[0], "display_name": r[1], "root_path": r[2],
-        "is_default": bool(r[3]),
+        "is_default": bool(r[3]), "trust_status": r[4],
     } for r in conn.execute(
-        "SELECT workspace_id, display_name, root_path, is_default "
+        "SELECT workspace_id, display_name, root_path, is_default, trust_status "
         "FROM work_workspaces WHERE lifecycle = 'active' "
         "ORDER BY is_default DESC, created_at")]
 
@@ -348,6 +441,544 @@ def source_revision(name, endpoint, source_permission):
     return REVISION_PREFIX + hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
+# --------------------------------------------------------------------------
+# MCP live discovery (the app's own local test, replicated)
+#
+# Mined from main.cjs 2026-11-05 (spec §9 E5 root cause): the app parses every
+# governed_connected_sources row STRICTLY - status must be 'connected'|'failed'
+# (a legacy 'pending' row fails the parse and renders as the hardcoded
+# invalid_response fallback without any test ever running) and a source is
+# only usable when tools_json holds the real discovered tools. The app's test
+# is LOCAL (child_process spawn for stdio, direct fetch for http), so the sync
+# can run the same discovery itself and write pre-tested rows the app accepts.
+
+_MCP_PROTOCOL_VERSION = "2025-03-26"
+_MCP_CLIENT_INFO = {"name": "ghost-sync", "version": "1.0.0"}
+
+
+def _mcp_tool_name(name):
+    """The app normalizes tool names with vme(): [^a-z0-9_] -> '_' + lower."""
+    return re.sub(r"[^a-z0-9_]", "_", str(name or "")).lower()
+
+
+# JSON-Schema boundary sanitizer - a faithful mirror of the app's gL/pme
+# (mined 2026-11-05 from main.cjs, the `_L` module). The tool registry calls
+# gL(parameters) UNCAUGHT during registration, so one non-conforming
+# inputSchema fails the whole source at startup (registerOrFail ->
+# recordFailure invalid_response). The sync therefore sanitizes every tool
+# schema to this boundary BEFORE writing and drops the tool when the schema
+# cannot be represented honestly. Mined rules:
+# - allowed keywords ONLY (anything else -> unsupported_keyword): $defs $ref
+#   additionalProperties anyOf default definitions description enum items
+#   oneOf pattern properties required type minItems maxItems minLength
+#   maxLength minimum maximum uniqueItems $schema
+# - every node: plain object, <=256 nodes total, depth <=16, serialized
+#   <=65536 chars at the registration walk; type: object|array|string|number|
+#   integer|boolean|null or an array of those; a node with none of
+#   type/anyOf/oneOf/$ref is "missing_type" (the killer for real-world MCP
+#   schemas)
+# - BINDING FOR WRITES: the stored-row zod (IL) refines the SERIALIZED
+#   inputSchema to <=16384 chars (inputSchema_too_large) AFTER keyword
+#   stripping - one over-size tool fails the WHOLE row parse at startup and
+#   the source flips to invalid_response (live-proven 2026-11-06: cloudinary
+#   upload_asset, 20024 chars). The sanitizer therefore measures the CLEANED
+#   schema and drops the tool when it still exceeds 16384.
+# - additionalProperties/uniqueItems: booleans only; enum: 1..64 values;
+#   pattern: <=512 chars compiling as a JS RegExp with 'u'; description
+#   <=2048; numeric bounds finite with |v| <= 1e9; $ref: single-level
+#   "#/definitions/<name>" or "#/$defs/<name>" only
+# - root: must sanitize to type=object AND carry properties
+_SCHEMA_ALLOWED_KEYS = frozenset([
+    "$defs", "$ref", "additionalProperties", "anyOf", "default",
+    "definitions", "description", "enum", "items", "oneOf", "pattern",
+    "properties", "required", "type", "minItems", "maxItems", "minLength",
+    "maxLength", "minimum", "maximum", "uniqueItems", "$schema"])
+_VALID_TYPES = ("object", "array", "string", "number", "integer", "boolean",
+                "null")
+_ANY_TYPE = list(_VALID_TYPES)
+_PROTO_KEYS = ("__proto__", "prototype", "constructor")
+
+
+class _SchemaRejected(Exception):
+    """A schema node the app's boundary cannot accept even after repair."""
+
+
+def _sanitize_schema_node(node, depth, state):
+    if depth > 16:
+        raise _SchemaRejected("schema_too_deep")
+    state["nodes"] += 1
+    if state["nodes"] > 256:
+        raise _SchemaRejected("schema_too_large")
+    if not isinstance(node, dict):
+        raise _SchemaRejected("schema_not_object")
+    out = {}
+    for key, value in node.items():
+        if key in _PROTO_KEYS:
+            raise _SchemaRejected("prototype_key")
+        if key not in _SCHEMA_ALLOWED_KEYS:
+            continue  # unsupported keyword: stripped (the app would throw)
+        if key == "type":
+            if isinstance(value, list):
+                types = [t for t in value if t in _VALID_TYPES]
+                if not types:
+                    raise _SchemaRejected("invalid_type")
+                if len(types) == 1:
+                    out["type"] = types[0]
+                else:
+                    out["anyOf"] = [{"type": t} for t in types]
+            elif value in _VALID_TYPES:
+                out["type"] = value
+            # an unknown type string is stripped; the any-repair below kicks in
+        elif key in ("properties", "definitions", "$defs"):
+            if not isinstance(value, dict):
+                raise _SchemaRejected("schema_map_invalid")
+            cleaned = {}
+            for name, sub in value.items():
+                if name in _PROTO_KEYS:
+                    raise _SchemaRejected("prototype_key")
+                cleaned[name] = _sanitize_schema_node(sub, depth + 1, state)
+            out[key] = cleaned
+        elif key in ("anyOf", "oneOf"):
+            if not isinstance(value, list) or not 1 <= len(value) <= 32:
+                raise _SchemaRejected("union_invalid")
+            out[key] = [_sanitize_schema_node(sub, depth + 1, state)
+                        for sub in value]
+        elif key == "items":
+            out["items"] = _sanitize_schema_node(value, depth + 1, state)
+        elif key == "required":
+            if not isinstance(value, list) or \
+                    not all(isinstance(v, str) for v in value):
+                raise _SchemaRejected("required_invalid")
+            out["required"] = [v for v in value if v not in _PROTO_KEYS]
+        elif key == "additionalProperties":
+            if isinstance(value, bool):
+                out["additionalProperties"] = value
+            # a schema-form additionalProperties is rejected by the app;
+            # stripping loosens validation honestly
+        elif key == "uniqueItems":
+            if isinstance(value, bool):
+                out["uniqueItems"] = value
+        elif key == "enum":
+            if not isinstance(value, list) or not 1 <= len(value) <= 64:
+                raise _SchemaRejected("enum_invalid")
+            out["enum"] = value
+        elif key == "pattern":
+            if not isinstance(value, str) or len(value) > 512:
+                raise _SchemaRejected("pattern_invalid")
+            try:
+                re.compile(value)
+            except re.error:
+                continue  # a pattern Python cannot compile is stripped
+            out["pattern"] = value
+        elif key == "description":
+            if isinstance(value, str):
+                out["description"] = value[:2048]
+        elif key in ("minLength", "maxLength", "minItems", "maxItems",
+                     "minimum", "maximum"):
+            if isinstance(value, (int, float)) \
+                    and not isinstance(value, bool) and abs(value) <= 1e9:
+                out[key] = value
+        elif key == "$ref":
+            if isinstance(value, str) and re.match(
+                    r"^#/(definitions|\$defs)/[A-Za-z0-9_.-]+$", value):
+                out["$ref"] = value
+            # anything else is stripped; the any-repair below covers the node
+        elif key == "default":
+            out["default"] = value
+        # "$schema" is dropped outright (the app deletes it anyway)
+    if "type" not in out and "anyOf" not in out and "oneOf" not in out \
+            and "$ref" not in out:
+        # the app's missing_type rule: give the node the honest "any" shape
+        # (as an explicit anyOf - the stable form under re-sanitization)
+        if "properties" in out:
+            out["type"] = "object"
+        elif "items" in out:
+            out["type"] = "array"
+        else:
+            out["anyOf"] = [{"type": t} for t in _ANY_TYPE]
+    return out
+
+
+def _json_utf16_len(value):
+    """Length of json.dumps(value) as the app's JSON.stringify measures it:
+    UTF-16 code units (an astral char counts 2, not 1)."""
+    return len(json.dumps(value, separators=(",", ":"),
+                          ensure_ascii=False).encode("utf-16-le")) // 2
+
+
+def _sanitize_input_schema(schema):
+    """Sanitize one tool inputSchema to the app's stored-row boundary.
+    Returns the sanitized schema, or None when the tool must be dropped
+    (unrepresentable schema). Idempotent on already-conforming schemas."""
+    try:
+        state = {"nodes": 0}
+        cleaned = _sanitize_schema_node(schema, 0, state)
+        if cleaned.get("type") != "object":
+            return None  # the app requires an object root
+        if "properties" not in cleaned:
+            cleaned["properties"] = {}
+        # IL refines the SERIALIZED schema to <=16384 after stripping - the
+        # post-clean measure is the arbiter, not the raw size (a schema
+        # bloated by unsupported keys shrinks when they are stripped).
+        if _json_utf16_len(cleaned) > 16384:
+            return None
+        return cleaned
+    except _SchemaRejected:
+        return None
+    except (TypeError, ValueError):
+        return None
+
+
+def _mcp_map_tools(raw_tools):
+    """Map MCP tools/list entries onto the app's IL tool shape. Returns
+    (tools, dropped). Names are normalized vme-consistently so permission
+    lookups match; descriptions are synthesized when missing (IL requires a
+    non-empty string); the original name rides in remoteName when renamed;
+    oversized inputSchemas are dropped (IL caps them at 16384 chars)."""
+    mapped, dropped, seen = [], 0, set()
+    for tool in raw_tools or []:
+        if not isinstance(tool, dict):
+            dropped += 1
+            continue
+        original = str(tool.get("name") or "").strip()
+        if not original:
+            dropped += 1
+            continue
+        norm = _mcp_tool_name(original)
+        if not TOOL_NAME_RE.match(norm):
+            dropped += 1
+            continue
+        base, suffix = norm, 2
+        while norm in seen:
+            norm = "{0}_{1}".format(base, suffix)
+            suffix += 1
+        seen.add(norm)
+        entry = {"name": norm}
+        desc = tool.get("description")
+        if isinstance(desc, str) and desc.strip():
+            entry["description"] = desc.strip()
+        else:
+            entry["description"] = ("MCP tool {0} (no description "
+                                    "provided).").format(original)
+        if original != norm:
+            entry["remoteName"] = original[:128]
+        schema = tool.get("inputSchema")
+        if isinstance(schema, dict):
+            cleaned = _sanitize_input_schema(schema)
+            if cleaned is None:
+                dropped += 1
+                continue
+            entry["inputSchema"] = cleaned
+        mapped.append(entry)
+    return mapped, dropped
+
+
+def _kill_process_tree(proc):
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/pid", str(proc.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=10, check=False)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
+def discover_stdio(command, args, timeout=60.0, cwd=None):
+    """Spawn an MCP stdio server and run the same handshake the app's local
+    stdio host runs (newline-delimited JSON-RPC, initialize ->
+    notifications/initialized -> tools/list, 30s-equivalent generous timeout
+    for cold npx/uvx installs). Returns (tools, error_code); tools is None
+    unless the handshake succeeded end-to-end."""
+    popen_kwargs = {}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    try:
+        proc = subprocess.Popen(
+            [command] + [str(a) for a in (args or [])],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, cwd=cwd or None, **popen_kwargs)
+    except (OSError, ValueError):
+        return None, "connection_failed"
+
+    def _pump(handle, q):
+        for line in iter(handle.readline, b""):
+            q.put(line)
+        q.put(None)
+
+    lines = queue.Queue()
+    threading.Thread(target=_pump, args=(proc.stdout, lines),
+                     daemon=True).start()
+    deadline = time.monotonic() + max(float(timeout), 5.0)
+    payload = "".join([
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"protocolVersion": _MCP_PROTOCOL_VERSION,
+                               "capabilities": {},
+                               "clientInfo": _MCP_CLIENT_INFO}}) + "\n",
+        json.dumps({"jsonrpc": "2.0",
+                    "method": "notifications/initialized"}) + "\n",
+        json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list",
+                    "params": {}}) + "\n",
+    ])
+    try:
+        proc.stdin.write(payload.encode("utf-8"))
+        proc.stdin.flush()
+    except OSError:
+        _kill_process_tree(proc)
+        return None, "connection_failed"
+
+    def _msg_id(msg):
+        mid = msg.get("id")
+        return mid if isinstance(mid, (int, str)) else None
+
+    got_init = got_tools = False
+    tools, err = None, None
+    while not (got_init and got_tools):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            err = err or "connection_failed"
+            break
+        try:
+            line = lines.get(timeout=remaining)
+        except queue.Empty:
+            err = err or "connection_failed"
+            break
+        if line is None:
+            err = err or "invalid_response"
+            break
+        try:
+            msg = json.loads(line.decode("utf-8", "replace"))
+        except ValueError:
+            continue  # banner/log noise on stdout - skip
+        if not isinstance(msg, dict):
+            continue
+        mid = _msg_id(msg)
+        if mid in (1, "1"):
+            if "error" in msg or "result" not in msg:
+                err = "invalid_response"
+                break
+            got_init = True
+        elif mid in (2, "2"):
+            if "error" in msg or "result" not in msg:
+                err = "invalid_response"
+                break
+            raw = (msg.get("result") or {}).get("tools")
+            if not isinstance(raw, list):
+                err = "invalid_response"
+                break
+            tools = raw
+            got_tools = True
+    _kill_process_tree(proc)
+    if err is not None:
+        return None, err
+    if not (got_init and got_tools):
+        return None, "connection_failed"
+    return tools, None
+
+
+def discover_http(endpoint, timeout=60.0, headers=None):
+    """Run the app's local Streamable-HTTP discover against an MCP endpoint:
+    POST initialize, notifications/initialized, then tools/list, honoring
+    mcp-session-id. JSON and SSE responses both handled. `headers` carries
+    extra request headers (e.g. Authorization) merged into every POST - how
+    credentialed http sources are pre-tested. Returns (tools, error_code)."""
+    def _post(body, session=None):
+        hdrs = {"Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream"}
+        if headers:
+            hdrs.update(headers)
+        if session:
+            hdrs["mcp-session-id"] = session
+        req = Request(endpoint, data=json.dumps(body).encode("utf-8"),
+                      headers=hdrs, method="POST")
+        with urlopen(req, timeout=timeout) as resp:
+            return (resp.headers.get("mcp-session-id"),
+                    resp.read().decode("utf-8", "replace"),
+                    resp.headers.get("Content-Type") or "")
+
+    def _parse(body, ctype):
+        body = (body or "").strip()
+        if not body:
+            return None
+        if "text/event-stream" in ctype or "data:" in body:
+            frames = [line[5:].strip() for line in body.splitlines()
+                      if line.startswith("data:")]
+            candidates = frames or [body]
+        else:
+            candidates = [body]
+        for cand in candidates:
+            try:
+                msg = json.loads(cand)
+            except ValueError:
+                continue
+            if isinstance(msg, dict) and ("result" in msg or "error" in msg):
+                return msg
+        return None
+
+    def _map_http_error(exc):
+        return ("authentication_failed"
+                if getattr(exc, "code", None) in (401, 403)
+                else "connection_failed")
+
+    session = None
+    try:
+        session, body, ctype = _post(
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": {"protocolVersion": _MCP_PROTOCOL_VERSION,
+                        "capabilities": {}, "clientInfo": _MCP_CLIENT_INFO}})
+    except HTTPError as exc:
+        return None, _map_http_error(exc)
+    except (URLError, OSError, ValueError):
+        return None, "connection_failed"
+    if not isinstance(_parse(body, ctype), dict):
+        return None, "invalid_response"
+    try:
+        _post({"jsonrpc": "2.0", "method": "notifications/initialized"},
+              session)
+    except Exception:
+        pass  # a 202/empty or refused notification must not fail the discover
+    try:
+        _, body, ctype = _post(
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            session)
+    except HTTPError as exc:
+        return None, _map_http_error(exc)
+    except (URLError, OSError, ValueError):
+        return None, "connection_failed"
+    listing = _parse(body, ctype)
+    if not isinstance(listing, dict) or "error" in listing:
+        return None, "invalid_response"
+    raw = (listing.get("result") or {}).get("tools")
+    if not isinstance(raw, list):
+        return None, "invalid_response"
+    return raw, None
+
+
+def test_source_locator(locator, timeout=60.0):
+    """Live local discover - exactly what the app's test() runs on this
+    machine (spawn the stdio command or fetch the http endpoint). Returns
+    {"ok", "error_code", "tools" (IL-mapped), "dropped", "tool_count"}."""
+    info = decode_locator(locator)
+    if info["transport"] == "stdio":
+        command = info.get("command")
+        if not command:
+            return {"ok": False, "error_code": "connection_failed",
+                    "tools": [], "dropped": 0, "tool_count": 0}
+        raw, err = discover_stdio(command, info.get("args") or [], timeout,
+                                  info.get("cwd"))
+    else:
+        raw, err = discover_http(info["endpoint"], timeout)
+    if err is not None:
+        return {"ok": False, "error_code": err, "tools": [], "dropped": 0,
+                "tool_count": 0}
+    tools, dropped = _mcp_map_tools(raw)
+    return {"ok": True, "error_code": None, "tools": tools, "dropped": dropped,
+            "tool_count": len(tools)}
+
+
+def tool_revision(name, endpoint, source_permission, tools):
+    """Replica of the app's T5 revision (contract connected-source-tool@2):
+    'native.' + first 16 hex chars of sha256 over the compact canonical JSON
+    with the app's exact key order."""
+    canon = json.dumps(
+        {"contract": REVISION_TOOL_CONTRACT, "name": name, "kind": "mcp",
+         "endpoint": endpoint, "credentialVersion": None,
+         "sourcePermission": source_permission, "toolPermissions": {},
+         "tools": tools},
+        separators=(",", ":"), ensure_ascii=False)
+    return "native." + hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
+
+
+def strict_row_problems(row):
+    """Mirror of the app's strict row parse (Gxn -> A_): an empty list means
+    the app renders this row natively; any problem means it falls back to the
+    hardcoded invalid_response renderer. Used as the verify-after gate so a
+    written row is never assumed usable."""
+    problems = []
+    if not SLUG_RE.match(str(row.get("slug") or "")):
+        problems.append("slug")
+    if row.get("status") not in ("connected", "failed"):
+        problems.append("status")
+    err = row.get("error_code")
+    if err is not None and err not in ERROR_CODES:
+        problems.append("error_code")
+    if row.get("source_permission") not in ("allowed", "approval_required",
+                                            "blocked"):
+        problems.append("source_permission")
+    info = decode_locator(str(row.get("endpoint") or ""))
+    if info["transport"] == "stdio":
+        command = str(info.get("command") or "")
+        args = info.get("args") or []
+        if not (1 <= len(command) <= 256):
+            problems.append("command")
+        if len(args) > 32 or any(len(str(a)) > 512 for a in args):
+            problems.append("args")
+    else:
+        endpoint = str(info.get("endpoint") or "")
+        if not endpoint.startswith(("http://", "https://")):
+            problems.append("endpoint")
+    try:
+        tools = json.loads(row.get("tools_json") or "[]")
+        if not isinstance(tools, list):
+            raise ValueError("not a list")
+        for tool in tools:
+            if not isinstance(tool, dict):
+                raise ValueError("not an object")
+            if not TOOL_NAME_RE.match(str(tool.get("name") or "")):
+                raise ValueError("bad tool name")
+            desc = tool.get("description")
+            if not isinstance(desc, str) or not desc:
+                raise ValueError("missing description")
+            remote = tool.get("remoteName")
+            if remote is not None and not (isinstance(remote, str) and
+                                           1 <= len(remote.strip()) <= 128):
+                raise ValueError("bad remoteName")
+            schema = tool.get("inputSchema")
+            if schema is not None:
+                if not isinstance(schema, dict):
+                    raise ValueError("schema not object")
+                # the IL refine: serialized <=16384 (JSON.stringify units) -
+                # one over-size tool fails the WHOLE row parse (cloudinary
+                # upload_asset, live-proven 2026-11-06)
+                if _json_utf16_len(schema) > 16384:
+                    raise ValueError("inputSchema_too_large")
+    except (ValueError, TypeError):
+        problems.append("tools_json")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$",
+                    str(row.get("updated_at") or "")):
+        problems.append("updated_at")
+    return problems
+
+
+_ENV_PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def expand_env_value(value):
+    """Expand ${VAR} placeholders from the environment.
+
+    Machine values (supabase project refs and friends) live in user-scope env
+    vars so no literal lands in the tracked master file. An unresolved
+    placeholder is left AS-IS and reported loudly on stderr instead of
+    silently collapsing (the PS env-guard equivalent: never write empty).
+    """
+    if not isinstance(value, str):
+        return value
+
+    def _sub(match):
+        name = match.group(1)
+        resolved = os.environ.get(name)
+        if not resolved:
+            print("[autoclaw2] WARN: manifest placeholder {0} unresolved "
+                  "- left as-is".format(name), file=sys.stderr)
+            return match.group(0)
+        return resolved
+
+    return _ENV_PLACEHOLDER_RE.sub(_sub, value)
+
+
 def load_manifest(path):
     if not os.path.isfile(path):
         raise Refusal("manifest-missing", "manifest not found: {0}".format(path))
@@ -379,10 +1010,10 @@ def load_manifest(path):
             "slug": slug,
             "name": (raw.get("name") or slug).strip(),
             "transport": transport,
-            "command": raw.get("command"),
-            "args": raw.get("args") or [],
-            "cwd": raw.get("cwd") or "",
-            "endpoint": raw.get("endpoint"),
+            "command": expand_env_value(raw.get("command")),
+            "args": [expand_env_value(a) for a in (raw.get("args") or [])],
+            "cwd": expand_env_value(raw.get("cwd") or ""),
+            "endpoint": expand_env_value(raw.get("endpoint")),
             "enabled": bool(raw.get("enabled", defaults.get("enabled", True))),
             "source_permission": raw.get("sourcePermission",
                                          defaults.get("sourcePermission", "allowed")),
@@ -421,9 +1052,32 @@ def merge_sources(servers, existing_rows):
                 "revision": revision,
             })
         else:
+            # A row the app cannot strictly parse (e.g. the legacy 'pending'
+            # rows) renders as the generic invalid_response fallback and its
+            # Reconnect throws before any test - it must be rewritten even
+            # when the definition itself is unchanged (spec §9 E5 root cause).
+            shape_broken = bool(strict_row_problems({
+                "slug": row.get("slug"), "status": row.get("status"),
+                "error_code": row.get("error_code"),
+                "source_permission": row.get("source_permission"),
+                "endpoint": row.get("endpoint"),
+                "tools_json": row.get("tools_json"),
+                "updated_at": row.get("updated_at"),
+            }))
+            # The app's startup registration flips a pre-tested row to
+            # failed/invalid_response when a stored schema fails its boundary
+            # (gL). Signature: our native revision + failed + non-empty
+            # tools_json - such rows must be re-tested, or they stay red
+            # forever because the definition alone never changes.
+            app_flipped = (row.get("status") == "failed"
+                           and row.get("error_code") == "invalid_response"
+                           and str(row.get("revision") or "").startswith("native.")
+                           and row.get("tools_json") not in (None, "", "[]"))
             changed = (row["name"] != server["name"]
                        or row["endpoint"] != locator
-                       or row["source_permission"] != server["source_permission"])
+                       or row["source_permission"] != server["source_permission"]
+                       or shape_broken
+                       or app_flipped)
             updates.append({
                 "slug": server["slug"], "name": server["name"],
                 "endpoint": locator,
@@ -499,9 +1153,37 @@ def _map_target_workspaces(src_ws_list, tgt_workspaces, policy):
     return pairs, warns
 
 
+def _plan_slug_migrations(existing_rows):
+    """The app's slug validator (By: ^[a-z][a-z0-9_]{0,39}$) forbids '-', so a
+    sync-authored row with an illegal slug can never render natively. Migrate
+    it in place (UPDATE slug) when the normalized slug is free and the row is
+    provably ours (revision sync-v1:*). Returns (migrations, rows-with-new-slugs)."""
+    taken = {row["slug"] for row in existing_rows}
+    migrations, rows = [], []
+    for row in existing_rows:
+        slug = row["slug"]
+        if SLUG_RE.match(slug):
+            rows.append(row)
+            continue
+        if not str(row.get("revision") or "").startswith(REVISION_PREFIX):
+            rows.append(row)  # app-authored row with an odd slug - leave alone
+            continue
+        new_slug = _mcp_tool_name(slug)
+        if not SLUG_RE.match(new_slug) or new_slug in taken:
+            rows.append(row)  # cannot migrate cleanly - stays kept-local
+            continue
+        taken.add(new_slug)
+        migrated = dict(row)
+        migrated["slug"] = new_slug
+        rows.append(migrated)
+        migrations.append({"from": slug, "to": new_slug})
+    return migrations, rows
+
+
 def mcp_plan(payload):
     """No writes. Per profile: resolved workspaces + create/update actions."""
     targets = payload.get("targets") or ["c1", "c2", "c3", "c4", "c5"]
+    hint = payload.get("account_hint")
     source = payload.get("from", "master")
     policy = payload.get("policy", "default")
     if source == "master":
@@ -509,7 +1191,8 @@ def mcp_plan(payload):
         servers = manifest["servers"]
         src_ws_list = None
     elif source == "primary":
-        primary = resolve_profile("Primary", require_account=True)
+        primary = resolve_profile("Primary", require_account=True,
+                                  account_hint=hint)
         if primary["running"] and not payload.get("allow_running_source"):
             # reading a WAL db of a running app is safe; only flag it
             pass
@@ -541,7 +1224,7 @@ def mcp_plan(payload):
 
     results = []
     for name in targets:
-        info = resolve_profile(name)
+        info = resolve_profile(name, account_hint=hint)
         entry = {"profile": name, "status": None}
         if info["account_status"] != "ok":
             entry["status"] = "skipped"
@@ -563,18 +1246,28 @@ def mcp_plan(payload):
                 src_ws_list, tgt_workspaces, policy)
             plan_ws = []
             for pair in pairs:
-                existing = [r for r in existing_all
-                            if r["workspace_id"] == pair["target_workspace"]["workspace_id"]]
+                ws_id = pair["target_workspace"]["workspace_id"]
+                existing = [r for r in existing_all if r["workspace_id"] == ws_id]
+                migrations, existing = _plan_slug_migrations(existing)
                 merged = merge_sources(servers, existing)
                 plan_ws.append({
-                    "workspace_id": pair["target_workspace"]["workspace_id"],
+                    "workspace_id": ws_id,
                     "root_path": pair["target_workspace"]["root_path"],
                     "matched_root": pair["matched_root"],
+                    "trust_status": pair["target_workspace"].get("trust_status"),
+                    "slug_migrations": migrations,
                     "creates": merged["creates"],
                     "updates": merged["updates"],
                     "kept_local": len(merged["manifest_absent"]),
                     "manifest_absent": merged["manifest_absent"],
                 })
+                if pair["target_workspace"].get("trust_status") != "trusted":
+                    ws_warns.append({
+                        "reason": "workspace-not-trusted",
+                        "root_path": pair["target_workspace"]["root_path"],
+                        "note": "source tools will not be offered in new runs "
+                                "until the workspace is trusted in the GUI",
+                    })
             entry["status"] = "planned"
             entry["workspaces"] = plan_ws
             entry["workspace_warnings"] = ws_warns
@@ -591,19 +1284,36 @@ def mcp_plan(payload):
 
 
 def mcp_apply(payload):
-    """One transaction per profile, verify-after re-read, clean backup first."""
+    """One transaction per profile, verify-after re-read, clean backup first.
+    Every create/update action is PRE-TESTED with a live local MCP discover
+    (the app's own test semantics: spawn the stdio command or fetch the http
+    endpoint) and written in the app's strict row shape - connected with the
+    real tools_json on success, failed with a legal error_code on failure.
+    'pending' is never written: the app cannot parse it (spec §9 E5)."""
     plan = mcp_plan(payload)
     dry_run = bool(payload.get("dry_run"))
+    discover_timeout = payload.get("discover_timeout", 60)
+    test_cache = {}
+
+    def _tested(action):
+        locator = action["endpoint"]
+        if locator not in test_cache:
+            test_cache[locator] = test_source_locator(locator, discover_timeout)
+        return test_cache[locator]
+
     results = []
     for entry in plan["profiles"]:
         result = dict(entry)
         if entry["status"] == "skipped":
             results.append(result)
             continue
-        info = resolve_profile(entry["profile"])
+        info = resolve_profile(entry["profile"],
+                               account_hint=payload.get("account_hint"))
         result["status"] = "unchanged"
         actions = []
         for ws in entry.get("workspaces") or []:
+            for mig in ws.get("slug_migrations") or []:
+                actions.append(("slug-migrate", ws["workspace_id"], dict(mig)))
             creates = ws.get("creates") or []
             updates = [u for u in (ws.get("updates") or []) if u.get("changed")]
             for create in creates:
@@ -620,6 +1330,33 @@ def mcp_apply(payload):
             result["status"] = "dry-run"
             results.append(result)
             continue
+        # Pre-test every distinct locator once (live local discover), then
+        # carry the tested row shape on the action.
+        source_tests = []
+        for kind, _, action in actions:
+            if kind in ("kept-local", "slug-migrate"):
+                continue
+            test = _tested(action)
+            action["test"] = {"ok": test["ok"], "error_code": test["error_code"],
+                              "tool_count": test["tool_count"],
+                              "dropped": test["dropped"]}
+            if test["ok"]:
+                action["status"] = "connected"
+                action["error_code"] = None
+                action["tools_json"] = json.dumps(
+                    test["tools"], separators=(",", ":"), ensure_ascii=False)
+                action["revision"] = tool_revision(
+                    action["name"], action["endpoint"],
+                    action["source_permission"], test["tools"])
+            else:
+                action["status"] = "failed"
+                action["error_code"] = test["error_code"]
+                action["tools_json"] = "[]"
+                # keep the definition revision: the app's own recordFailure
+                # also leaves the revision untouched when its test fails
+            source_tests.append({"slug": action["slug"], "test": action["test"],
+                                 "status": action["status"]})
+        result["sources"] = source_tests
         backup_path = _backup_db(info["db_path"], info["path"], "mcp-sync")
         conn = rw_connect(info["db_path"])
         try:
@@ -627,24 +1364,34 @@ def mcp_apply(payload):
             now = _iso_now()
             owner = _owner_id(conn)
             for kind, workspace_id, action in actions:
-                if kind == "create":
+                if kind == "slug-migrate":
+                    conn.execute(
+                        "UPDATE " + SOURCE_TABLE + " SET slug = ?, updated_at = ?"
+                        " WHERE owner_id = ? AND workspace_id = ? AND slug = ?",
+                        (action["to"], now, owner, workspace_id, action["from"]))
+                elif kind == "create":
                     conn.execute(
                         "INSERT INTO " + SOURCE_TABLE + " (owner_id, workspace_id,"
                         " kind, slug, name, endpoint, enabled, status, error_code,"
                         " credential_version, source_permission,"
                         " tool_permissions_json, revision, tools_json, updated_at)"
-                        " VALUES (?, ?, 'mcp', ?, ?, ?, ?, 'pending', NULL,"
-                        " NULL, ?, '{}', ?, '[]', ?)",
+                        " VALUES (?, ?, 'mcp', ?, ?, ?, ?, ?, ?, NULL,"
+                        " ?, '{}', ?, ?, ?)",
                         (owner, workspace_id, action["slug"], action["name"],
                          action["endpoint"], 1 if action["enabled"] else 0,
-                         action["source_permission"], action["revision"], now))
+                         action["status"], action["error_code"],
+                         action["source_permission"], action["revision"],
+                         action["tools_json"], now))
                 elif kind == "update":
                     conn.execute(
                         "UPDATE " + SOURCE_TABLE + " SET name = ?, endpoint = ?,"
-                        " source_permission = ?, revision = ?, updated_at = ?"
+                        " source_permission = ?, revision = ?, status = ?,"
+                        " error_code = ?, tools_json = ?, updated_at = ?"
                         " WHERE owner_id = ? AND workspace_id = ? AND slug = ?",
                         (action["name"], action["endpoint"],
-                         action["source_permission"], action["revision"], now,
+                         action["source_permission"], action["revision"],
+                         action["status"], action["error_code"],
+                         action["tools_json"], now,
                          owner, workspace_id, action["slug"]))
             conn.commit()
         except Exception:
@@ -652,7 +1399,8 @@ def mcp_apply(payload):
             raise
         finally:
             conn.close()
-        # verify-after: re-read and compare the written definition fields
+        # verify-after: re-read every written row and require the app's own
+        # strict row shape - "row written" is not "row usable"
         mismatches = []
         written = 0
         conn = ro_connect(info["db_path"])
@@ -660,17 +1408,45 @@ def mcp_apply(payload):
             for kind, workspace_id, action in actions:
                 if kind == "kept-local":
                     continue
+                if kind == "slug-migrate":
+                    new = conn.execute(
+                        "SELECT 1 FROM " + SOURCE_TABLE +
+                        " WHERE owner_id = ? AND workspace_id = ? AND slug = ?",
+                        (owner, workspace_id, action["to"])).fetchone()
+                    old = conn.execute(
+                        "SELECT 1 FROM " + SOURCE_TABLE +
+                        " WHERE owner_id = ? AND workspace_id = ? AND slug = ?",
+                        (owner, workspace_id, action["from"])).fetchone()
+                    if new is None or old is not None:
+                        mismatches.append({"slug": action["from"],
+                                           "error": "slug-migration-unverified"})
+                    else:
+                        written += 1
+                    continue
                 row = conn.execute(
-                    "SELECT name, endpoint, source_permission, revision FROM "
+                    "SELECT name, endpoint, source_permission, revision, status,"
+                    " error_code, tools_json, updated_at, slug FROM "
                     + SOURCE_TABLE + " WHERE owner_id = ? AND workspace_id = ?"
                     " AND slug = ?", (owner, workspace_id, action["slug"])).fetchone()
                 if row is None:
                     mismatches.append({"slug": action["slug"], "error": "missing"})
                     continue
-                if (row[0], row[1], row[2], row[3]) != (
-                        action["name"], action["endpoint"],
-                        action["source_permission"], action["revision"]):
-                    mismatches.append({"slug": action["slug"], "row": list(row)})
+                readd = {"slug": row[8], "name": row[0], "endpoint": row[1],
+                         "source_permission": row[2], "revision": row[3],
+                         "status": row[4], "error_code": row[5],
+                         "tools_json": row[6], "updated_at": row[7]}
+                expected = (action["name"], action["endpoint"],
+                            action["source_permission"], action["revision"],
+                            action["status"], action["error_code"],
+                            action["tools_json"], now)
+                got = (readd["name"], readd["endpoint"],
+                       readd["source_permission"], readd["revision"],
+                       readd["status"], readd["error_code"],
+                       readd["tools_json"], readd["updated_at"])
+                problems = strict_row_problems(readd)
+                if got != expected or problems:
+                    mismatches.append({"slug": action["slug"],
+                                       "problems": problems, "row": list(row)})
                 written += 1
         finally:
             conn.close()
