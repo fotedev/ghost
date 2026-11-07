@@ -7,7 +7,145 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+- **Supabase project refs scrubbed from the PUBLIC repo's entire history**
+  (2026-11-07): the four refs (`eysu…`/`jcu…`/`cetv…`/`zfhfe…`) had been
+  committed since PR #25/#26 in `master-mcp.json`, `mcp-inventory.json` and
+  `autoclaw2-mcp.master.json`. Working tree: every ref replaced by a
+  dedicated `${SUPABASE_PROJECT_REF_*}` env placeholder (MAIN/MASARX/
+  IPLOGGER/PORTFOLIO — 4 new user-scope vars, harvest never printed), the
+  collector now redacts refs by SHAPE in all three forms they appear in
+  (`--project-ref` flag-follow args, `project_ref=` query values,
+  `<ref>.supabase.co` hosts — JSON, TOML and flattened-command forms), and
+  `ghost.autoclaw2.expand_env_value` teaches the AutoClaw2 manifest loader
+  to expand `${VAR}` (unresolved = left as-is + loud stderr WARN, never
+  silently empty). History: mirror clone + `git filter-repo
+  --replace-text` over 129 commits (full refs AND the `Supabase (eysuvsof)`
+  / `(jcufigo)` name fragments), verified zero occurrences by pickaxe, then
+  force-pushed main + release/v1.2.0 + all tags (ruleset temporarily
+  disabled via API and restored byte-identically; release.yml disabled for
+  the tag push and re-enabled — no spurious release runs). Tokens were
+  verified NEVER present in any commit (pickaxe on all history: empty).
+  Residual: the pre-rewrite commits remain reachable via GitHub's
+  `refs/pull/*` archive of PRs #25-#27 (deleting the PRs would purge that
+  too — refs are non-secret identifiers, so left in place).
+
 ### Added
+- **The OpenCode clone fleet moves into T3 Code** (2026-11-07): a live spike
+  proved `opencode acp` is a real ACP-over-stdio server under a clone's XDG
+  env (`protocolVersion: 1` — the exact v1 shape T3's generation detection
+  keys on — plus a live `session/new` sessionId; clean exit, zero orphans),
+  so `tools/install_t3_opencode_instances.ps1` (new) seeds five
+  `acpRegistry` provider instances into `~/.t3/userdata/settings.json` —
+  the OpenCode counterpart of the five hand-seeded ZCode bridge instances.
+  Same pattern, same discipline: the entries launch
+  `launch_opencode_cli_light.ps1 -Instance cN -Acp` (new mode) so per-clone
+  isolation rides OUR script's four XDG levers — the entries carry NO env
+  field and there is zero dependence on any T3 env-override schema;
+  backup-first, merge-never-overwrite (only the five `opencode-c1..c5`
+  keys — favorites and the `zcode-*` instances survive), verify-after
+  deep-compare, idempotent, `-Remove`, and a loud running-T3 guard (T3
+  reads settings.json only at startup). Tests:
+  `tests/opencode_t3_seed.Tests.ps1` (8 — AST-extracted core on TEMP
+  fixtures, the real settings file never touched). T3-UI acceptance
+  (Providers render, streamed reply, model switch, concurrency) is
+  user-supervised — spec §3.10.
+- **MCP central registry — full-device collect + two new sync targets**
+  (2026-11-07): the registry now reaches every MCP-capable agent on the
+  box. `tools/mcp/master-mcp.json` grew 25 -> 28 servers
+  (`supabase-My-portfolio` — Orange-clone discovery, scoped `only:zcode`,
+  secret formalized as a NEW dedicated env var
+  `${SUPABASE_ACCESS_TOKEN_PORTFOLIO}` after the one-token-per-org lesson;
+  `node_repl` — Codex runtime, `only:codex`; `computer-use` — Copilot
+  plugin, dormant scoped to the never-target `copilot-computer-use`),
+  and sentry's per-app literal `SENTRY_ACCESS_TOKEN` header was
+  formalized as `${SENTRY_ACCESS_TOKEN}` (both harvested from the app
+  configs into user-scope env, values never printed). New targets:
+  `claude-code` (`~/.claude.json` — surgical merge of the top-level
+  `mcpServers` property only; app state and `projects.*` untouched) and
+  `codex` (`~/.codex/config.toml` — new pure module
+  `tools/mcp/codex_toml.ps1`, a line-based TOML reader/writer that
+  represents ONLY `[mcp_servers.*]` tables and splices them back verbatim
+  around everything else; presence==enabled, so registry-disabled and
+  remote (url) entries are left untouched; app-only keys such as
+  `startup_timeout_sec` and the `[mcp_servers.<n>.env]` sub-table
+  survive per-key). `tools/mcp/collect_mcp_inventory.ps1` harvests the
+  four newly-found sources too (claude-code, codex TOML, Copilot
+  computer-use plugin, OpenCode-Primary mcp section — apiKeys in that
+  file deliberately unread). Live full-device push verified:
+  windsurf/vscode/minimax = sentry header formalization, ZCode Primary
+  +1 (the resident watcher propagated it to all five clones within
+  seconds), claude-code +19 servers, codex +10 stdio (10 remote entries
+  skipped loudly); second run fully in-sync (idempotent); watcher
+  `-ApplyLive` recycled the idle instances and correctly DEFERRED the
+  ones with active chats (Green/Orange) — never -Force. Tests:
+  `tests/mcp_registry_sync.Tests.ps1` (14 — TOML parse/round-trip/
+  verbatim-preservation, bare-key refusal, registry invariants incl. a
+  never-literal-secrets scan of the master); Pester 110/110, unittest
+  150/150, CI lint gate (Severity Error) clean.
+- **OpenCode light worker — headless CLI mode for the clones** (2026-11-07):
+  the OpenCode counterpart of the ZCode LIGHT worker. All prior OpenCode
+  support was desktop-clone-only; the v2 CLI itself was never driven. A
+  live spike (scratch XDG env, CLI v2.2.5) verified the whole surface:
+  `src/windows/launch_opencode_cli_light.ps1` (OpenCode submenu [7], gid 79)
+  runs the shipped `<install>\resources\opencode-cli.exe` on a clone's own
+  state using ONLY the four XDG env levers the clone-home asar patch already
+  feeds the desktop app (`debug paths` proved data/cache/config/state all
+  follow XDG_* while `home` stays the real profile — no HOME/USERPROFILE
+  redirect needed, unlike ZCode light). Modes: interactive prompt loop
+  (default), `-Prompt` one-shot (`run`), `-Server` foreground `serve
+  [--port]` (the "run a server" case — HTTP verified), `-StopService`
+  (automates the §3.8 orphan-kill note), `-Login` (submenu [8], gid 80 —
+  one-time `auth login` per clone home, verify-after =
+  `<data>\opencode\auth.json` non-{}). Anonymous homes WORK but run the
+  FREE model (iceman-free) — the opencode-zen analogue; `-Auto`/`-Standalone`
+  pass the CLI's `--auto`/`--standalone`. `run` auto-starts the clone's
+  background service (clean stop verified, zero orphans). Tests:
+  `tests/opencode_cli_light.Tests.ps1` (15 — AST extraction + a functional
+  poisoned-env child for the fail-fast guard + the `Test-CloneLoggedIn`
+  verify primitive). GHOST.bat OpenCode submenu renumbered locally
+  (shortcuts [9], patch [10], status [11], remove [12]; gids 53-62
+  untouched). Live acceptance 2026-11-07 (spec §3.9.1): one-shot `-Json`
+  turn, single + dual-instance `serve` coexistence, orphan-free shutdown —
+  which caught TWO real launcher bugs, both fixed: (1) assigning the
+  launcher function's output swallowed the CLI's ENTIRE stdout (the turn
+  succeeded and the answer landed in the session store while stdout showed
+  only the banner) — the script now calls it as a bare statement and
+  branches on `$LASTEXITCODE`, and scripted consumers get `-Json`
+  (`--format json`, the CLI's NDJSON contract) because the default
+  renderer's final answer is not guaranteed on non-TTY stdout; (2) the CLI
+  resolves its project from `$env:PWD` (unix convention) — PowerShell
+  children inherit a STALE PWD, so every turn silently bound to the
+  launcher's launch dir instead of `-Cwd` until the script sets it.
+  `-Login` browser-flow acceptance remains user-supervised (§3.9.1).
+- **AutoClaw2 clones get colored taskbar buttons** (2026-11-06): the suite's
+  last DEGRADED item — running windows all shared the base AUMID
+  `com.zhipuai.autoclaw2` and the exe icon, so every clone collapsed into one
+  grouped taskbar button while only the shortcut pins stayed per-clone
+  (spec §7: "deferred until actually needed"). It turned out AutoClaw2 4.0.0
+  ships UNPACKED — the whole main process is the plain-text
+  `resources\app\dist\main.cjs` (no `app.asar`, no runtime integrity check;
+  the bootstrap does a bare `require()` and `payload-verify.cjs` is an
+  existence-only check the app never spawns) — so
+  `tools/patch_autoclaw2_identity.ps1` (new, AutoClaw2 [13] / gid 78,
+  `-WaitForClose`/`-Restore`/`-Force`) does NOT need the asar-surgery route:
+  it splices THREE byte-anchors, each verified to occur exactly once in the
+  14.3 MB bundle, making the AUMID and window icon env-driven
+  (`setAppUserModelId`, the per-window `setAppDetails` `appId`/`appIconPath`
+  — the `relaunchCommand` backtick literal is never touched — and the main
+  window's `setIcon`). `launch_autoclaw2_clone.ps1` now sets
+  `ZWORK_AUMID=com.zhipuai.autoclaw2.cN` (matching the SHORTCUT AUMIDs, so
+  pins and windows group together) + `ZWORK_CLONE_ICON=<the tinted
+  tray_icon.ico>` per clone; with no env set the patched bundle behaves
+  stock, so bare/Primary launches are untouched. Idempotent with a sibling
+  backup `main.cjs.bak-zwork-identity-<stamp>`, a sha256 marker, a
+  `node --check` gate through the app's own vendor node, verify-after with
+  auto-restore, and fresh-backup re-apply after app updates;
+  `install_autoclaw2_clone_shortcuts.ps1` gained `-RepairPrimaryAumid`
+  (EC-C01). Tests: `tests/autoclaw2_identity_patch.Tests.ps1` (8 — the
+  splice core is AST-extracted verbatim and the REAL spliced fixture is run
+  under node both with and without the env). Window TITLE stays the shared
+  "AutoClaw" (renderer `<title>` re-override is out of scope).
 - **AutoClaw2 MCP + chat sync suite** (2026-11-04): the dead-session design
   (docs/AUTOCLAW2_SYNC_{SPEC,PLAN,TASKS}.md) is implemented on closed profiles
   only — `tools/autoclaw2-mcp.master.json` (device MCP manifest, definitions
@@ -77,6 +215,81 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   bare OpenCode.exe opens the PRIMARY profile).
 
 ### Changed
+- **AutoClaw2 sync: the last flipped source healed + the Primary is now a sync
+  target** (2026-11-06): cloudinary was the one stdio source still flipping to
+  `invalid_response` at every app start while every other source rendered
+  green — the stored-row zod (`IL`) refines each tool's serialized
+  `inputSchema` to ≤16384 chars (`inputSchema_too_large`), stricter than the
+  registration walk the sanitizer mirrored, and cloudinary's `upload_asset`
+  serializes to 20,024 chars; one over-limit tool fails the WHOLE row parse.
+  `_sanitize_input_schema` now measures the CLEANED schema (UTF-16-exact
+  `JSON.stringify` units) against 16384 and drops over-limit tools
+  (live: `cloudinary: connected (41 tool(s))` — `upload_asset` is the honest
+  cost), and `strict_row_problems` mirrors the refine so verify-after can
+  never wave such a row through. `-Target Primary` (previously blocked by the
+  two-account ambiguity: dormant `27e33829…` + live `68f7331f…`) now
+  disambiguates — explicit `-Account <hint>` (exact hash or unique prefix)
+  wins, otherwise the newest-`runtime.sqlite` account is picked LOUDLY; a
+  sub-60 s tie still refuses. The fresh-account bootstrap's single
+  re-stamped `schema_migrations` row (`0001…/85/2e8dc336…`) is accepted by
+  the schema gate as a second legitimate history encoding
+  (`FRESH_STAMP_BASELINE`); any other single-row shape still refuses. First
+  Primary sync: 10 rows — 6 connected + 4 honest OAuth auth-failures. Spec
+  §9.2 records the full incident. 148 unittests green. Same day the master
+  manifest merged the FULL ZCode Primary set (20 servers, merge-not-replace —
+  the 10 ZCode-disabled ones added enabled per developer decision; live result
+  per profile: linkedin ·5 + github_local ·26 + notion connected·0 (server
+  exposes no tools with the legacy NOTION_TOKEN env) + honest failures for
+  omniroute (local router down) and the 8 unauthenticated http sources), and a
+  programmatic credential-wiring session closed the auth story without any UI
+  clicking: the app's credential custody (`<account>/runtime/credentials.enc`,
+  Electron safeStorage = v10 + AES-256-GCM under a per-profile DPAPI'd
+  Chromium OSCrypt key, key = [ownerId, "source:<ws>:<slug>", version], value
+  = token string) was replicated from Python and wired with the ZCode config's
+  live tokens across all three signed-in profiles; the omniroute local router
+  was started (`omniroute serve`, port 20128) and its command wrapped in the
+  cmd.exe .cmd-shim pattern — final state **10 connected / 10 honest-failed
+  per profile** (github/vercel authenticate through the wired custody but the
+  app's own startup discover then fails — vercel's 633 KB catalog is 2.4× its
+  hard 256 KB cap, impossible on 4.0.0; github's clean replay leaves it an
+  app-side quirk — runtime Reconnect may still succeed; stale sentry/cloudflare
+  tokens fail auth until recreated). `discover_http` gained an optional
+  `headers` parameter for credentialed pre-tests; spec §9.2.1/§9.2.2.
+- **AutoClaw2 clone runs un-bricked + sync schema gate follows the app** (2026-11-05):
+  every c1/c3 run died in ~1 s with `resource_revision_corrupt (cause: content)` —
+  one CAS blob whose content hash ≠ its filename (the same wrong-content fingerprint
+  sits in c1, c3 and Primary's dormant account; the app's own quarantine fails EPERM
+  on the all-ReadOnly store, so it can never self-heal). Healed live by overwriting
+  the blob with a verified-clean copy from the Primary's fresh account (backup +
+  hash verify-after; c1 ping completed with a model request; full procedure
+  documented in `docs/AUTOCLAW2_SYNC_SPEC.md` §9.1). The same day the 4.0.0 update
+  moved the runtime DB schema 80→85 as an append-only multi-row migration history,
+  which made the sync's single-row gate refuse every profile and the launcher's
+  pre-launch step [2b] a silent no-op — `ghost/autoclaw2.py` `check_schema` now
+  requires an intact baseline row + our column sets instead of exactly one row (4
+  new unittests; live acceptance `[SKIP] c1 - running`), and
+  `launch_autoclaw2_clone.ps1` gained `-SkipMcpSync` plus a loud warning when the
+  sync refuses. **Never `-RestoreBackup` across the migration** — the sync backups
+  are whole-DB schema-80 copies and would down-migrate the runtime DB.
+- **AutoClaw2 MCP sources now sync pre-tested and usable** (2026-11-05): the
+  "The server returned an invalid response." on every synced source is fully
+  explained by the 4.0.0 bundle — the app strictly parses each
+  `governed_connected_sources` row and `pending` (what the sync used to write)
+  is not a legal status, so every row rendered through a fallback that
+  hardcodes that message and the GUI's Reconnect threw before any network
+  call. The source test is local (spawn/fetch), so `ghost/autoclaw2.py` now
+  runs the same discovery per source (stdlib MCP stdio handshake +
+  Streamable-HTTP) and writes what the app accepts: `connected` + real
+  `tools_json` (IL shape, vme-normalized tool names, synthesized descriptions,
+  oversized schemas dropped) + a `native.` revision, or `failed` + a legal
+  error_code. Legacy `pending` rows are rewritten even when the definition is
+  unchanged, illegal slugs migrate in place (`chrome_devtools`,
+  `supabase_masarx`), verify-after requires the app's strict row shape, and
+  untrusted workspaces warn loudly (tools are not offered in runs until the
+  workspace is trusted). OAuth http sources (Vercel / GitHub Copilot / Sentry
+  / Upstash) land as `authentication_failed` — sign in per clone, then
+  Reconnect. Spec §9 records the full mined contracts. 129 unittests (incl. a
+  real stdio MCP server fixture) + Pester 73/73.
 - **The asar patches now take seconds, not minutes** (2026-11-03): the ZCode
   icon patch [27] (engine v9) and the OpenCode clone-home patch [8]
   (engine v4) share a new `tools/asar_surgery.mjs` IO layer that replaces the

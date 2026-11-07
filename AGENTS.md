@@ -198,6 +198,71 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     enabled toggles, backup +
                                    #     -RestoreBackup, verify-after, JSONL
                                    #     audit; live acceptance pending spikes;
+                                   #     2026-11-05: E5 RESOLVED — root cause
+                                   #     mined from main.cjs: 'pending' is NOT
+                                   #     a legal row status (strict zod parse;
+                                   #     the fallback renders a hardcoded
+                                   #     invalid_response and Reconnect throws
+                                   #     pre-network) and the source test is
+                                   #     LOCAL spawn/fetch, so the sync now
+                                   #     runs the same discovery itself
+                                   #     (discover_stdio/discover_http) and
+                                   #     writes PRE-TESTED rows (connected +
+                                   #     real tools_json / failed + legal
+                                   #     error_code), migrates illegal slugs
+                                   #     (chrome_devtools, supabase_masarx)
+                                   #     and warns on untrusted workspaces;
+                                   #     [2b] gained -SkipMcpSync + a loud
+                                   #     exit-2 warning; the schema gate
+                                   #     accepts the app's append-only migration
+                                   #     history since 4.0.0 (80→85; intact
+                                   #     baseline row + columns must hold —
+                                   #     NEVER -RestoreBackup across it, the
+                                   #     backups are whole-DB schema-80 copies;
+                                   #     §9.1 of the spec = the corrupt-CAS
+                                   #     incident that bricked every clone run
+                                   #     and its heal procedure);
+                                   #     2026-11-06 LIVE-VERIFIED: blue/green
+                                   #     converged green (playwright ·21,
+                                   #     chrome_devtools ·3, obsidian ·15,
+                                   #     supabase ×2 ·20); the LAST flip
+                                   #     (cloudinary) = the stored-row zod IL
+                                   #     refines each tool's serialized
+                                   #     inputSchema to ≤16384
+                                   #     (inputSchema_too_large — cloudinary
+                                   #     upload_asset 20024; one over-limit
+                                   #     tool fails the WHOLE row) — the
+                                   #     sanitizer now measures the CLEANED
+                                   #     schema (UTF-16-exact) and drops
+                                   #     over-limit tools (41/42 survive),
+                                   #     strict_row_problems mirrors the
+                                   #     refine; -Target Primary now works
+                                   #     (was ambiguous-account: dormant
+                                   #     27e33829 + live 68f7331f — explicit
+                                   #     -Account hint or newest-runtime.sqlite
+                                   #     picked LOUDLY, sub-60s tie refuses)
+                                   #     and the gate accepts the fresh-account
+                                   #     single-row stamp (FRESH_STAMP_BASELINE
+                                   #     0001/85/2e8dc336); first Primary sync
+                                   #     = 10 rows (6 connected + 4 honest
+                                   #     OAuth auth-fails); 2026-11-06 later:
+                                   #     the FULL ZCode set merged in (20
+                                   #     servers, +10 enabled) and the
+                                   #     credential custody replicated
+                                   #     programmatically (credentials.enc =
+                                   #     v10 + AES-256-GCM under a per-profile
+                                   #     DPAPI'd OSCrypt key from Local State;
+                                   #     key=[ownerId,"source:<ws>:<slug>",
+                                   #     version], value=token string) —
+                                   #     final 10 connected / 10 honest-failed
+                                   #     per profile; vercel's 633KB catalog
+                                   #     is 2.4× the app's 256KB discover cap
+                                   #     (impossible on 4.0.0), github fails
+                                   #     the startup test while the identical
+                                   #     handshake replays clean (app-side
+                                   #     quirk, runtime Reconnect may work);
+                                   #     discover_http gained a headers param;
+                                   #     spec §9.2.1/§9.2.2;
                                    #   sync_autoclaw2_chats.ps1 — AutoClaw2 chat
                                    #     inventory ([9] / gid 75) + guarded
                                    #     one-way import ([10] / gid 76) +
@@ -205,32 +270,94 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     prefix (D11), IM sessions refused
                                    #     (D12), work_events copied with fresh
                                    #     UUIDv4 ids, sidecar provenance;
+                                   #   patch_autoclaw2_identity.ps1 — AutoClaw2
+                                   #     window identity patch (AutoClaw2 [13] /
+                                   #     gid 78; -Restore, -Force, -WaitForClose):
+                                   #     colored per-clone taskbar buttons for the
+                                   #     RUNNING windows — the suite's last
+                                   #     DEGRADED item (spec §7, "deferred until
+                                   #     actually needed") shipped 2026-11-06 after
+                                   #     the 4.0.0 bundle turned out to ship
+                                   #     UNPACKED (plain-text
+                                   #     resources\app\dist\main.cjs, no app.asar,
+                                   #     NO runtime integrity check — bootstrap =
+                                   #     bare require(); payload-verify.cjs is
+                                   #     existence-only and never spawned). Splices
+                                   #     THREE byte-anchors (each verified unique
+                                   #     in the 14.3MB bundle) so the AUMID +
+                                   #     window icon read ZWORK_AUMID /
+                                   #     ZWORK_CLONE_ICON: setAppUserModelId(Kqn),
+                                   #     appId:Kqn,appIconPath:e, (inside Xqn — the
+                                   #     relaunchCommand backtick literal is never
+                                   #     touched) and the Xqn(l,process.execPath)
+                                   #     call site (+l.setIcon). launch_autoclaw2_clone.ps1
+                                   #     sets ZWORK_AUMID=com.zhipuai.autoclaw2.cN
+                                   #     (matching the SHORTCUT AUMIDs so pins and
+                                   #     windows group) + ZWORK_CLONE_ICON=the
+                                   #     tinted tray_icon.ico; no env = stock
+                                   #     behaviour (the Primary stays base-AUMID).
+                                   #     Idempotent (done-anchors = replacements),
+                                   #     sibling backup main.cjs.bak-zwork-identity-<stamp>,
+                                   #     marker autoclaw2-identity-patch.marker.json
+                                   #     (sha256 before/after), node --check gate
+                                   #     via the app's own vendor node, verify-after
+                                   #     with auto-restore, fresh-backup re-apply
+                                   #     after app updates, install-scoped
+                                   #     running-instance gate (throw, or
+                                   #     -WaitForClose instruct-and-poll). The new
+                                   #     env vars are NOT added to the bundle's
+                                   #     agent-shell env allowlist (HX) —
+                                   #     main-process reads only; window TITLE
+                                   #     stays shared "AutoClaw" (renderer <title>
+                                   #     re-override is out of scope);
                                    #   sync_mcp_registry.ps1 — MCP central registry importer
                                    #     (Maintenance [4] / gid 77; -DryRun, -Target
-                                   #     cursor|windsurf|vscode|zcode|minimax|opencode|all —
-                                   #     LIVE is the default without -DryRun): pushes the single
-                                   #     source of truth tools/mcp/master-mcp.json (25 servers,
-                                   #     Claude-Desktop mcpServers format) + the gitignored
+                                   #     cursor|windsurf|vscode|zcode|minimax|opencode|
+                                   #     claude-code|codex|all — LIVE is the default
+                                   #     without -DryRun): pushes the single source of
+                                   #     truth tools/mcp/master-mcp.json (28 servers,
+                                   #     Claude-Desktop mcpServers format; 25 + 2026-11-07
+                                   #     adds supabase-My-portfolio [only:zcode], node_repl
+                                   #     [only:codex], computer-use [dormant, scoped to the
+                                   #     never-target copilot-computer-use]) + the gitignored
                                    #     overlay master-mcp.local.json (device values, local
                                    #     wins) into each app's own config in its own shape
                                    #     (windsurf serverUrl, minimax streamable-http, opencode
-                                   #     remote/local array-command); merge = registry
-                                   #     definition wins, app-local enabled/disabled state
-                                   #     survives, app-only servers never deleted; secrets =
-                                   #     ${VAR} names only — the env-guard resolves them from
-                                   #     machine env (all 20 setx'd 2026-11-04 from the app
-                                   #     configs' own working values), an unresolved key is
-                                   #     omitted loudly, never written empty; backup ->
+                                   #     remote/local array-command, claude-code passthrough +
+                                   #     SURGICAL top-level-mcpServers-only merge of the big
+                                   #     .claude.json app-state file, codex = TOML
+                                   #     [mcp_servers.*] tables via the pure module
+                                   #     tools/mcp/codex_toml.ps1 — line-based reader/writer,
+                                   #     rest of the file verbatim, presence==enabled so
+                                   #     registry-disabled and remote (url) entries are left
+                                   #     untouched, startup_timeout_sec + env sub-table
+                                   #     survive per-key); merge = registry definition wins,
+                                   #     app-local enabled/disabled state survives, app-only
+                                   #     servers never deleted; secrets = ${VAR} names only —
+                                   #     the env-guard resolves them from machine env (26
+                                   #     user-scope vars: 20 setx'd 2026-11-04 + SENTRY_
+                                   #     ACCESS_TOKEN + SUPABASE_ACCESS_TOKEN_PORTFOLIO +
+                                   #     4 SUPABASE_PROJECT_REF_* 2026-11-07 — the refs were
+                                   #     also scrubbed from the whole public git history via
+                                   #     filter-repo, see CHANGELOG Security), an unresolved key is omitted
+                                   #     loudly, never written empty; backup ->
                                    #     MCP_Backups\<ts>\, verify-after deep-compare, JSONL
                                    #     audit at %LOCALAPPDATA%\mcp-registry-sync\; ZCode
                                    #     target = Primary only (clones converge via
                                    #     sync_zcode_assets -McpOnly / the watcher); harvest
                                    #     direction = tools/mcp/collect_mcp_inventory.ps1
-                                   #     (read-only -> mcp-inventory.json, 109 defs) — never
-                                   #     auto-merges into the master, promotion is a per-name
-                                   #     human decision; plan: docs/MCP_CENTRAL_REGISTRY_PLAN.md
+                                   #     (read-only -> mcp-inventory.json; 2026-11-07 covers
+                                   #     claude-code/codex/copilot-plugin/opencode-primary
+                                   #     [mcp section only] too) — never auto-merges into
+                                   #     the master, promotion is a per-name human decision;
+                                   #     plan: docs/MCP_CENTRAL_REGISTRY_PLAN.md
                                    #     (live-verified 2026-11-04: windsurf +17, vscode +18,
-                                   #     zcode +7, minimax +19 adds, second run idempotent);
+                                   #     zcode +7, minimax +19 adds, second run idempotent;
+                                   #     2026-11-07 full-device collect + push: windsurf/
+                                   #     vscode/minimax sentry-headers formalization, zcode
+                                   #     +supabase-My-portfolio, claude-code +19, codex +10
+                                   #     stdio / 10 remote skipped, second run all-in-sync);
+                                   #     tests: tests/mcp_registry_sync.Tests.ps1 (14));
                                    #   watch_zcode_mcp_sync.ps1 — resident MCP sync watcher
                                    #     (ZCode submenu [19] resident / [20] one-shot + live
                                    #     apply; -RunOnce, -DryRun, -IntervalSeconds, -ApplyLive,
@@ -561,12 +688,14 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   (Blue..Orange, ALL, shortcuts) / Sync + Chat Import [8]-[10] (Import MCPs
   gid 73, Chat inventory gid 75, Import chats gid 76 — the MCP watcher row is
   deferred to the follow-up PR and keeps its reserved gid 74) / Maintenance
-  [11]-[12] (rewired to the AutoClaw2
-  suite the same day — born display-ordered); Cline: Launch Clones [1]-[7]
+  [11]-[13] (status, remove-shortcuts, [13] gid 78 = the window identity
+  patch — colored taskbar buttons, 2026-11-06); Cline: Launch Clones [1]-[7]
   (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9]; OpenCode: Launch Clones
-  [1]-[7] (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[10] (patch, status,
-  remove — 2026-10-31: shortcuts moved into Launch and the patch row into
-  Maintenance, locals [7]/[8] swapped, gids unchanged). **Gids NEVER
+  [1]-[9] (Blue..Orange, ALL, [7] light worker gid 79, [8] login clone
+  account gid 80 — 2026-11-07, ZCode LIGHT pattern; shortcuts shifted to
+  [9]) / Maintenance [10]-[12] (patch, status, remove — 2026-10-31: shortcuts
+  moved into Launch and the patch row into Maintenance, locals [7]/[8]
+  swapped, gids unchanged). **Gids NEVER
   renumber** — specs, wiring history and repo-integrity cite them; a
   renumber touches only the submenu echo block + its resolver ladder. Add
   future rows in display order inside their section — never a higher id out
@@ -1020,7 +1149,43 @@ are already stated in the live suites' sections where they apply.
 - Launch SEQUENTIALLY, never in parallel, never elevated (UIPI; the app
   itself is asInvoker). All via the launcher / "OpenCode cN" shortcuts —
   a bare OpenCode.exe (or protocol launch) always opens the PRIMARY
-  profile. GHOST.bat OpenCode submenu [1]-[10] (gids 53-62).
+  profile. GHOST.bat OpenCode submenu [1]-[12] (gids 53-62 + 79/80).
+- Light worker (2026-11-07, spike-verified + LIVE-ACCEPTED — spec §3.9):
+  OpenCode submenu [7] gid 79 = `src/windows/launch_opencode_cli_light.ps1`
+  runs the v2 CLI (`<install>\resources\opencode-cli.exe`) headless on a
+  clone's own state — the four XDG env vars are the ONLY state levers
+  (verified via `debug paths`: data/cache/config/state all follow XDG_*;
+  `home` stays the real profile, so unlike ZCode light NO HOME/USERPROFILE
+  redirect). Modes: interactive prompt loop (default), `-Prompt` one-shot
+  (`run`), `-Server` foreground `serve [--port]`, `-StopService` (kills the
+  clone's background service — the §3.8 orphan), `-Login` (submenu [8] gid
+  80, one-time `auth login` per clone home; verify-after =
+  `<data>\opencode\auth.json` non-{}). Anonymous homes WORK but run the
+  FREE model (iceman-free) — the OpenCode analogue of the opencode-zen
+  caveat; machine-env creds in `auth list` (source "environment") are NOT
+  logins. `run` auto-starts the clone's background service; `service.json`
+  in the clone's config home is the registry. Two live-acceptance-caught
+  launcher truths (both fixed + test-pinned): PowerShell children inherit a
+  STALE `$env:PWD` and the CLI resolves its project from it (must set
+  `$env:PWD = $Cwd`), and assigning the launcher function's output swallows
+  the CLI's entire stdout (bare statement + `$LASTEXITCODE` only); scripted
+  consumers must use `-Json` (`--format json` — the default renderer's
+  final answer is not guaranteed on non-TTY stdout). Acceptance done:
+  one-shot `-Json` turn, single + dual-instance serve coexistence,
+  orphan-free shutdown; `-Login` browser flow remains user-supervised
+  (§3.9.1).
+- T3 Code wiring (2026-11-07, spec §3.10): the light worker gained `-Acp`
+  (foreground `opencode acp` on stdio; handshake live-verified —
+  protocolVersion 1 + a real session/new under c2's env), and
+  `tools/install_t3_opencode_instances.ps1` seeds five `acpRegistry`
+  instances (`opencode-c1..c5`, displayName "OpenCode <Color>", accents =
+  the four staged suite colors + orange placeholder #C8620A) into
+  `~/.t3/userdata/settings.json` — commandArgs launch OUR launcher
+  (`powershell -File ... -Instance cN -Acp`) so isolation rides the script's
+  XDG levers with NO T3 env field (same shape as the ZCode bridge entries);
+  backup-first + merge-never-overwrite + verify-after + idempotent +
+  `-Remove` + a loud running-T3 guard. Pester 8/8 on TEMP fixtures. T3-UI
+  acceptance user-supervised.
 
 ## App cloning playbook (any new app)
 
@@ -1038,7 +1203,9 @@ icon) + report, with stock-default + report as the allowed fallback — both
 branches are ALWAYS reported, never silent (playbook §5). Colors are
 developer-specified per clone (defaults: the ZCode blue/yellow/green
 palette). Current suites: ZCode (gold standard, full identity) and AutoClaw2
-(2026-10-23, c1..c5, env-lever-only, no patching) and Cline
+(2026-10-23, c1..c5, env-lever-only; window-level taskbar identity added
+2026-11-06 via the unpacked main.cjs identity patch — see
+docs/AUTOCLAW2_CLONES_SPEC.md §7) and Cline
 (2026-10-24, c1..c5, env levers + single-instance window neutralization,
 no patching — its spec documents the Tauri guard anatomy). OpenCode
 desktop (2026-10-24, c1..c5, clone-home asar patch — packaged builds
