@@ -103,3 +103,6 @@ _analysis/
 
 # Local bug-sweep scratch - never commit.
 _bug_sweep/
+
+# Editor settings (VS Code)
+.vscode/
