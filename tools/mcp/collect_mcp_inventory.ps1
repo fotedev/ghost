@@ -8,7 +8,9 @@
   docs\MCP_CENTRAL_REGISTRY_PLAN.md §2/§11) and collects what each app actually has.
 
   NEVER reads secret VALUES: env/headers contribute key NAMES only; long token-shaped
-  strings inside args are redacted. Output: tools\mcp\mcp-inventory.json + console table.
+  strings inside args are redacted, and supabase project refs are redacted by shape
+  (the args element after --project-ref, project_ref= query values, and
+  <ref>.supabase.co hosts). Output: tools\mcp\mcp-inventory.json + console table.
 
   Read-only: the only file written is the inventory (and never inside any app's config).
 
@@ -42,6 +44,18 @@ function ConvertFrom-JsonLoose([string]$text) {
     try { return ($nl | ConvertFrom-Json) } catch { return $null }
 }
 
+function Repair-SecretText([string]$s) {
+    # Redact() handles token-shaped values; supabase project refs are redacted
+    # by SHAPE in every text form they appear in (no value ever appears in
+    # this tool): project_ref= query values, <ref>.supabase.co hosts, and a
+    # bare ref right after a --project-ref flag inside a flattened command.
+    $s = Redact $s
+    $s = [regex]::Replace($s, 'project_ref=[A-Za-z0-9]+', 'project_ref=<REDACTED>')
+    $s = [regex]::Replace($s, '[A-Za-z0-9]{20}\.supabase\.co', '<REDACTED>.supabase.co')
+    $s = [regex]::Replace($s, '(--project-ref\s+)[A-Za-z0-9]{20}', '${1}<REDACTED>')
+    return $s
+}
+
 function Get-EntrySummary($e) {
     $r = New-Object PSObject
     $kind = 'unknown'
@@ -49,18 +63,44 @@ function Get-EntrySummary($e) {
     elseif ($null -ne $e.PSObject.Properties['serverUrl']){ $kind = 'remote' }
     elseif ($null -ne $e.PSObject.Properties['command'])  { $kind = 'stdio' }
     $r | Add-Member -NotePropertyName kind -NotePropertyValue $kind
-    foreach ($f in @('type', 'command')) {
+    foreach ($f in @('type')) {
         $p = $e.PSObject.Properties[$f]
         if ($null -ne $p) { $r | Add-Member -NotePropertyName $f -NotePropertyValue ([string]$p.Value) }
     }
+    $cp = $e.PSObject.Properties['command']
+    if ($null -ne $cp) {
+        if ($cp.Value -is [System.Collections.IEnumerable] -and $cp.Value -isnot [string]) {
+            # opencode shape: command is an ARRAY - apply the same --project-ref
+            # flag-follow redaction per element (a ref can ride inside it).
+            $carr = @()
+            $prevWasRefFlag = $false
+            foreach ($c in @($cp.Value)) {
+                $cs = Repair-SecretText ([string]$c)
+                if ($prevWasRefFlag) { $cs = '<REDACTED>'; $prevWasRefFlag = $false }
+                elseif ($cs -eq '--project-ref') { $prevWasRefFlag = $true }
+                $carr += $cs
+            }
+            $r | Add-Member -NotePropertyName command -NotePropertyValue $carr
+        }
+        else {
+            $r | Add-Member -NotePropertyName command -NotePropertyValue (Repair-SecretText ([string]$cp.Value))
+        }
+    }
     $p = $e.PSObject.Properties['args']
     if ($null -ne $p) {
-        $arr = @($p.Value) | ForEach-Object { Redact ([string]$_) }
+        $arr = @()
+        $prevWasRefFlag = $false
+        foreach ($a in @($p.Value)) {
+            $s = Repair-SecretText ([string]$a)
+            if ($prevWasRefFlag) { $s = '<REDACTED>'; $prevWasRefFlag = $false }
+            elseif ($s -eq '--project-ref') { $prevWasRefFlag = $true }
+            $arr += $s
+        }
         $r | Add-Member -NotePropertyName args -NotePropertyValue $arr
     }
     foreach ($f in @('url', 'serverUrl')) {
         $p = $e.PSObject.Properties[$f]
-        if ($null -ne $p) { $r | Add-Member -NotePropertyName $f -NotePropertyValue ([string]$p.Value) }
+        if ($null -ne $p) { $r | Add-Member -NotePropertyName $f -NotePropertyValue (Repair-SecretText ([string]$p.Value)) }
     }
     $p = $e.PSObject.Properties['env']
     if ($null -ne $p -and $null -ne $p.Value) {
@@ -154,6 +194,70 @@ function Add-HermesYaml([string]$file) {
     return
 }
 
+# --- Codex CLI (TOML) — light block scan of [mcp_servers.*] tables only ---------------
+# Line-based scanner (stdlib only): captures command/args/url + env KEY NAMES from
+# [mcp_servers.<name>] and [mcp_servers.<name>.env] tables; every other TOML table
+# is skipped verbatim. Values are never collected for env (names only, like JSON).
+function Add-CodexToml([string]$file) {
+    $role = 'target (sync)'
+    if (-not (Test-Path -LiteralPath $file)) {
+        $script:Locations += (New-Object PSObject -Property @{ app = 'codex'; file = $file; role = $role; status = 'missing'; note = ''; servers = @() })
+        return
+    }
+    $lines = [System.IO.File]::ReadAllLines($file)
+    $servers = @()
+    $current = $null
+    $inEnv = $false
+    foreach ($L in $lines) {
+        if ($L -match '^\[mcp_servers\.([^.\]]+)\]\s*$') {
+            if ($null -ne $current) { $servers += $current }
+            $current = New-Object PSObject
+            $current | Add-Member -NotePropertyName name -NotePropertyValue $Matches[1]
+            $current | Add-Member -NotePropertyName kind -NotePropertyValue 'stdio'
+            $inEnv = $false
+        }
+        elseif ($L -match '^\[mcp_servers\.([^.\]]+)\.env\]\s*$') {
+            $inEnv = $true
+            if ($null -ne $current) { $current | Add-Member -NotePropertyName envKeys -NotePropertyValue @() -Force }
+        }
+        elseif ($L -match '^\[') {
+            # any other TOML table ends the current mcp_servers block
+            if ($null -ne $current) { $servers += $current; $current = $null }
+            $inEnv = $false
+        }
+        elseif ($null -ne $current) {
+            if ($inEnv) {
+                if ($L -match '^([A-Za-z0-9_\-]+)\s*=') {
+                    $current.envKeys = (@($current.envKeys) + $Matches[1])
+                }
+            }
+            elseif ($L -match '^command\s*=\s*[''\"]([^''\"]+)[''\"]') {
+                $current | Add-Member -NotePropertyName command -NotePropertyValue (Repair-SecretText $Matches[1]) -Force
+            }
+            elseif ($L -match '^args\s*=\s*\[(.*)\]') {
+                $arr = @($Matches[1] -split ',' | ForEach-Object { ($_ -replace '[''\"]', '').Trim() } | Where-Object { $_ })
+                # Same --project-ref flag-follow redaction as the JSON path.
+                $rarr = @()
+                $prevWasRefFlag = $false
+                foreach ($a in $arr) {
+                    $s = Repair-SecretText ([string]$a)
+                    if ($prevWasRefFlag) { $s = '<REDACTED>'; $prevWasRefFlag = $false }
+                    elseif ($s -eq '--project-ref') { $prevWasRefFlag = $true }
+                    $rarr += $s
+                }
+                $current | Add-Member -NotePropertyName args -NotePropertyValue $rarr -Force
+            }
+            elseif ($L -match '^(url|serverUrl)\s*=\s*[''\"]([^''\"]+)[''\"]') {
+                $current.kind = 'remote'
+                $current | Add-Member -NotePropertyName $Matches[1] -NotePropertyValue (Repair-SecretText $Matches[2]) -Force
+            }
+        }
+    }
+    if ($null -ne $current) { $servers += $current }
+    $script:Locations += (New-Object PSObject -Property @{ app = 'codex'; file = $file; role = $role; status = 'ok'; note = 'light TOML scan (mcp_servers tables only)'; servers = $servers })
+    return
+}
+
 # ---------------------------------------------------------------------------
 $script:Locations = @()
 
@@ -174,6 +278,17 @@ Get-ChildItem (Join-Path $U 'OpenCodeClonesHome') -Directory | ForEach-Object {
     }
 }
 if (-not (Test-Path (Join-Path $U 'OpenCodeClonesHome'))) { Add-NoteOnly 'opencode' 'OpenCodeClonesHome missing' }
+# Claude Code CLI — top-level mcpServers ONLY: the file carries extensive app state and
+# project-scoped server maps (projects.*.mcpServers) that are deliberately never read.
+Add-Location 'claude-code' (Join-Path $U '.claude.json') 'target (sync)' @('mcpServers') 'top-level mcpServers only; app state + projects.* untouched; enabledMcpjsonServers/disabledMcpjsonServers are app-local state'
+# Codex CLI — TOML mcp_servers tables (command is a single string; env is a sub-table)
+Add-CodexToml (Join-Path $U '.codex\config.toml')
+# GitHub Copilot desktop — computer-use plugin store
+Add-Location 'copilot-computer-use' (Join-Path $LAD 'Programs\GitHub Copilot\plugins\computer-use\mcp.json') 'not wired (plugin store)' @('mcpServers') 'plugin-level MCP store'
+# OpenCode Primary — mcp section ONLY. The SAME file holds live provider apiKeys which
+# must never enter the inventory: Add-Location reads just the mcp container node, and
+# Get-EntrySummary redacts args + keeps env/header KEY NAMES only.
+Add-Location 'opencode-primary' (Join-Path $U '.config\opencode\opencode.jsonc') 'note (Primary excluded from sync)' @('mcp') 'mcp section only; provider apiKeys in the same file deliberately unread (sync writes clones only)'
 # Antigravity IDE: extension MCP settings (all expected empty) + native config unknown
 foreach ($ext in @(@('kilo', 'kilocode.kilo-code\settings\mcp_settings.json'),
                    @('roo', 'rooveterinaryinc.roo-cline\settings\mcp_settings.json'),

@@ -1,6 +1,6 @@
 {
-    "generated":  "2026-11-03T11:40:33+02:00",
-    "machine":  null,
+    "generated":  "2026-11-07T09:32:56+02:00",
+    "machine":  "DESKTOP-7F13Q30",
     "locations":  [
                       {
                           "note":  "Primary; clones converge via sync_zcode_assets/watch_zcode_mcp_sync",
@@ -9,7 +9,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "omniroute",
-                                              "args":  "--mcp",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
                                               "envKeys":  [
                                                               "OMNIROUTE_API_KEY",
                                                               "OMNIROUTE_BASE_URL"
@@ -24,12 +26,11 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MAIN}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
-                                              "enabled":  true,
                                               "name":  "supabase"
                                           },
                                           {
@@ -118,7 +119,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "node",
-                                              "args":  "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
                                               "envKeys":  [
                                                               "LINKEDIN_ACCESS_TOKEN"
                                                           ],
@@ -129,7 +132,9 @@
                                               "kind":  "remote",
                                               "type":  "http",
                                               "url":  "https://mcp.sentry.dev/mcp",
-                                              "enabled":  true,
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
                                               "name":  "sentry"
                                           },
                                           {
@@ -146,13 +151,100 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MASARX}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
                                               "enabled":  true,
                                               "name":  "supabase-masarx"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "uvx",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OBSIDIAN_PROTOCOL",
+                                                              "OBSIDIAN_HOST",
+                                                              "OBSIDIAN_PORT",
+                                                              "OBSIDIAN_API_KEY"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "obsidian"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "chrome-devtools"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "playwright"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase-My-portfolio"
                                           }
                                       ],
                           "app":  "zcode-primary",
@@ -167,7 +259,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "omniroute",
-                                              "args":  "--mcp",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
                                               "envKeys":  [
                                                               "OMNIROUTE_API_KEY",
                                                               "OMNIROUTE_BASE_URL"
@@ -182,7 +276,7 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MAIN}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
@@ -276,7 +370,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "node",
-                                              "args":  "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
                                               "envKeys":  [
                                                               "LINKEDIN_ACCESS_TOKEN"
                                                           ],
@@ -287,6 +383,9 @@
                                               "kind":  "remote",
                                               "type":  "http",
                                               "url":  "https://mcp.sentry.dev/mcp",
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
                                               "enabled":  true,
                                               "name":  "sentry"
                                           },
@@ -304,13 +403,100 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MASARX}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
                                               "enabled":  true,
                                               "name":  "supabase-masarx"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "uvx",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OBSIDIAN_PROTOCOL",
+                                                              "OBSIDIAN_HOST",
+                                                              "OBSIDIAN_PORT",
+                                                              "OBSIDIAN_API_KEY"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "obsidian"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "chrome-devtools"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "playwright"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase-My-portfolio"
                                           }
                                       ],
                           "app":  "zcode-ZCodeFifthHome",
@@ -325,7 +511,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "omniroute",
-                                              "args":  "--mcp",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
                                               "envKeys":  [
                                                               "OMNIROUTE_API_KEY",
                                                               "OMNIROUTE_BASE_URL"
@@ -340,12 +528,11 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MAIN}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
-                                              "enabled":  true,
                                               "name":  "supabase"
                                           },
                                           {
@@ -434,7 +621,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "node",
-                                              "args":  "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
                                               "envKeys":  [
                                                               "LINKEDIN_ACCESS_TOKEN"
                                                           ],
@@ -445,6 +634,9 @@
                                               "kind":  "remote",
                                               "type":  "http",
                                               "url":  "https://mcp.sentry.dev/mcp",
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
                                               "enabled":  true,
                                               "name":  "sentry"
                                           },
@@ -462,13 +654,100 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MASARX}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
                                               "enabled":  true,
                                               "name":  "supabase-masarx"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "uvx",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OBSIDIAN_PROTOCOL",
+                                                              "OBSIDIAN_HOST",
+                                                              "OBSIDIAN_PORT",
+                                                              "OBSIDIAN_API_KEY"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "obsidian"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "chrome-devtools"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "playwright"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase-My-portfolio"
                                           }
                                       ],
                           "app":  "zcode-ZCodeFourthHome",
@@ -483,7 +762,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "omniroute",
-                                              "args":  "--mcp",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
                                               "envKeys":  [
                                                               "OMNIROUTE_API_KEY",
                                                               "OMNIROUTE_BASE_URL"
@@ -498,12 +779,11 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MAIN}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
-                                              "enabled":  true,
                                               "name":  "supabase"
                                           },
                                           {
@@ -513,7 +793,7 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MASARX}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
@@ -607,7 +887,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "node",
-                                              "args":  "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
                                               "envKeys":  [
                                                               "LINKEDIN_ACCESS_TOKEN"
                                                           ],
@@ -618,6 +900,9 @@
                                               "kind":  "remote",
                                               "type":  "http",
                                               "url":  "https://mcp.sentry.dev/mcp",
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
                                               "enabled":  true,
                                               "name":  "sentry"
                                           },
@@ -627,6 +912,93 @@
                                               "url":  "https://mcp.upstash.com/mcp",
                                               "enabled":  true,
                                               "name":  "upstash"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "uvx",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OBSIDIAN_PROTOCOL",
+                                                              "OBSIDIAN_HOST",
+                                                              "OBSIDIAN_PORT",
+                                                              "OBSIDIAN_API_KEY"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "obsidian"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "chrome-devtools"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "playwright"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase-My-portfolio"
                                           }
                                       ],
                           "app":  "zcode-ZCodeSecondHome",
@@ -641,7 +1013,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "omniroute",
-                                              "args":  "--mcp",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
                                               "envKeys":  [
                                                               "OMNIROUTE_API_KEY",
                                                               "OMNIROUTE_BASE_URL"
@@ -656,13 +1030,12 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MAIN}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
-                                              "enabled":  true,
-                                              "name":  "supabase"
+                                              "name":  "supabase-My-portfolio"
                                           },
                                           {
                                               "kind":  "remote",
@@ -750,7 +1123,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "node",
-                                              "args":  "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
                                               "envKeys":  [
                                                               "LINKEDIN_ACCESS_TOKEN"
                                                           ],
@@ -761,6 +1136,9 @@
                                               "kind":  "remote",
                                               "type":  "http",
                                               "url":  "https://mcp.sentry.dev/mcp",
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
                                               "enabled":  true,
                                               "name":  "sentry"
                                           },
@@ -778,13 +1156,99 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MASARX}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
                                               "enabled":  true,
                                               "name":  "supabase-masarx"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "uvx",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OBSIDIAN_PROTOCOL",
+                                                              "OBSIDIAN_HOST",
+                                                              "OBSIDIAN_PORT",
+                                                              "OBSIDIAN_API_KEY"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "obsidian"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "chrome-devtools"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "playwright"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "name":  "supabase"
                                           }
                                       ],
                           "app":  "zcode-ZCodeSixthHome",
@@ -799,7 +1263,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "omniroute",
-                                              "args":  "--mcp",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
                                               "envKeys":  [
                                                               "OMNIROUTE_API_KEY",
                                                               "OMNIROUTE_BASE_URL"
@@ -814,12 +1280,11 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MAIN}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
-                                              "enabled":  true,
                                               "name":  "supabase"
                                           },
                                           {
@@ -908,7 +1373,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "node",
-                                              "args":  "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
                                               "envKeys":  [
                                                               "LINKEDIN_ACCESS_TOKEN"
                                                           ],
@@ -919,6 +1386,9 @@
                                               "kind":  "remote",
                                               "type":  "http",
                                               "url":  "https://mcp.sentry.dev/mcp",
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
                                               "enabled":  true,
                                               "name":  "sentry"
                                           },
@@ -936,13 +1406,100 @@
                                               "args":  [
                                                            "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
                                                            "--project-ref",
-                                                           "${SUPABASE_PROJECT_REF_MASARX}"
+                                                           "\u003cREDACTED\u003e"
                                                        ],
                                               "envKeys":  [
                                                               "SUPABASE_ACCESS_TOKEN"
                                                           ],
                                               "enabled":  true,
                                               "name":  "supabase-masarx"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "uvx",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OBSIDIAN_PROTOCOL",
+                                                              "OBSIDIAN_HOST",
+                                                              "OBSIDIAN_PORT",
+                                                              "OBSIDIAN_API_KEY"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "obsidian"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "chrome-devtools"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "playwright"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase-My-portfolio"
                                           }
                                       ],
                           "app":  "zcode-ZCodeThirdHome",
@@ -956,7 +1513,9 @@
                                           {
                                               "kind":  "stdio",
                                               "command":  "uvx",
-                                              "args":  "mcp-obsidian",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
                                               "envKeys":  [
                                                               "OBSIDIAN_PROTOCOL",
                                                               "OBSIDIAN_HOST",
@@ -981,7 +1540,8 @@
                                               "kind":  "remote",
                                               "serverUrl":  "https://api.githubcopilot.com/mcp/",
                                               "headerKeys":  [
-                                                                 "Authorization"
+                                                                 "Authorization",
+                                                                 "X-MCP-Toolsets"
                                                              ],
                                               "disabled":  false,
                                               "name":  "github"
@@ -992,7 +1552,7 @@
                                               "args":  [
                                                            "-y",
                                                            "mcp-remote",
-                                                           "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF_IPLOGGER}"
+                                                           "https://mcp.supabase.com/mcp?project_ref=\u003cREDACTED\u003e"
                                                        ],
                                               "disabled":  true,
                                               "name":  "supabase-iplogger"
@@ -1003,9 +1563,180 @@
                                               "args":  [
                                                            "-y",
                                                            "mcp-remote",
-                                                           "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF_MASARX}"
+                                                           "https://mcp.supabase.com/mcp?project_ref=\u003cREDACTED\u003e"
                                                        ],
                                               "name":  "supabase-masar-x"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "omniroute",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OMNIROUTE_API_KEY",
+                                                              "OMNIROUTE_BASE_URL"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "omniroute"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase-masarx"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "serverUrl":  "https://mcp.vercel.com",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "vercel"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "serverUrl":  "https://mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-api"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "serverUrl":  "https://docs.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-docs"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "serverUrl":  "https://browser.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-browser"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "serverUrl":  "https://mcp.sentry.dev/mcp",
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "sentry"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "serverUrl":  "https://mcp.upstash.com/mcp",
+                                              "enabled":  true,
+                                              "name":  "upstash"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@notionhq/notion-mcp-server"
+                                                       ],
+                                              "envKeys":  [
+                                                              "NOTION_TOKEN"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "notion"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@cloudinary/asset-management-mcp",
+                                                           "start"
+                                                       ],
+                                              "envKeys":  [
+                                                              "CLOUDINARY_CLOUD_NAME",
+                                                              "CLOUDINARY_API_KEY",
+                                                              "CLOUDINARY_API_SECRET"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "cloudinary"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
+                                              "envKeys":  [
+                                                              "LINKEDIN_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "linkedin"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "playwright"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "serverUrl":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "serverUrl":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "serverUrl":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
                                           }
                                       ],
                           "app":  "windsurf",
@@ -1020,7 +1751,9 @@
                                               "kind":  "stdio",
                                               "type":  "stdio",
                                               "command":  "uvx",
-                                              "args":  "mcp-obsidian",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
                                               "envKeys":  [
                                                               "OBSIDIAN_PROTOCOL",
                                                               "OBSIDIAN_HOST",
@@ -1032,8 +1765,208 @@
                                           {
                                               "kind":  "remote",
                                               "type":  "http",
-                                              "url":  "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF_MASARX}",
+                                              "url":  "https://mcp.supabase.com/mcp?project_ref=\u003cREDACTED\u003e",
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
                                               "name":  "supabase"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "omniroute",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OMNIROUTE_API_KEY",
+                                                              "OMNIROUTE_BASE_URL"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "omniroute"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase-masarx"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://api.githubcopilot.com/mcp/",
+                                              "headerKeys":  [
+                                                                 "Authorization",
+                                                                 "X-MCP-Toolsets"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "github"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.vercel.com",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "vercel"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-api"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://docs.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-docs"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://browser.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-browser"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.sentry.dev/mcp",
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "sentry"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.upstash.com/mcp",
+                                              "enabled":  true,
+                                              "name":  "upstash"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@notionhq/notion-mcp-server"
+                                                       ],
+                                              "envKeys":  [
+                                                              "NOTION_TOKEN"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "notion"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@cloudinary/asset-management-mcp",
+                                                           "start"
+                                                       ],
+                                              "envKeys":  [
+                                                              "CLOUDINARY_CLOUD_NAME",
+                                                              "CLOUDINARY_API_KEY",
+                                                              "CLOUDINARY_API_SECRET"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "cloudinary"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
+                                              "envKeys":  [
+                                                              "LINKEDIN_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "linkedin"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "chrome-devtools"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "playwright"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
                                           }
                                       ],
                           "app":  "vscode",
@@ -1061,7 +1994,9 @@
                                           {
                                               "kind":  "stdio",
                                               "command":  "C:\\Users\\FOTE\\AppData\\Local\\Programs\\MiniMax Code\\MiniMax Code.exe",
-                                              "args":  "C:\\Users\\FOTE\\AppData\\Local\\Programs\\MiniMax Code\\resources\\resources\\matrix-mcp-cli\\index.js",
+                                              "args":  [
+                                                           "C:\\Users\\FOTE\\AppData\\Local\\Programs\\MiniMax Code\\resources\\resources\\matrix-mcp-cli\\index.js"
+                                                       ],
                                               "envKeys":  [
                                                               "MATRIX_BASE_URL",
                                                               "MATRIX_TIMEOUT_MS"
@@ -1101,12 +2036,716 @@
                                                           ],
                                               "enabled":  true,
                                               "name":  "trash"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "omniroute",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OMNIROUTE_API_KEY",
+                                                              "OMNIROUTE_BASE_URL"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "omniroute"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase-masarx"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://api.githubcopilot.com/mcp/",
+                                              "headerKeys":  [
+                                                                 "Authorization",
+                                                                 "X-MCP-Toolsets"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "github"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://mcp.vercel.com",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "vercel"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-api"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://docs.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-docs"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://browser.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-browser"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://mcp.sentry.dev/mcp",
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "sentry"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://mcp.upstash.com/mcp",
+                                              "enabled":  true,
+                                              "name":  "upstash"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@notionhq/notion-mcp-server"
+                                                       ],
+                                              "envKeys":  [
+                                                              "NOTION_TOKEN"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "notion"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@cloudinary/asset-management-mcp",
+                                                           "start"
+                                                       ],
+                                              "envKeys":  [
+                                                              "CLOUDINARY_CLOUD_NAME",
+                                                              "CLOUDINARY_API_KEY",
+                                                              "CLOUDINARY_API_SECRET"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "cloudinary"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
+                                              "envKeys":  [
+                                                              "LINKEDIN_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "linkedin"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "uvx",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OBSIDIAN_PROTOCOL",
+                                                              "OBSIDIAN_HOST",
+                                                              "OBSIDIAN_PORT",
+                                                              "OBSIDIAN_API_KEY"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "obsidian"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "chrome-devtools"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "streamable-http",
+                                              "url":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
                                           }
                                       ],
                           "app":  "minimax",
                           "role":  "target (sync)",
                           "status":  "ok",
                           "file":  "C:\\Users\\FOTE\\.minimax\\mcp\\mcp.json"
+                      },
+                      {
+                          "note":  "top-level mcpServers only; app state + projects.* untouched; enabledMcpjsonServers/disabledMcpjsonServers are app-local state",
+                          "servers":  [
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "uvx",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OBSIDIAN_PROTOCOL",
+                                                              "OBSIDIAN_HOST",
+                                                              "OBSIDIAN_PORT",
+                                                              "OBSIDIAN_API_KEY"
+                                                          ],
+                                              "name":  "obsidian"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "omniroute",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OMNIROUTE_API_KEY",
+                                                              "OMNIROUTE_BASE_URL"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "omniroute"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase-masarx"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://api.githubcopilot.com/mcp/",
+                                              "headerKeys":  [
+                                                                 "Authorization",
+                                                                 "X-MCP-Toolsets"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "github"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.vercel.com",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "vercel"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-api"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://docs.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-docs"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://browser.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-browser"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.sentry.dev/mcp",
+                                              "headerKeys":  [
+                                                                 "SENTRY_ACCESS_TOKEN"
+                                                             ],
+                                              "enabled":  true,
+                                              "name":  "sentry"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.upstash.com/mcp",
+                                              "enabled":  true,
+                                              "name":  "upstash"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@notionhq/notion-mcp-server"
+                                                       ],
+                                              "envKeys":  [
+                                                              "NOTION_TOKEN"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "notion"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@cloudinary/asset-management-mcp",
+                                                           "start"
+                                                       ],
+                                              "envKeys":  [
+                                                              "CLOUDINARY_CLOUD_NAME",
+                                                              "CLOUDINARY_API_KEY",
+                                                              "CLOUDINARY_API_SECRET"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "cloudinary"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
+                                              "envKeys":  [
+                                                              "LINKEDIN_ACCESS_TOKEN"
+                                                          ],
+                                              "enabled":  false,
+                                              "name":  "linkedin"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "chrome-devtools"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ],
+                                              "enabled":  true,
+                                              "name":  "playwright"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.stripe.com",
+                                              "enabled":  false,
+                                              "name":  "stripe"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://mcp.resend.com/mcp",
+                                              "enabled":  false,
+                                              "name":  "resend"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "http",
+                                              "url":  "https://app.openseo.so/mcp",
+                                              "enabled":  false,
+                                              "name":  "openseo"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ],
+                                              "enabled":  false,
+                                              "name":  "github-local"
+                                          }
+                                      ],
+                          "app":  "claude-code",
+                          "role":  "target (sync)",
+                          "status":  "ok",
+                          "file":  "C:\\Users\\FOTE\\.claude.json"
+                      },
+                      {
+                          "note":  "light TOML scan (mcp_servers tables only)",
+                          "servers":  [
+                                          {
+                                              "name":  "node_repl",
+                                              "kind":  "stdio",
+                                              "command":  "C:/Users/FOTE/AppData/Local/OpenAI/Codex/runtimes/cua_node/440c4f095d41ea30/bin/node_repl.exe",
+                                              "args":  [
+
+                                                       ],
+                                              "envKeys":  [
+                                                              "NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS",
+                                                              "NODE_REPL_NODE_MODULE_DIRS",
+                                                              "NODE_REPL_NODE_PATH",
+                                                              "NODE_REPL_TRUSTED_CODE_PATHS",
+                                                              "CODEX_HOME",
+                                                              "BROWSER_USE_AVAILABLE_BACKENDS",
+                                                              "BROWSER_USE_TINYSKY_ENABLED",
+                                                              "NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER",
+                                                              "NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME",
+                                                              "BROWSER_USE_CODEX_APP_BUILD_FLAVOR",
+                                                              "BROWSER_USE_CODEX_APP_VERSION",
+                                                              "NODE_REPL_TRUSTED_SERVICES",
+                                                              "SKY_CUA_NATIVE_PIPE",
+                                                              "SKY_CUA_NATIVE_PIPE_DIRECTORY",
+                                                              "CODEX_CLI_PATH"
+                                                          ]
+                                          },
+                                          {
+                                              "name":  "omniroute",
+                                              "kind":  "stdio",
+                                              "command":  "omniroute",
+                                              "args":  [
+                                                           "--mcp"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OMNIROUTE_API_KEY",
+                                                              "OMNIROUTE_BASE_URL"
+                                                          ]
+                                          },
+                                          {
+                                              "name":  "supabase",
+                                              "kind":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ]
+                                          },
+                                          {
+                                              "name":  "supabase-masarx",
+                                              "kind":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+                                                           "--project-ref",
+                                                           "\u003cREDACTED\u003e"
+                                                       ],
+                                              "envKeys":  [
+                                                              "SUPABASE_ACCESS_TOKEN"
+                                                          ]
+                                          },
+                                          {
+                                              "name":  "notion",
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@notionhq/notion-mcp-server"
+                                                       ],
+                                              "envKeys":  [
+                                                              "NOTION_TOKEN"
+                                                          ]
+                                          },
+                                          {
+                                              "name":  "cloudinary",
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@cloudinary/asset-management-mcp",
+                                                           "start"
+                                                       ],
+                                              "envKeys":  [
+                                                              "CLOUDINARY_CLOUD_NAME",
+                                                              "CLOUDINARY_API_KEY",
+                                                              "CLOUDINARY_API_SECRET"
+                                                          ]
+                                          },
+                                          {
+                                              "name":  "linkedin",
+                                              "kind":  "stdio",
+                                              "command":  "node",
+                                              "args":  [
+                                                           "C:/Users/FOTE/Tools/linkedin-mcp/index.mjs"
+                                                       ],
+                                              "envKeys":  [
+                                                              "LINKEDIN_ACCESS_TOKEN"
+                                                          ]
+                                          },
+                                          {
+                                              "name":  "obsidian",
+                                              "kind":  "stdio",
+                                              "command":  "uvx",
+                                              "args":  [
+                                                           "mcp-obsidian"
+                                                       ],
+                                              "envKeys":  [
+                                                              "OBSIDIAN_PROTOCOL",
+                                                              "OBSIDIAN_HOST",
+                                                              "OBSIDIAN_PORT",
+                                                              "OBSIDIAN_API_KEY"
+                                                          ]
+                                          },
+                                          {
+                                              "name":  "chrome-devtools",
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "chrome-devtools-mcp@latest",
+                                                           "--auto-connect",
+                                                           "--slim"
+                                                       ]
+                                          },
+                                          {
+                                              "name":  "playwright",
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@playwright/mcp@0.0.70"
+                                                       ]
+                                          },
+                                          {
+                                              "name":  "github-local",
+                                              "kind":  "stdio",
+                                              "command":  "npx",
+                                              "args":  [
+                                                           "-y",
+                                                           "@modelcontextprotocol/server-github"
+                                                       ]
+                                          }
+                                      ],
+                          "app":  "codex",
+                          "role":  "target (sync)",
+                          "status":  "ok",
+                          "file":  "C:\\Users\\FOTE\\.codex\\config.toml"
+                      },
+                      {
+                          "note":  "plugin-level MCP store",
+                          "servers":  [
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "stdio",
+                                              "command":  "./computer-use-mcp.exe",
+                                              "args":  [
+
+                                                       ],
+                                              "name":  "computer-use"
+                                          }
+                                      ],
+                          "app":  "copilot-computer-use",
+                          "role":  "not wired (plugin store)",
+                          "status":  "ok",
+                          "file":  "C:\\Users\\FOTE\\AppData\\Local\\Programs\\GitHub Copilot\\plugins\\computer-use\\mcp.json"
+                      },
+                      {
+                          "note":  "mcp section only; provider apiKeys in the same file deliberately unread (sync writes clones only)",
+                          "servers":  [
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "local",
+                                              "command":  [
+                                                              "uvx",
+                                                              "mcp-obsidian"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "obsidian"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "local",
+                                              "command":  [
+                                                              "npx",
+                                                              "-y",
+                                                              "@supabase/mcp-server-supabase@latest",
+                                                              "--project-ref",
+                                                              "\u003cREDACTED\u003e"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "supabase"
+                                          },
+                                          {
+                                              "kind":  "stdio",
+                                              "type":  "local",
+                                              "command":  [
+                                                              "npx",
+                                                              "-y",
+                                                              "@modelcontextprotocol/server-github"
+                                                          ],
+                                              "enabled":  true,
+                                              "name":  "github"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "remote",
+                                              "url":  "https://mcp.sentry.dev/mcp",
+                                              "name":  "sentry"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "remote",
+                                              "url":  "https://mcp.vercel.com",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "vercel"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "remote",
+                                              "url":  "https://mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-api"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "remote",
+                                              "url":  "https://docs.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-docs"
+                                          },
+                                          {
+                                              "kind":  "remote",
+                                              "type":  "remote",
+                                              "url":  "https://browser.mcp.cloudflare.com/mcp",
+                                              "headerKeys":  [
+                                                                 "Authorization"
+                                                             ],
+                                              "enabled":  false,
+                                              "name":  "cloudflare-browser"
+                                          }
+                                      ],
+                          "app":  "opencode-primary",
+                          "role":  "note (Primary excluded from sync)",
+                          "status":  "ok",
+                          "file":  "C:\\Users\\FOTE\\.config\\opencode\\opencode.jsonc"
                       },
                       {
                           "note":  "extension-level MCP store",
@@ -1309,7 +2948,7 @@
                           "file":  "C:\\Users\\FOTE\\AppData\\Local\\hermes\\config.yaml"
                       },
                       {
-                          "note":  "own suite machinery (tools\\autoclaw2-mcp.master.json): servers array currently holds 0 entr(ies); sync via sync_autoclaw2_mcp.ps1 / GHOST.bat AutoClaw2 [8]",
+                          "note":  "own suite machinery (tools\\autoclaw2-mcp.master.json): servers array currently holds 20 entr(ies); sync via sync_autoclaw2_mcp.ps1 / GHOST.bat AutoClaw2 [8]",
                           "servers":  [
 
                                       ],

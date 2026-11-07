@@ -36,6 +36,20 @@
       },
       "enabled": true
     },
+    "supabase-My-portfolio": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:/Users/FOTE/Tools/supabase-mcp/node_modules/@supabase/mcp-server-supabase/dist/cli.js",
+        "--project-ref",
+        "${SUPABASE_PROJECT_REF_PORTFOLIO}"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN_PORTFOLIO}"
+      },
+      "enabled": true,
+      "only": ["zcode"]
+    },
     "supabase-iplogger": {
       "type": "stdio",
       "command": "npx",
@@ -94,6 +108,9 @@
     "sentry": {
       "type": "http",
       "url": "https://mcp.sentry.dev/mcp",
+      "headers": {
+        "SENTRY_ACCESS_TOKEN": "${SENTRY_ACCESS_TOKEN}"
+      },
       "enabled": true
     },
     "upstash": {
@@ -202,6 +219,19 @@
       "type": "http",
       "url": "https://app.openseo.so/mcp",
       "enabled": false
+    },
+    "node_repl": {
+      "type": "stdio",
+      "command": "C:/Users/FOTE/AppData/Local/OpenAI/Codex/runtimes/cua_node/440c4f095d41ea30/bin/node_repl.exe",
+      "args": [],
+      "enabled": true,
+      "only": ["codex"]
+    },
+    "computer-use": {
+      "type": "stdio",
+      "command": "C:/Users/FOTE/AppData/Local/Programs/GitHub Copilot/plugins/computer-use/computer-use-mcp.exe",
+      "enabled": false,
+      "only": ["copilot-computer-use"]
     }
   }
 }
