@@ -49,6 +49,12 @@
   Show this clone's status (profile dir, lockfile held/free, process
   count, device-id hash prefix) WITHOUT launching.
 
+.PARAMETER SkipMcpSync
+  Skip the pre-launch MCP sync step [2b] for this launch only (incident
+  triage escape hatch - e.g. the 2026-11-05 E5 verdict: externally-written
+  MCP rows are never adopted by the app, so re-applying them on every
+  launch just re-seeds the red sources list).
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File launch_autoclaw2_clone.ps1 -Instance c1
   powershell -ExecutionPolicy Bypass -File launch_autoclaw2_clone.ps1 -Instance c3 -Status
@@ -56,7 +62,8 @@
 param(
     [ValidateSet('c1','c2','c3','c4','c5')]
     [string]$Instance = 'c1',
-    [switch]$Status
+    [switch]$Status,
+    [switch]$SkipMcpSync
 )
 $ErrorActionPreference = 'Stop'
 
@@ -139,15 +146,26 @@ if (Test-Path $lockfile) {
 # here (a running clone only warns above and never reaches a second write),
 # so a quick best-effort MCP sync lands on this very launch. Never blocks
 # the launch: any failure is a warning only (same contract as ZCode's 2d).
-$ac2McpSync = Join-Path $PSScriptRoot '..\..\tools\sync_autoclaw2_mcp.ps1'
-if (Test-Path -LiteralPath $ac2McpSync) {
-    try {
-        & $ac2McpSync -Target $Instance -Quiet
-        if ($LASTEXITCODE -notin 0, 2) {
-            Write-Warning "pre-launch MCP sync exit $LASTEXITCODE (launch continues)"
+# A refusal (exit 2) is NEVER silent: the sync prints its own [REFUSED]
+# verdict and the launcher adds a warning so a hidden-console launch cannot
+# swallow it (2026-11-05: the schema gate refusing every post-4.0.0 profile
+# made this step a silent no-op for a whole day).
+if ($SkipMcpSync) {
+    Write-Host "pre-launch MCP sync: SKIPPED (-SkipMcpSync)"
+} else {
+    $ac2McpSync = Join-Path $PSScriptRoot '..\..\tools\sync_autoclaw2_mcp.ps1'
+    if (Test-Path -LiteralPath $ac2McpSync) {
+        try {
+            & $ac2McpSync -Target $Instance -Quiet
+            $syncExit = $LASTEXITCODE
+            if ($syncExit -eq 2) {
+                Write-Warning "pre-launch MCP sync REFUSED (exit 2 - see the [REFUSED] verdict above). Launch continues; the sync did NOT run."
+            } elseif ($syncExit -ne 0) {
+                Write-Warning "pre-launch MCP sync exit $syncExit (launch continues)"
+            }
+        } catch {
+            Write-Warning "pre-launch MCP sync failed: $($_.Exception.Message) (launch continues)"
         }
-    } catch {
-        Write-Warning "pre-launch MCP sync failed: $($_.Exception.Message) (launch continues)"
     }
 }
 
