@@ -33,6 +33,7 @@ touches, and emits an audit log plus a self-contained restore script.
 | Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | — |
 | ZCode clones (Primary + 5 branded clones) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | — |
 | ZCode light headless worker (no desktop window) | `launch_zcode_cli_light.ps1 -Instance Second\|...\|Sixth` (`-Prompt` / `-Server`) | — |
+| OpenCode light headless worker (CLI only, clone XDG state) | `launch_opencode_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` / `-Server` / `-Login` / `-StopService`) | — |
 | Reset QoderWork | `reset_qoderwork.ps1` | — |
 | Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | — |
 | Device fingerprint | `change_device_id.ps1` | `change_device_id.sh Fingerprint` |
@@ -246,6 +247,12 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   + "OpenCode <Color>" title) rides the same patch; shortcuts install via
   `tools/install_opencode_clone_shortcuts.ps1` (`-Remove`,
   `-RepairPrimaryAumid`). Fresh state per clone — one manual sign-in each.
+  The light worker (`src/windows/launch_opencode_cli_light.ps1` —
+  `-Instance c1..c5`, `-Prompt` one-shot, `-Server` v2 API/web server,
+  `-Acp`, `-Login`, `-StopService`) drives the shipped `opencode-cli.exe`
+  headless on the clone's own XDG state (free model until `-Login`), and
+  `tools/install_t3_opencode_instances.ps1` seeds the five clones into
+  T3 Code as ACP provider instances (close T3 first; `-Remove` undoes).
   Design + verified ground truth: [docs/OPENCODE_CLONES_SPEC.md](docs/OPENCODE_CLONES_SPEC.md)
 - **AutoClaw2 multi-instance** — `src/windows/launch_autoclaw2_clone.ps1
   -Instance c1..c5` launches isolated AutoClaw2 (v2.1.1, zwork) clones beside

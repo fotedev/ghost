@@ -308,7 +308,7 @@ shortcuts = Cline [7] (`-Remove` = [9]).
 ## OpenCode multi-instance (5 clones + Primary; per-user, no admin needed)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "tools\patch_opencode_clone_home.ps1"   # once; close ALL OpenCode windows (or pass -WaitForClose like menu row [8])
+powershell -ExecutionPolicy Bypass -File "tools\patch_opencode_clone_home.ps1"   # once; close ALL OpenCode windows (or pass -WaitForClose like menu row [10])
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c2   # ... c5
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1 -Status
@@ -316,19 +316,35 @@ powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clones_all
 powershell -ExecutionPolicy Bypass -File "tools\install_opencode_clone_shortcuts.ps1"
 powershell -ExecutionPolicy Bypass -File "tools\install_opencode_clone_shortcuts.ps1" -Remove
 powershell -ExecutionPolicy Bypass -File "tools\install_opencode_clone_shortcuts.ps1" -RepairPrimaryAumid
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_cli_light.ps1" -Instance c1              # headless light worker (prompt loop)
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_cli_light.ps1" -Instance c1 -Prompt "summarize the repo"   # one-shot
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_cli_light.ps1" -Instance c1 -Server -Port 4096             # foreground v2 API/web server
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_cli_light.ps1" -Instance c1 -Acp                            # foreground ACP stdio server (T3 Code surface)
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_cli_light.ps1" -Instance c1 -Login                         # one-time account login
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_cli_light.ps1" -Instance c1 -StopService                   # stop the clone's background service
+powershell -ExecutionPolicy Bypass -File "tools\install_t3_opencode_instances.ps1"          # seed the 5 clones into T3 Code (close T3 first)
+powershell -ExecutionPolicy Bypass -File "tools\install_t3_opencode_instances.ps1" -Remove   # unseed
 ```
 
 Isolation needs the ONE-TIME clone-home asar patch (packaged builds
 hardcode the Electron userData): the launcher aborts loudly when it is
 missing, and an app update reverts it — the byte-probe re-patches
-automatically on the next run (re-run OpenCode [8] after any manual
+automatically on the next run (re-run OpenCode [10] after any manual
 update). Each clone gets its own userData/sessionData plus its own
 `XDG_*` CLI-state home, its own single-instance lock, and per-clone
 taskbar identity (AUMID + window icon + "OpenCode <Color>" title).
 Service ports are ephemeral per instance (no port plan). First run per
 clone: ONE manual sign-in. Menu equivalents: launch
-c1/c2/c3/c4/c5 = OpenCode [1]-[5]; all five = [6]; shortcuts = [7]
-(`-Remove` = [10]); patch = [8]; status = [9].
+c1/c2/c3/c4/c5 = OpenCode [1]-[5]; all five = [6]; light worker = [7]
+(gids 79/80 for worker/login); login = [8]; shortcuts = [9]
+(`-Remove` = [12]); patch = [10]; status = [11].
+
+The light worker (`src/windows/launch_opencode_cli_light.ps1`, OpenCode
+[7]) runs the shipped `opencode-cli.exe` headless on the clone's own
+XDG state — sessions share history with that clone's desktop app. A
+fresh clone WORKS but on the FREE model (iceman-free); `-Login` attaches
+the clone's account (one credential = one instance). `-Auto` passes
+`--auto` for tasks that would otherwise wait on approval prompts.
 
 ## AutoClaw2 multi-instance (5 clones + Primary; per-user, no admin needed)
 

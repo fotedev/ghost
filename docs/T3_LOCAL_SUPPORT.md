@@ -21,7 +21,7 @@ GitHub fork.
 | GHOST app | In T3 Code? | Path |
 | --- | --- | --- |
 | **ZCode** (Z.ai Start Plan accounts) | Via our bridge — **IMPLEMENTED + WIRED (phases A-D, 2026-10-29)** | [T3_ZCODE_BRIDGE_SPEC.md](T3_ZCODE_BRIDGE_SPEC.md) — ACP ⇄ ZCode Protocol adapter; `tools/t3_zcode_bridge.mjs` + probe + fake-client harness; T3 Code v0.1.4 installed and the five accounts pre-seeded in `~/.t3/userdata/settings.json`; live-acceptance runbook in spec §9.2 (gated on the per-home [28] login) |
-| **OpenCode** (desktop clone suite accounts) | Native, zero code | T3 ships an OpenCode provider (`docs/user/providers-opencode.md`); one manual `opencode auth login` per account. Per-account isolation rides the same env-lever pattern as the clone suite (XDG homes) if T3's single-auth model is too narrow |
+| **OpenCode** (desktop clone suite accounts) | Native — **SEEDED (2026-11-07)** | `tools/install_t3_opencode_instances.ps1` seeds five `acpRegistry` instances (backup + verify-after + merge-never-overwrite; [OPENCODE_CLONES_SPEC.md](OPENCODE_CLONES_SPEC.md) §3.10): each launches `launch_opencode_cli_light.ps1 -Instance cN -Acp`, which sets the four XDG clone-home levers and execs `opencode acp` on stdio (handshake live-verified: protocolVersion 1). T3-UI acceptance user-supervised; one manual `opencode auth login` per clone home attaches its account (anonymous = FREE model) |
 | **Claude Code / Codex / Grok / Cursor / Pi / Antigravity** | Native | First-class T3 providers (if you hold subscriptions) |
 | **AutoClaw** | Not applicable | Desktop app with its own gateway/MCP ports — not a headless agent CLI; T3 controls agents, not Electron IDEs |
 | **Cline** | Not applicable | Tauri desktop app, no headless CLI surface |
