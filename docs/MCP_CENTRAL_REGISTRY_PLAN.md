@@ -112,7 +112,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_mcp_registry.ps1
 # تطبيق على أهداف محددة
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_mcp_registry.ps1 -Target zcode,windsurf
 
-# أهداف متاحة: cursor, windsurf, vscode, zcode, minimax, opencode, all
+# أهداف متاحة: cursor, windsurf, vscode, zcode, minimax, opencode, claude-code, codex, all
+
+# claude-code = ~/.claude.json (دمج جراحي: خاصية mcpServers العليا فقط —
+#   حالة التطبيق و projects.* لا تُلمس؛ أغلق جلسات Claude Code أولاً لأنه
+#   يعيد كتابة الملف عند الخروج).
+# codex = ~/.codex/config.toml عبر tools/mcp/codex_toml.ps1 (وحدة نقية:
+#   قارئ/كاتب TOML بالأسطر لجداول [mcp_servers.*] فقط، باقي الملف verbatim؛
+#   presence==enabled لذا سيرفرات master الـ enabled:false والـ remote (url)
+#   تُترك دون مساس؛ startup_timeout_sec وجدول env الفرعي ينجون per-key).
 ```
 
 - **قاعدة الإضافة الجديدة:** أضف السيرفر في `master-mcp.json` مرة واحدة ثم شغّل السكربت — كل التطبيقات الموضوعة كأهداف تحصل عليه.

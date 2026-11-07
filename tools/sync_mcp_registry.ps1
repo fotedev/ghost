@@ -43,17 +43,31 @@
               holds live provider API keys and may be JSONC with comments (CS-1 rule).
     minimax   %USERPROFILE%\.minimax\mcp\mcp.json            container mcpServers
               (verified live 2026-11-03: command/args/env + url with type "streamable-http").
+    claude-code  %USERPROFILE%\.claude.json                  container mcpServers
+              (pass-through shape; SURGICAL: only the top-level mcpServers property is
+              merged - the file's app state and projects.*.mcpServers are never touched;
+              enabledMcpjsonServers/disabledMcpjsonServers are app-local state. Close
+              running Claude Code sessions first - it rewrites this file on exit).
+    codex     %USERPROFILE%\.codex\config.toml               TOML [mcp_servers.*] tables
+              (line-based surgical reader/writer: only mcp_servers sections are merged,
+              the rest of the file - other tables + comments - is preserved verbatim and
+              merged sections are appended; presence == enabled, so registry entries
+              marked enabled:false are left alone entirely; app-only keys inside a
+              section, e.g. startup_timeout_sec and the [mcp_servers.<n>.env] sub-table,
+              survive per-key).
 
   NOT wired yet (paths unverified / app not installed — documented as pending):
     Qoder (~\.qoder\mcp.json — absent; .qoder holds only skills/), Trae (no mcp.json found),
-    Cline desktop (no mcp settings file in ClineClonesHome\cN\data), AutoClaw2 (no client
-    MCP config located).
+    Cline desktop (cline_mcp_settings.json exists but empty), AutoClaw2 (SQLite store —
+    own suite machinery via sync_autoclaw2_mcp.ps1 / tools\autoclaw2-mcp.master.json),
+    GitHub Copilot computer-use plugin (plugin-store config, centralized in the registry
+    as dormant 'computer-use' scoped to the never-target 'copilot-computer-use').
 
   PS 5.1 rules honored: no ternary, no $Input, ConvertTo-Json -InputObject (never piped),
   PSCustomObject/ConvertFrom-Json semantics, UTF8-no-BOM writes.
 
 .PARAMETER Target
-  cursor, windsurf, vscode, zcode, opencode, minimax, all (default: all).
+  cursor, windsurf, vscode, zcode, opencode, minimax, claude-code, codex, all (default: all).
 
 .PARAMETER DryRun
   Compute and print the plan per target; write nothing (no file, no backup, no audit).
@@ -86,11 +100,16 @@ if (-not (Test-Path -LiteralPath $mergeCore)) {
     throw "merge core not found: $mergeCore"
 }
 . $mergeCore
+$codexToml = Join-Path $PSScriptRoot 'mcp\codex_toml.ps1'
+if (-not (Test-Path -LiteralPath $codexToml)) {
+    throw "codex TOML module not found: $codexToml"
+}
+. $codexToml
 
 if (-not $RegistryPath)       { $RegistryPath       = Join-Path $PSScriptRoot 'mcp\master-mcp.json' }
 if (-not $LocalOverridesPath) { $LocalOverridesPath = Join-Path $PSScriptRoot 'mcp\master-mcp.local.json' }
 
-$script:LocalStateFields = @('enabled', 'disabled', 'autoApprove', 'description', 'builtin', 'configured', 'timeout')
+$script:LocalStateFields = @('enabled', 'disabled', 'autoApprove', 'description', 'builtin', 'configured', 'timeout', 'startup_timeout_sec')
 $script:LocalAppData = [Environment]::GetFolderPath('LocalApplicationData')
 if ([string]::IsNullOrEmpty($script:LocalAppData)) { $script:LocalAppData = Join-Path $env:USERPROFILE 'AppData\Local' }
 $script:AuditDir  = Join-Path $script:LocalAppData 'mcp-registry-sync'
@@ -298,7 +317,15 @@ function Get-RegistryServers {
 function ConvertTo-AppEntry($canonicalEntry, [string]$mode) {
     $isRemote = ($null -ne $canonicalEntry.PSObject.Properties['url'])
 
-    if ($mode -eq 'passthrough' -or $mode -eq 'zcode') { return $canonicalEntry }
+    if ($mode -eq 'passthrough' -or $mode -eq 'zcode' -or $mode -eq 'claude-code') { return $canonicalEntry }
+
+    if ($mode -eq 'codex') {
+        # Codex config.toml has no type/enabled/disabled fields - presence == enabled.
+        Remove-PropIfExists $canonicalEntry 'type'
+        Remove-PropIfExists $canonicalEntry 'enabled'
+        Remove-PropIfExists $canonicalEntry 'disabled'
+        return $canonicalEntry
+    }
 
     if ($mode -eq 'windsurf') {
         # Verified live 2026-11-03: Windsurf remote entries use "serverUrl" and no "type".
@@ -437,6 +464,10 @@ function Get-TargetTable {
                       Files = @((Join-Path $u '.zcode\cli\config.json')); CreateIfMissing = $false }
         minimax  = @{ Mode = 'minimax';     Jsonc = $false; Container = @('mcpServers');
                       Files = @((Join-Path $u '.minimax\mcp\mcp.json')); CreateIfMissing = $false }
+        'claude-code' = @{ Mode = 'claude-code'; Jsonc = $false; Container = @('mcpServers');
+                      Files = @((Join-Path $u '.claude.json')); CreateIfMissing = $false }
+        codex    = @{ Mode = 'codex';       Jsonc = $false; Container = @('mcp_servers');
+                      Files = @((Join-Path $u '.codex\config.toml')); CreateIfMissing = $false }
         opencode = @{ Mode = 'opencode';    Jsonc = $true;  Container = @('mcp');
                       Files = @(); CreateIfMissing = $false; Glob = 'OpenCodeClonesHome' }
     }
@@ -569,7 +600,14 @@ function Sync-OneFile([string]$targetName, $spec, [string]$file, $registryServer
         return 'skip'
     }
 
-    try { $originalRoot = Read-AppConfig $file $spec.Jsonc }
+    $codexRaw = $null
+    try {
+        if ($spec.Mode -eq 'codex') {
+            $codexRaw = [System.IO.File]::ReadAllText($file)
+            $originalRoot = ConvertFrom-CodexTomlText $codexRaw
+        }
+        else { $originalRoot = Read-AppConfig $file $spec.Jsonc }
+    }
     catch {
         Write-Host ("[FAILED:{0}] config exists but does not parse ({1}) - NOT touching it: {2}" -f $targetName, $_.Exception.Message, $file) -ForegroundColor Red
         Add-AuditLine -target $targetName -file $file -server '-' -action 'parse' -ok:$false -note $_.Exception.Message
@@ -596,6 +634,26 @@ function Sync-OneFile([string]$targetName, $spec, [string]$file, $registryServer
     $stateMap = Get-LocalStateMap $container
     Strip-LocalState $container $stateMap
     $view = Build-TargetView $registryServers $spec $targetName $container
+    if ($spec.Mode -eq 'codex') {
+        # Codex config.toml: presence == enabled and stdio is the only fully-supported
+        # transport shape here (no headers sub-table writer), so:
+        #   - remote (url) entries are SKIPPED loudly - left untouched,
+        #   - registry entries marked enabled:false are left alone ENTIRELY - never
+        #     written, never removed; existing app sections for them survive untouched.
+        foreach ($vp in @($view.PSObject.Properties)) {
+            $urlp = $vp.Value.PSObject.Properties['url']
+            $ep   = $vp.Value.PSObject.Properties['enabled']
+            $reason = ''
+            if ($null -ne $urlp)                            { $reason = 'remote entry (codex syncs stdio servers only)' }
+            elseif ($null -ne $ep -and -not $ep.Value)       { $reason = 'registry-disabled (presence == enabled in TOML)' }
+            if ($reason) {
+                $skipName = $vp.Name
+                $view.PSObject.Properties.Remove($skipName)
+                Write-Host ("    [codex] SKIP '{0}': {1} - left untouched." -f $skipName, $reason) -ForegroundColor DarkYellow
+                Add-AuditLine -target $targetName -file $file -server $skipName -action 'skip' -ok:$true -note $reason
+            }
+        }
+    }
     if (@($view.PSObject.Properties).Count -eq 0) {
         Write-Host ("[OK:{0}] registry has no servers scoped to this target - nothing to do." -f $targetName) -ForegroundColor Green
         return 'noop'
@@ -647,7 +705,8 @@ function Sync-OneFile([string]$targetName, $spec, [string]$file, $registryServer
         Copy-Item -LiteralPath $file -Destination (Join-Path $backupDir (Split-Path -Leaf $file)) -Force
     }
     try {
-        Write-JsonFileNoBom $file $workRoot
+        if ($spec.Mode -eq 'codex') { Write-CodexTomlFile $file $workRoot $codexRaw }
+        else { Write-JsonFileNoBom $file $workRoot }
     }
     catch {
         Write-Host ("[FAILED:{0}] write failed: {1}" -f $targetName, $_.Exception.Message) -ForegroundColor Red
@@ -655,7 +714,10 @@ function Sync-OneFile([string]$targetName, $spec, [string]$file, $registryServer
         return 'failed'
     }
 
-    try { $reRead = Read-AppConfig $file $spec.Jsonc }
+    try {
+        if ($spec.Mode -eq 'codex') { $reRead = ConvertFrom-CodexTomlText ([System.IO.File]::ReadAllText($file)) }
+        else { $reRead = Read-AppConfig $file $spec.Jsonc }
+    }
     catch { $reRead = $null }
 
     $equal = $false
