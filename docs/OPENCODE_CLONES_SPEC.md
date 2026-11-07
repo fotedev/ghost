@@ -303,6 +303,135 @@ ladder below is moot for this app version:
   main's death (observed: outlived a closed clone window) — kill it when
   stopping a clone manually.
 
+### 3.9 Light worker: headless CLI on the clone XDG homes (spike-verified 2026-11-07)
+
+`src/windows/launch_opencode_cli_light.ps1` (OpenCode submenu [7], gid 79;
+`-Login` = [8], gid 80; `-StopService` covers the §3.8 manual kill) runs the
+v2 CLI against a clone's isolated state WITHOUT the desktop window — the
+OpenCode counterpart of the ZCode LIGHT worker (`launch_zcode_cli_light.ps1`).
+Everything below was live-verified on this host via a spike on a scratch XDG
+env (CLI v2.2.5 from the installed desktop bundle):
+
+- **The CLI ships with the desktop app**: `<install>\resources\opencode-cli.exe`
+  (`--version` → `opencode v2.2.5`; install dir is
+  `%LOCALAPPDATA%\Programs\@opencode-aidesktop` — the electron-builder NSIS
+  appId prefix). The launcher probes candidates functionally (`--version`
+  must exit 0 reporting an opencode version), never a bare path hit.
+- **The four XDG env vars are the ONLY levers needed** (unlike ZCode light,
+  which must also redirect HOME/USERPROFILE): with
+  `XDG_DATA_HOME/XDG_CONFIG_HOME/XDG_CACHE_HOME/XDG_STATE_HOME` pointed at
+  the clone home's `data\config\cache\state` subdirs, `opencode debug paths`
+  showed data/cache/config/state all resolving under them (db =
+  `<data>\opencode\opencode.db`, auth = `<data>\opencode\auth.json`,
+  service registry = `<config>\opencode\service.json`) while `home` stayed
+  the real profile. Same homes ⇒ sessions share history with that clone's
+  desktop app.
+- **Verified subcommand surface**: `run "<message>"` (one-shot; auto-starts
+  the clone's background service on first use), `serve [--port N]`
+  (foreground v2 API/web server — HTTP 200 verified on a pinned port), and
+  `service status/start/stop` (background-service lifecycle — clean stop,
+  zero orphan processes afterwards). `debug paths` / `debug config` are the
+  verify primitives. `acp` exists (Agent Client Protocol server — T3 Code's
+  surface) but is NOT wired by this script yet.
+- **Anonymous homes still WORK**: a `run` turn completed with the FREE model
+  (`iceman-free`, agent `build`) on a data home with no auth.json — the
+  OpenCode analogue of ZCode light's opencode-zen caveat. The fix is ONE
+  `opencode auth login` per clone home (`-Login` mode; verify-after =
+  `<data>\opencode\auth.json` appears and is not `{}` — the same file
+  `reset_minimax_opencode.ps1 -KeepLogin` preserves). Machine-env
+  credentials (e.g. CLOUDFLARE_API_TOKEN) show in `auth list` as source
+  "environment" and are NOT account logins. One credential = one instance.
+- **Runtime cache**: the CLI keeps its runtime binaries in
+  `<cache>\opencode\bin` — a fresh clone may download them once on the first
+  headless run (one-time network).
+- **Shared tmp**: `%TEMP%\opencode` is NOT XDG-scoped — every instance
+  (desktop and headless) shares it. Benign so far; noted for completeness.
+- **Permissions**: headless tasks that edit files or run commands wait on an
+  approval prompt — pass `-Auto` (CLI `--auto`) for unattended tasks, or
+  `-Standalone` for a private per-call server that leaves nothing running.
+- **Scripted consumers MUST use `-Json`** (CLI `--format json`): live-verified
+  2026-11-07 the default renderer's final answer text is not guaranteed on a
+  redirected (non-TTY) stdout — the turn succeeds and lands in the session
+  store while stdout may end after the model header. `-Json` emits NDJSON
+  (`step_start` / `{"type":"text",...,"text":"OK"}` / `step_finish` with
+  token counts). Related trap found the same day: assigning a launcher
+  function's output (`$ok = Invoke-LightRun`) swallows the CLI's ENTIRE
+  stdout — the script calls it as a bare statement and branches on
+  `$LASTEXITCODE`.
+- **The CLI resolves its project from `$env:PWD`, not the process CWD**
+  (live-verified 2026-11-07): PowerShell children inherit a STALE `PWD` from
+  the parent shell, so without `$env:PWD = $Cwd` every `run` turn silently
+  bound to the launcher's own launch dir's project (sessions recorded the
+  repo dir while the banner printed the requested `-Cwd`; with the var set
+  the session recorded `-Cwd` — proven on a scratch dir). Windows tools that
+  read the Win32 CWD are covered by `[Environment]::CurrentDirectory` +
+  `Push-Location` (PS passes the provider location as the child working dir).
+- **Orchestrator pipe note**: a one-shot `run` auto-starts the clone's
+  background service, and the detached service child inherits the caller's
+  stdout handle — consumers that wait for pipe EOF (`tail` on a pipe) hang
+  after the turn completes. Redirect to a FILE, or use `-Standalone` for
+  one-shots that must leave nothing behind.
+- **Latency hedge**: an anonymous free-model turn is NOT real-time — a
+  ~40K-input-token context took ~305 s provider-side on 2026-11-07 (the
+  turn DID complete; the same prompt on a small context took ~2 s). Never
+  treat timings measured here as proof of acceptable latency.
+
+#### 3.9.1 Live acceptance (2026-11-07)
+
+Automated checks — all PASS on this host:
+
+1. `-Prompt` one-shot on Blue (c1), `-Json`: real turn, `"text":"OK"`,
+   `step_finish reason:"stop"`, exit 0; session recorded under the requested
+   `-Cwd` (after the two fixes above). The anonymous home ran the FREE model
+   as predicted. Free-model latency: see the hedge above.
+2. `-Server --port 40191` on c1: HTTP 200; process killed; `service stop`;
+   zero `opencode-cli.exe` processes afterwards (no orphans).
+3. Dual-instance coexistence: `serve --port 40191` (c1) + `serve --port
+   40192` (c2) simultaneously — both HTTP 200; clean shutdown of both, zero
+   orphan processes.
+
+User-supervised (browser interaction; still open):
+
+4. `-Login` on a clone without a login — follow the interactive flow, expect
+   the `[login] OK - auth.json written` verify line.
+5. After a real login: `-Prompt` again — the model should switch from
+   iceman-free to the clone account's model (the same acceptance shape as
+   the ZCode light login, spec §9.2 there).
+
+### 3.10 T3 Code wiring: the fleet as acpRegistry instances (2026-11-07)
+
+`tools/install_t3_opencode_instances.ps1` seeds five `acpRegistry` provider
+instances into `~/.t3/userdata/settings.json` — the OpenCode counterpart of
+the five hand-seeded ZCode bridge instances (T3_ZCODE_BRIDGE_SPEC §9.1):
+backup-first (`<settings>.bak-t3-opencode-<stamp>`), merge-never-overwrite
+(only the five `opencode-c1..c5` keys are touched; favorites and the
+`zcode-*` instances survive), verify-after deep-compare, idempotent,
+`-Remove`, and an install-scoped running guard (T3 reads settings.json only
+at startup — any running copy throws).
+
+- **The spike**: `opencode acp` is a real ACP-over-stdio server — a minimal
+  JSON-RPC handshake under c2's XDG env returned `protocolVersion: 1`
+  (exactly the v1 shape T3's generation detection keys on) plus rich
+  `agentCapabilities` and a live `session/new` sessionId with model
+  configOptions; clean exit, zero orphan processes. `acp --login` exists as
+  an alternative auth route.
+- **The shape**: `commandPath` = powershell.exe, `commandArgs` =
+  `[-NoProfile, -ExecutionPolicy, Bypass, -File, <repo>\src\windows\
+  launch_opencode_cli_light.ps1, -Instance, cN, -Acp]` — the SAME pattern as
+  the ZCode entries (env rides OUR script, not T3's schema): the `-Acp` mode
+  sets the four XDG levers then execs `opencode acp` on stdio. Zero
+  dependence on any T3 per-provider env-override field (unverified for
+  acpRegistry — the ZCode entries carry none).
+- **Accents**: the four staged suite accents (#2A7CBD/#ECC31E/#37A188/
+  #BD2A32); Orange keeps a documented PLACEHOLDER hex (#C8620A — no
+  developer render exists yet, same open item as the shortcut branding).
+- **T3-UI acceptance is USER-SUPERVISED** (same discipline as the ZCode §9.2
+  runbook): open T3 → Providers render the five "OpenCode <Color>"
+  instances → a streamed reply per instance → model switch → stop →
+  two-instance concurrency. Anonymous homes run the FREE model; one manual
+  `opencode auth login` per clone home (or the light worker's `-Login`)
+  attaches its account.
+
 ## 4. Naming and layout
 
 ```
