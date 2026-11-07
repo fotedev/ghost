@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-07
+
 ### Security
 - **Supabase project refs scrubbed from the PUBLIC repo's entire history**
   (2026-11-07): the four refs (`eysu…`/`jcu…`/`cetv…`/`zfhfe…`) had been
