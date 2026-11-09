@@ -265,11 +265,48 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     spec §9.2.1/§9.2.2;
                                    #   sync_autoclaw2_chats.ps1 — AutoClaw2 chat
                                    #     inventory ([9] / gid 75) + guarded
-                                   #     one-way import ([10] / gid 76) +
-                                   #     -Revert -ImportId; [import] title
+                                   #     one-way import ([10] / gid 76; 2026-11-09
+                                   #     BOTH rows were dead from birth — :Run
+                                   #     forwarded only 3 args, so gid 75 lost
+                                   #     "All" (missing-argument error) and gid 76
+                                   #     lost -Target All AND had no -SessionId;
+                                   #     :Run now forwards 8 args) + the -AllMissing
+                                   #     batch (every non-IM source session each
+                                   #     target lacks — the Inventory diff — dry-run
+                                   #     plan + -Apply; exit 2 only when every
+                                   #     target refused) + -Revert -ImportId; [import] title
                                    #     prefix (D11), IM sessions refused
                                    #     (D12), work_events copied with fresh
                                    #     UUIDv4 ids, sidecar provenance;
+                                   #     2026-11-09 LIVE-VERIFIED (first real
+                                   #     imports, Primary→c1): apply initially
+                                   #     failed with UNIQUE constraint failed:
+                                   #     work_runs.accept_order — the live 4.0.0
+                                   #     schema has CREATE UNIQUE INDEX
+                                   #     uniq_work_accept_order ON
+                                   #     work_runs(accept_order) (globally unique
+                                   #     per account DB, NOT per session; dry-run
+                                   #     passed because it never touches the DB).
+                                   #     chat_import now remaps accept_order from
+                                   #     the target's MAX tail preserving source
+                                   #     relative order (queue ordering reads
+                                   #     (session_id, status, accept_order);
+                                   #     content_hash excludes it so idempotency
+                                   #     is unaffected); both failed applies
+                                   #     rolled back cleanly = C6 held. Fixture
+                                   #     carries the index + a per-profile
+                                   #     accept_order counter + regression test
+                                   #     (tests/python/test_ghost_autoclaw2.py,
+                                   #     discover -s tests/python: 155 green);
+                                   #     spec §5.5 updated. Known gaps: the chat
+                                   #     tools resolve ONLY the newest Primary
+                                   #     account dir (dormant 27e33829 holds 10
+                                   #     older chats — no -Account hint here, the
+                                   #     MCP script has one), and targets must be
+                                   #     closed + signed-in (c2/c4 not signed in);
+                                   #     re-importing an actively-growing source
+                                   #     session duplicates it (changed content
+                                   #     hash falls through by design);
                                    #   patch_autoclaw2_identity.ps1 — AutoClaw2
                                    #     window identity patch (AutoClaw2 [13] /
                                    #     gid 78; -Restore, -Force, -WaitForClose):
@@ -296,6 +333,13 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     windows group) + ZWORK_CLONE_ICON=the
                                    #     tinted tray_icon.ico; no env = stock
                                    #     behaviour (the Primary stays base-AUMID).
+                                   #     Since 2026-11-09 the LAUNCHER also kicks the
+                                   #     window AUMID after launch (temp `.kick` ->
+                                   #     real, 1.2 s apart, read-back verified): the
+                                   #     shell builds the taskbar group before
+                                   #     setAppDetails runs and never rebuilds it on a
+                                   #     plain write, so without the kick every clone
+                                   #     sits in ONE button (the ZCode kick lesson).
                                    #     Idempotent (done-anchors = replacements),
                                    #     sibling backup main.cjs.bak-zwork-identity-<stamp>,
                                    #     marker autoclaw2-identity-patch.marker.json
@@ -315,11 +359,12 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     cursor|windsurf|vscode|zcode|minimax|opencode|
                                    #     claude-code|codex|all — LIVE is the default
                                    #     without -DryRun): pushes the single source of
-                                   #     truth tools/mcp/master-mcp.json (28 servers,
+                                   #     truth tools/mcp/master-mcp.json (29 servers,
                                    #     Claude-Desktop mcpServers format; 25 + 2026-11-07
                                    #     adds supabase-My-portfolio [only:zcode], node_repl
                                    #     [only:codex], computer-use [dormant, scoped to the
-                                   #     never-target copilot-computer-use]) + the gitignored
+                                   #     never-target copilot-computer-use]; 2026-11-08 adds
+                                   #     netlify-mcp) + the gitignored
                                    #     overlay master-mcp.local.json (device values, local
                                    #     wins) into each app's own config in its own shape
                                    #     (windsurf serverUrl, minimax streamable-http, opencode
