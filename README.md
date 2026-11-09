@@ -11,6 +11,14 @@ for **Cursor**, **Windsurf / Devin Desktop**, **Trae**, **Qoder**, **ZCode**,
 machine IDs. Built for privacy hygiene, multi-account testing, and
 CI/dev-environment resets.
 
+<p align="center">
+  <img src="assets/preview.png" width="720"
+       alt="GHOST clone suites: ZCode, Cline, AutoClaw2 and OpenCode, each with five color-branded clones beside the Primary, plus the GHOST launcher">
+  <br>
+  <em>Multi-instance clones with per-clone color identity: taskbar icons,
+  window titles, accents and isolated profiles — all launched from one menu.</em>
+</p>
+
 ## Disclaimer
 
 These scripts modify application and system identifiers on machines **you own
