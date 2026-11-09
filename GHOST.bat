@@ -211,7 +211,7 @@ echo.
 call :Div "Sync + Chat Import"
 call :Opt 8 "Import MCPs to clones" "- from the central master manifest"
 call :Opt 9 "Chat inventory" "- read-only cross-profile report"
-call :Opt 10 "Import chats to clones" "- one-way Primary to clones - DB backed up first"
+call :Opt 10 "Import chats to clones" "- every missing Primary chat - one-way - clone windows must be closed"
 echo.
 call :Div "Maintenance"
 call :Opt 11 "Clone status" "- all 5 - locks, device-id, sign-in state"
@@ -555,7 +555,7 @@ if "%~1"=="71" (call :Detached "ZCode Clone Login" "-NoProfile" "src\windows\lau
 if "%~1"=="72" (call :Run "tools\install_zcode_second_shortcuts.ps1" -Remove & exit /b)
 if "%~1"=="73" (call :Run "tools\sync_autoclaw2_mcp.ps1" -Target All & exit /b)
 if "%~1"=="75" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Inventory -Target All & exit /b)
-if "%~1"=="76" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Import -Apply -Target All & exit /b)
+if "%~1"=="76" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Import -Apply -AllMissing -Target All & exit /b)
 if "%~1"=="77" (call :Run "tools\sync_mcp_registry.ps1" & exit /b)
 if "%~1"=="78" (call :RunWith "tools\patch_autoclaw2_identity.ps1" "Patch finished - relaunch the clones via their AutoClaw2 shortcuts for colored taskbar buttons." -WaitForClose & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
@@ -672,9 +672,11 @@ if not "%~3"=="" echo [%OID%] %~2 %~3
 exit /b
 
 :Run
-rem Runs a script inline (up to 3 extra args), then returns to the caller.
+rem Runs a script inline (up to 8 extra args), then returns to the caller.
 rem Usage: call :Run <script> [args...]
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~1" %2 %3 %4
+rem 2026-11-09 widened from 3 args: gid 75 lost "All" (-Target with no value)
+rem and gid 76 lost -Target All, so both AutoClaw2 chat rows never worked.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~1" %2 %3 %4 %5 %6 %7 %8 %9
 pause
 exit /b
 
