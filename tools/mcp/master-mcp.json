@@ -232,6 +232,15 @@
       "command": "C:/Users/FOTE/AppData/Local/Programs/GitHub Copilot/plugins/computer-use/computer-use-mcp.exe",
       "enabled": false,
       "only": ["copilot-computer-use"]
+    },
+    "netlify-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@netlify/mcp"],
+      "env": {
+        "NETLIFY_PERSONAL_ACCESS_TOKEN": "${NETLIFY_PERSONAL_ACCESS_TOKEN}"
+      },
+      "enabled": true
     }
   }
 }
