@@ -1,19 +1,20 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Window-level taskbar identity patch for the AutoClaw2 (zwork) clone suite
-  - colored, per-clone taskbar buttons for the RUNNING windows.
+  Window-level taskbar + notification-tray identity patch for the AutoClaw2
+  (zwork) clone suite - colored, per-clone taskbar buttons and tray icons for
+  the RUNNING windows.
 
 .DESCRIPTION
   AutoClaw2 4.0.0 ships UNPACKED: the whole main process is the plain-text
   resources\app\dist\main.cjs (no app.asar; the bootstrap does a bare
   require() of it, and dist\installer\payload-verify.cjs is an
   existence-only check the app never spawns - verified 2026-11-06). This
-  patch therefore does NOT need the asar-surgery route: it splices THREE
+  patch therefore does NOT need the asar-surgery route: it splices FOUR
   unique byte-level anchors (each verified to occur EXACTLY once in the
-  4.0.0 bundle) so the AppUserModelID and the window icon become
-  env-driven, following the app's own ZWORK_* env convention (the app
-  never parses arbitrary argv flags):
+  4.0.0 bundle) so the AppUserModelID, the window icon AND the
+  notification-area tray icon become env-driven, following the app's own
+  ZWORK_* env convention (the app never parses arbitrary argv flags):
 
     1.  setAppUserModelId(Kqn)
           -> setAppUserModelId(process.env.ZWORK_AUMID||Kqn)
@@ -35,6 +36,18 @@
                Xqn(l,process.execPath))
         (window icon for the main window's title bar / taskbar)
 
+    4.  t=r(e(n.iconPath));
+          -> t=r(e(process.env.ZWORK_CLONE_ICON||n.iconPath))
+        (inside the generic tray builder mTr: the notification-area tray
+        icon. Stock passes the app's own trayTemplate.png - a monochrome
+        Windows template asset every copy shares, which is why all five
+        tray icons showed the same uncolored logo even after the taskbar
+        buttons were colored. With ZWORK_CLONE_ICON set, createFromPath
+        receives the clone's tinted tray_icon.ico instead; the stock
+        18x18 resize + template-flag logic is untouched. Overriding the
+        read INSIDE mTr covers every call site; verified unique in the
+        bundle 2026-11-09.)
+
   The launcher (launch_autoclaw2_clone.ps1) then sets, per clone:
     ZWORK_AUMID      = com.zhipuai.autoclaw2.cN   (matches the SHORTCUT
                        AUMIDs the installer already writes, so pins and
@@ -51,6 +64,14 @@
   match) with auto-restore on failure, and -Restore. After an app update
   wipes the patch the script detects the stock bundle and re-applies with
   a FRESH backup of the new file.
+
+  Upgrade (patch v2, 2026-11-09): an anchor whose replacement is ALREADY
+  present is skipped per-anchor (recorded in the splice result's Skipped
+  list and the marker's preDoneAnchors) instead of failing as drift - that
+  is the legitimate v1 -> v2 upgrade state. The upgrade applies only the
+  missing tray anchor, backs up the CURRENT (v1-patched) file fresh, and
+  -Restore verifies against that pre-upgrade state. An anchor that is
+  neither findable nor already spliced still fails with anchor drift.
 
   Exit codes: 0 = applied or already applied
               2 = main.cjs not found
@@ -91,29 +112,37 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:PatchVersion = 1
+$script:PatchVersion = 2
 
-# Byte-level anchors verified unique in the 4.0.0 bundle (main.cjs, 2026-11-06:
-# each occurs exactly once; grep counts 1/1/1 across 14,293,768 bytes). Plain
-# ASCII, no backticks, no single quotes - safe as PS single-quoted literals.
-# The relaunchCommand:`"${e}"` template literal lives INSIDE the same Xqn
-# function but is deliberately not part of any anchor.
+# Byte-level anchors verified unique in the 4.0.0 bundle (main.cjs; anchors
+# 1-3 verified 2026-11-06, each occurring exactly once - grep counts 1/1/1
+# across the 14,293,768 stock bytes; anchor 4 verified 2026-11-09 with one
+# occurrence in both the pristine backup and the live v1-patched bundle).
+# Plain ASCII, no backticks, no single quotes - safe as PS single-quoted
+# literals. The relaunchCommand:`"${e}"` template literal lives INSIDE the
+# same Xqn function but is deliberately not part of any anchor.
 $script:Anchors = @(
     @{ Name = 'process-aumid';    Find = 'setAppUserModelId(Kqn)'; Replace = 'setAppUserModelId(process.env.ZWORK_AUMID||Kqn)' },
     @{ Name = 'window-details';   Find = 'appId:Kqn,appIconPath:e,'; Replace = 'appId:process.env.ZWORK_AUMID||Kqn,appIconPath:process.env.ZWORK_CLONE_ICON||e,' },
-    @{ Name = 'main-window-icon'; Find = 'Uf.app.isPackaged&&Xqn(l,process.execPath)'; Replace = 'Uf.app.isPackaged&&(process.env.ZWORK_CLONE_ICON&&l.setIcon(process.env.ZWORK_CLONE_ICON),Xqn(l,process.execPath))' }
+    @{ Name = 'main-window-icon'; Find = 'Uf.app.isPackaged&&Xqn(l,process.execPath)'; Replace = 'Uf.app.isPackaged&&(process.env.ZWORK_CLONE_ICON&&l.setIcon(process.env.ZWORK_CLONE_ICON),Xqn(l,process.execPath))' },
+    @{ Name = 'tray-icon';        Find = 't=r(e(n.iconPath))'; Replace = 't=r(e(process.env.ZWORK_CLONE_ICON||n.iconPath))' }
 )
 
 function Invoke-IdentitySplice {
     # Pure splice core (extracted for tests/autoclaw2_identity_patch.Tests.ps1):
     # consumes the bundle text, returns the patched text or a typed failure.
+    # Since patch v2 the per-anchor state is resumable: an anchor whose
+    # replacement text is already present is SKIPPED (recorded in .Skipped)
+    # instead of failing as drift - that is the legitimate v1 -> v2 upgrade
+    # state (older anchors spliced, the new tray anchor still pristine).
+    # Drift remains when an anchor is neither findable nor already spliced.
     param([Parameter(Mandatory = $true)][string]$Text)
-    $result = [pscustomobject]@{ Ok = $false; AlreadyApplied = $false; Text = $Text; Message = ''; Applied = @() }
-    $doneHits = 0
+    $result = [pscustomobject]@{ Ok = $false; AlreadyApplied = $false; Text = $Text; Message = ''; Applied = @(); Skipped = @() }
+    $done = @{}
     foreach ($a in $script:Anchors) {
-        if ([regex]::Matches($Text, [regex]::Escape($a.Replace)).Count -ge 1) { $doneHits++ }
+        if ([regex]::Matches($Text, [regex]::Escape($a.Replace)).Count -ge 1) { $done[$a.Name] = $true }
     }
-    if ($doneHits -eq $script:Anchors.Count) {
+    if ($done.Count -eq $script:Anchors.Count) {
         $result.Ok = $true
         $result.AlreadyApplied = $true
         $result.Message = 'all identity anchors already patched'
@@ -121,10 +150,14 @@ function Invoke-IdentitySplice {
     }
     $out = $Text
     foreach ($a in $script:Anchors) {
+        if ($done.ContainsKey($a.Name)) {
+            $result.Skipped += $a.Name
+            continue
+        }
         $n = [regex]::Matches($out, [regex]::Escape($a.Find)).Count
         if ($n -ne 1) {
-            # 0 + some done-anchors present = partially patched (mixed state);
-            # anything else = the bundle layout changed (app update).
+            # 0 here = the bundle layout changed (app update): that anchor is
+            # neither splicable nor already spliced. Anything else is drift.
             $result.Message = "anchor drift: '$($a.Name)' occurs $n time(s) (expected exactly 1) - the bundle changed or is in a mixed state; review manually (a -Restore may be needed first)"
             return $result
         }
@@ -217,8 +250,13 @@ if ($Restore) {
         $doneLeft += [regex]::Matches($restoredText, [regex]::Escape($a.Replace)).Count
     }
     $shaBack = Write-Sha256 -LiteralPath $target
-    if ($doneLeft -gt 0 -or $shaBack -ne $marker.sha256Before) {
-        Write-Error "restore verification FAILED (done-anchors left: $doneLeft) - inspect $target manually"
+    # preDoneAnchors (patch v2+) lists the anchors already spliced BEFORE the
+    # apply: a v1 -> v2 upgrade restores to that v1-patched state, so those
+    # done-anchors are EXPECTED to remain. A v1 marker has no field -> 0.
+    $preDone = @()
+    if ($marker.PSObject.Properties.Name -contains 'preDoneAnchors' -and $null -ne $marker.preDoneAnchors) { $preDone = @($marker.preDoneAnchors) }
+    if ($doneLeft -gt $preDone.Count -or $shaBack -ne $marker.sha256Before) {
+        Write-Error "restore verification FAILED (done-anchors left: $doneLeft, expected <= $($preDone.Count)) - inspect $target manually"
         exit 6
     }
     Remove-Item -LiteralPath $markerPath -Force
@@ -248,6 +286,7 @@ if ($splice.AlreadyApplied) {
         sha256Before = ''
         sha256After  = (Write-Sha256 -LiteralPath $target)
         anchors      = @($script:Anchors | ForEach-Object { $_.Name })
+        preDoneAnchors = @($script:Anchors | ForEach-Object { $_.Name })
     }
     [System.IO.File]::WriteAllText($markerPath, ($marker | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
     Write-Output "marker re-recorded: $markerPath"
@@ -318,13 +357,18 @@ $marker = [ordered]@{
     sha256Before = $shaBefore
     sha256After  = $shaAfter
     anchors      = @($script:Anchors | ForEach-Object { $_.Name })
+    preDoneAnchors = @($splice.Skipped)
 }
 [System.IO.File]::WriteAllText($markerPath, ($marker | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host ""
-Write-Host "IDENTITY PATCH APPLIED (v$($script:PatchVersion)): 3 anchors spliced into main.cjs" -ForegroundColor Green
+Write-Host "IDENTITY PATCH APPLIED (v$($script:PatchVersion)): $($script:Anchors.Count) anchors spliced into main.cjs" -ForegroundColor Green
+if (@($splice.Skipped).Count -gt 0) {
+    Write-Host "  upgrade: skipped $($splice.Skipped.Count) already-spliced anchor(s) (v1 -> v$($script:PatchVersion)): $($splice.Skipped -join ', ')"
+}
 Write-Host "  marker : $markerPath"
 Write-Host "  next   : launch the clones via their AutoClaw2 shortcuts - each window now"
-Write-Host "           carries com.zhipuai.autoclaw2.cN + its colored tray_icon.ico."
+Write-Host "           carries com.zhipuai.autoclaw2.cN + its colored tray_icon.ico, and"
+Write-Host "           the notification tray icon follows ZWORK_CLONE_ICON too."
 Write-Host "           Bare launches (the Primary) stay stock."
 exit 0
