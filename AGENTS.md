@@ -308,10 +308,11 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     session duplicates it (changed content
                                    #     hash falls through by design);
                                    #   patch_autoclaw2_identity.ps1 — AutoClaw2
-                                   #     window identity patch (AutoClaw2 [13] /
+                                   #     window + notification-tray identity patch
+                                   #     (AutoClaw2 [13] /
                                    #     gid 78; -Restore, -Force, -WaitForClose):
-                                   #     colored per-clone taskbar buttons for the
-                                   #     RUNNING windows — the suite's last
+                                   #     colored per-clone taskbar buttons + tray
+                                   #     icons for the RUNNING windows — the suite's last
                                    #     DEGRADED item (spec §7, "deferred until
                                    #     actually needed") shipped 2026-11-06 after
                                    #     the 4.0.0 bundle turned out to ship
@@ -320,14 +321,22 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     NO runtime integrity check — bootstrap =
                                    #     bare require(); payload-verify.cjs is
                                    #     existence-only and never spawned). Splices
-                                   #     THREE byte-anchors (each verified unique
-                                   #     in the 14.3MB bundle) so the AUMID +
-                                   #     window icon read ZWORK_AUMID /
-                                   #     ZWORK_CLONE_ICON: setAppUserModelId(Kqn),
+                                   #     FOUR byte-anchors (each verified unique
+                                   #     in the 14.3MB bundle; v2 2026-11-09 adds
+                                   #     the tray anchor) so the AUMID, window icon
+                                   #     AND notification-tray icon read
+                                   #     ZWORK_AUMID / ZWORK_CLONE_ICON:
+                                   #     setAppUserModelId(Kqn),
                                    #     appId:Kqn,appIconPath:e, (inside Xqn — the
                                    #     relaunchCommand backtick literal is never
-                                   #     touched) and the Xqn(l,process.execPath)
-                                   #     call site (+l.setIcon). launch_autoclaw2_clone.ps1
+                                   #     touched), the Xqn(l,process.execPath)
+                                   #     call site (+l.setIcon) and the tray
+                                   #     builder's t=r(e(n.iconPath)) read (inside
+                                   #     mTr — the stock bundle feeds every tray
+                                   #     its own monochrome trayTemplate.png, which
+                                   #     is why the five tray icons stayed
+                                   #     uncolored after the 2026-11-06 window
+                                   #     anchors landed). launch_autoclaw2_clone.ps1
                                    #     sets ZWORK_AUMID=com.zhipuai.autoclaw2.cN
                                    #     (matching the SHORTCUT AUMIDs so pins and
                                    #     windows group) + ZWORK_CLONE_ICON=the
@@ -340,7 +349,12 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     setAppDetails runs and never rebuilds it on a
                                    #     plain write, so without the kick every clone
                                    #     sits in ONE button (the ZCode kick lesson).
-                                   #     Idempotent (done-anchors = replacements),
+                                   #     Idempotent + per-anchor resume since v2:
+                                   #     an already-spliced anchor is SKIPPED and
+                                   #     recorded as the marker's preDoneAnchors —
+                                   #     a v1-patched bundle upgrades in place
+                                   #     (fresh pre-upgrade backup) and -Restore
+                                   #     verifies against that pre-upgrade state,
                                    #     sibling backup main.cjs.bak-zwork-identity-<stamp>,
                                    #     marker autoclaw2-identity-patch.marker.json
                                    #     (sha256 before/after), node --check gate

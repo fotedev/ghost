@@ -58,6 +58,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `c1\.autoclaw2-sync-backups\`, revertable via `-Revert -ImportId`.
 
 ### Added
+- **AutoClaw2 notification-tray identity — identity patch v2** (2026-11-09):
+  `tools/patch_autoclaw2_identity.ps1` splices a FOURTH byte-anchor inside the
+  generic tray builder (`mTr`): `t=r(e(n.iconPath))` ->
+  `t=r(e(process.env.ZWORK_CLONE_ICON||n.iconPath))` — the notification-area
+  tray icon now follows `ZWORK_CLONE_ICON` too (the stock bundle passes its own
+  monochrome `trayTemplate.png` to every tray, which is why all five tray icons
+  stayed uncolored after the 2026-11-06 window anchors landed). The splice core
+  is resumable per anchor: an anchor whose replacement text is already present
+  is skipped (recorded as `preDoneAnchors` in the marker) instead of failing as
+  drift, so a v1-patched bundle upgrades in place with a fresh pre-upgrade
+  backup and `-Restore` verifies against that state. Anchor 4 is verified
+  unique in the 4.0.0 bundle; the Pester suite gains the tray fixture, the
+  resume test and functional node assertions (tray source follows the env var,
+  stock keeps `trayTemplate.png`).
 - **Netlify MCP server added to the central registry** (2026-11-08): the
   29th entry `netlify-mcp` in `tools/mcp/master-mcp.json` (stdio, `npx -y
   @netlify/mcp`, unscoped — every target). Token template = the official
