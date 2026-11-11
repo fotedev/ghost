@@ -37,7 +37,7 @@
 ## 3. البنية
 
 ```
-tools\mcp\master-mcp.json          ← مصدر الحقيقة (22 سيرفراً) — صيغة Claude Desktop "mcpServers"
+tools\mcp\master-mcp.json          ← مصدر الحقيقة (29 سيرفراً) — صيغة Claude Desktop "mcpServers"
   └─ tools\mcp\master-mcp.local.json   ← overlay محلي (gitignored): قيم/تعريفات خاصة بالجهاز
 tools\sync_mcp_registry.ps1        ← المستورد: registry → ملف كل تطبيق
 tools\zcode_mcp_merge.ps1          ← (قائم) نواة الـ merge الوحيدة، dot-sourced
