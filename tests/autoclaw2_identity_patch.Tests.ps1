@@ -1,20 +1,22 @@
 ﻿# SPDX-License-Identifier: Apache-2.0
 # Tests for tools/patch_autoclaw2_identity.ps1 - the AutoClaw2 (zwork)
-# window-level taskbar identity patch. The splice core is extracted VERBATIM
-# from the driver via the PowerShell AST (the driver's main body must not
-# execute), then exercised against a synthetic main.cjs fixture that mirrors
-# the real 4.0.0 minified shapes (including the relaunchCommand backtick
-# template literal, which must survive untouched). Node-dependent assertions
-# run the REAL spliced fixture under node - functional proof of the
-# env-driven identity semantics, never a test-local reimplementation.
-# The LIVE-bundle test is THREE-STATE (2026-11-07, after the first real apply
-# invalidated the original pristine-only premise 6 minutes after it was
-# written): pristine (each Find anchor exactly once, no done-anchor) PASSES;
-# fully patched (each done-anchor exactly once + marker sha256After verified
-# + recorded backup present) PASSES; anything else (an app update landed a
-# new bundle shape, or a splice crashed mid-way) FAILS loudly. After an app
-# update the bundle is stock again, so the pristine branch passes and the
-# driver re-applies on its next run - the state machine handles updates.
+# window + notification-tray identity patch. The splice core is extracted
+# VERBATIM from the driver via the PowerShell AST (the driver's main body
+# must not execute), then exercised against a synthetic main.cjs fixture
+# that mirrors the real 4.0.0 minified shapes (including the relaunchCommand
+# backtick template literal, which must survive untouched, and the mTr tray
+# builder whose iconPath read is the patch-v2 tray anchor). Node-dependent
+# assertions run the REAL spliced fixture under node - functional proof of
+# the env-driven identity semantics, never a test-local reimplementation.
+# The LIVE-bundle test is state-aware (three-state since 2026-11-07,
+# resumable-aware since patch v2 2026-11-09): every anchor must be EITHER
+# already spliced (its done-text present) OR pristine (its Find text exactly
+# once). Fully patched PASSES (marker sha256After verified + recorded backup
+# present); pristine and legacy-partial (v1) states PASS as resumable - the
+# driver applies the remaining anchors on its next run; only a genuinely
+# changed bundle layout (an anchor neither present nor already spliced)
+# FAILS loudly. After an app update the bundle is stock again, so the
+# pristine branch passes and the driver re-applies on its next run.
 # -Skip gates use a static node-presence probe (Pester evaluates the Skip
 # expression outside BeforeAll scope); each test re-probes functionally.
 
@@ -39,17 +41,18 @@ Describe 'AutoClaw2 identity patch - anchor table' {
         Invoke-Expression ('$script:Anchors = ' + $assign[0].Right.Extent.Text)
     }
 
-    It 'declares exactly 3 distinct, backtick-free anchors' {
-        $script:Anchors.Count | Should -Be 3
+    It 'declares exactly 4 distinct, backtick-free anchors (v2 adds tray-icon)' {
+        $script:Anchors.Count | Should -Be 4
         foreach ($a in $script:Anchors) {
             $a.Find | Should -Not -Be $a.Replace
             $a.Find | Should -Not -Match '`' -Because "the relaunchCommand template literal must never be inside a splice anchor"
             $a.Name | Should -Not -BeNullOrEmpty
         }
-        ($script:Anchors | ForEach-Object { $_.Name } | Select-Object -Unique).Count | Should -Be 3
+        ($script:Anchors | ForEach-Object { $_.Name } | Select-Object -Unique).Count | Should -Be 4
+        @($script:Anchors | Where-Object { $_.Name -eq 'tray-icon' }).Count | Should -Be 1 -Because "patch v2 adds exactly one notification-tray anchor"
     }
 
-    It 'live 4.0.0 main.cjs is exactly pristine (anchors x1) or exactly patched (done-anchors x1, marker sha verified)' -Skip:(-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\AutoClaw2\resources\app\dist\main.cjs'))) {
+    It 'live main.cjs is fully patched (marker sha verified), pristine, or cleanly resumable' -Skip:(-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\AutoClaw2\resources\app\dist\main.cjs'))) {
         $bundle = Join-Path $env:LOCALAPPDATA 'Programs\AutoClaw2\resources\app\dist\main.cjs'
         $text = [System.IO.File]::ReadAllText($bundle)
         $findCounts = @{}; $replCounts = @{}
@@ -57,35 +60,52 @@ Describe 'AutoClaw2 identity patch - anchor table' {
             $findCounts[$a.Name] = [regex]::Matches($text, [regex]::Escape($a.Find)).Count
             $replCounts[$a.Name] = [regex]::Matches($text, [regex]::Escape($a.Replace)).Count
         }
-        $pristine = ((@($findCounts.Values) -eq 1).Count -eq 3) -and ((@($replCounts.Values) -eq 0).Count -eq 3)
-        $patched = ((@($replCounts.Values) -eq 1).Count -eq 3) -and ((@($findCounts.Values) -eq 0).Count -eq 3)
-        if ($patched) {
+        $doneAll = $true; $resumable = $true
+        foreach ($a in $script:Anchors) {
+            $done = $replCounts[$a.Name] -ge 1
+            $splicable = $findCounts[$a.Name] -eq 1
+            if ($done -and $splicable) {
+                # both texts present: ambiguous bundle state, never legitimate
+                $doneAll = $false; $resumable = $false
+            } elseif (-not $done -and -not $splicable) {
+                # neither present: the bundle layout changed (app update)
+                $doneAll = $false; $resumable = $false
+            } elseif (-not $done) {
+                # pristine anchor: splicable, not yet applied
+                $doneAll = $false
+            }
+        }
+        if ($doneAll) {
             # PATCHED state - verify the applied bundle against the marker:
             # live sha256 must equal the recorded post-patch hash, and the
-            # recorded pristine backup (when non-empty; a -Force re-record
-            # writes backupPath='') must exist for -Restore.
+            # recorded backup (when non-empty; a -Force re-record writes
+            # backupPath='') must exist and byte-match sha256Before. Since
+            # patch v2 the backup may hold the pre-upgrade (legacy-patched)
+            # state rather than pristine stock - sha256Before stays truthful
+            # either way.
             $markerPath = Join-Path $env:LOCALAPPDATA 'Programs\AutoClaw2\resources\app\autoclaw2-identity-patch.marker.json'
             Test-Path -LiteralPath $markerPath | Should -BeTrue -Because "a patched bundle must carry the identity-patch marker"
             $marker = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
             $liveHash = (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash
             $liveHash | Should -Be $marker.sha256After -Because "the live bundle must byte-match the marker's recorded post-patch hash"
             if ($marker.backupPath) {
-                Test-Path -LiteralPath $marker.backupPath | Should -BeTrue -Because "the recorded pristine backup must exist for -Restore"
+                Test-Path -LiteralPath $marker.backupPath | Should -BeTrue -Because "the recorded backup must exist for -Restore"
                 (Get-FileHash -LiteralPath $marker.backupPath -Algorithm SHA256).Hash | Should -Be $marker.sha256Before -Because "the backup must byte-match the marker's recorded pre-patch hash"
             }
             $true | Should -BeTrue -Because "live bundle is fully patched - done-anchors x1 with marker sha256 verified"
             return
         }
-        if ($pristine) {
-            # PRISTINE state - stock 4.0.0 bundle (or a post-update re-download);
-            # the driver re-applies with a fresh backup on its next run.
-            $true | Should -BeTrue -Because "live bundle is pristine - every Find anchor occurs exactly once and no done-anchor leaked"
+        if ($resumable) {
+            # PRISTINE or LEGACY state - stock bundle, or a v1-patched bundle
+            # awaiting the v2 tray anchor; the driver applies/resumes on its
+            # next run (per-anchor skip since patch v2).
+            $true | Should -BeTrue -Because "live bundle is pristine or cleanly resumable - every anchor is either present x1 or already spliced"
             return
         }
-        # NEITHER cleanly patched NOR pristine: an app update landed a NEW
-        # bundle shape (anchors moved/renamed) or a splice crashed mid-way.
+        # NEITHER patched NOR resumable: an app update landed a NEW bundle
+        # shape (anchors moved/renamed) or a splice crashed mid-way.
         $detail = ($script:Anchors | ForEach-Object { "{0}: find={1} repl={2}" -f $_.Name, $findCounts[$_.Name], $replCounts[$_.Name] }) -join '; '
-        throw "live main.cjs is neither pristine nor cleanly patched ($detail) - re-derive the anchors (see AUTOCLAW2_CLONES_SPEC.md anchor procedure)"
+        throw "live main.cjs is neither fully patched nor cleanly resumable ($detail) - re-derive the anchors (see AUTOCLAW2_CLONES_SPEC.md anchor procedure)"
     }
 }
 
@@ -100,23 +120,35 @@ Describe 'AutoClaw2 identity patch - splice core (synthetic fixture)' {
         Invoke-Expression ('$script:Anchors = ' + $assign[0].Right.Extent.Text)
 
         # Mirrors the REAL minified shapes (byte-level anchors) of AutoClaw2
-        # 4.0.0 main.cjs. Single-quoted here-string: backticks and $ are literal.
+        # 4.0.0 main.cjs, including the mTr tray builder (the patch-v2 tray
+        # anchor lives on its iconPath read). Single-quoted here-string:
+        # backticks and $ are literal.
         $script:Fixture = @'
 var Uf = { app: { isPackaged: true, setName: function (n) { globalThis.__name = n; }, setAppUserModelId: function (a) { globalThis.__procAumid = a; }, setAboutPanelOptions: function (o) { globalThis.__about = o; } } };
+var SU = { nativeImage: { createFromPath: function (o) { globalThis.__traySrc = o; return { isEmpty: function () { return false; }, isTemplateImage: function () { return false; }, resize: function (s) { return { setTemplateImage: function (b) { globalThis.__trayTemplate = b; return {}; } }; } }; }, createEmpty: function () { return { isEmpty: function () { return true; } }; } }, Tray: function (o) { globalThis.__trayImage = o; return { setToolTip: function () { }, setContextMenu: function () { }, on: function () { }, destroy: function () { } }; }, Menu: { buildFromTemplate: function (o) { return o; } } };
+var pTr = { join: function (a, b) { return a + '\\' + b; } };
 var Kqn = "com.zhipuai.autoclaw2", p0 = "AutoClaw", Tgt = p0, Zqn = p0;
 function Yqn(n,e=process.platform,r=p0,i=r){Zqn=r,Tgt=i,n.setName(p0),e==="win32"&&n.setAppUserModelId(Kqn),n.setAboutPanelOptions({applicationName:i})}
 function Xqn(n,e,r=process.platform){r==="win32"&&n.setAppDetails({appId:Kqn,appIconPath:e,appIconIndex:0,relaunchCommand:`"${e}"`,relaunchDisplayName:Tgt})}
 var l = { setIcon: function (p) { globalThis.__winIcon = p; }, setAppDetails: function (d) { globalThis.__details = d; } };
 Uf.app.isPackaged&&Xqn(l,process.execPath);
 Yqn(Uf.app);
+function PG(){return "AutoClaw";}
+function xr(o,k){return k;}
+function fTr(n){return(0,pTr.join)(n,"trayTemplate.png")}
+function mTr(n){let e=n.createIcon??(o=>{let s=SU.nativeImage.createFromPath(o);if(s.isEmpty())return SU.nativeImage.createEmpty();let l=s.resize({width:18,height:18});return l.setTemplateImage(s.isTemplateImage()),l}),r=n.createTray??(o=>new SU.Tray(o)),i=n.buildMenu??(o=>SU.Menu.buildFromTemplate([...o])),t=r(e(n.iconPath));t.setToolTip(PG());let a=()=>{let o=n.language(),s=[{label:xr(o,"tray.open"),click:n.onOpen},{label:xr(o,"tray.quit"),click:n.onQuit}];t.setContextMenu(i(s))};return a(),t.on("click",n.onOpen),{dispose:()=>{t.destroy()},refresh:a}}
+function UUr(n,e,r,i,t){n.tray=mTr({iconPath:fTr(e),language:r.current,onOpen:()=>{i.canOpenInteractiveWindows()&&t()},onQuit:()=>{FUr.app.quit()}}),r.attachTray(()=>{n.tray?.refresh()})}
+var FUr = { app: { quit: function () { globalThis.__quit = true; } } };
+UUr({tray:null},"C:\\app\\resources",{current:function(){return{};},attachTray:function(f){f()}},{canOpenInteractiveWindows:function(){return false;}},function(){});
 '@
     }
 
-    It 'splices all 3 anchors and preserves the backtick literal verbatim' {
+    It 'splices all 4 anchors and preserves the backtick literal verbatim' {
         $r = Invoke-IdentitySplice -Text $script:Fixture
         $r.Ok | Should -BeTrue
         $r.AlreadyApplied | Should -BeFalse
-        $r.Applied.Count | Should -Be 3
+        $r.Applied.Count | Should -Be 4
+        $r.Applied | Should -Contain 'tray-icon' -Because "patch v2 splices the tray anchor"
         foreach ($a in $script:Anchors) {
             [regex]::Matches($r.Text, [regex]::Escape($a.Find)).Count | Should -Be 0
             [regex]::Matches($r.Text, [regex]::Escape($a.Replace)).Count | Should -Be 1
@@ -133,6 +165,19 @@ Yqn(Uf.app);
         $twice.Text | Should -Be $once.Text
     }
 
+    It 'resumes a legacy v1 state: only the missing tray anchor is applied, older anchors skipped' {
+        $a1 = $script:Anchors[0]
+        $legacy = $script:Fixture.Replace($a1.Find, $a1.Replace)
+        $r = Invoke-IdentitySplice -Text $legacy
+        $r.Ok | Should -BeTrue
+        $r.AlreadyApplied | Should -BeFalse
+        @($r.Skipped).Count | Should -Be 1
+        $r.Skipped[0] | Should -Be 'process-aumid'
+        $r.Applied.Count | Should -Be 3
+        $r.Applied | Should -Not -Contain 'process-aumid'
+        $r.Applied | Should -Contain 'tray-icon'
+    }
+
     It 'aborts with anchor drift when an anchor is missing (bundle changed)' {
         $noAnchor2 = ($script:Fixture -split "`n" | Where-Object { $_ -notmatch 'setAppDetails' }) -join "`n"
         $r = Invoke-IdentitySplice -Text $noAnchor2
@@ -141,12 +186,14 @@ Yqn(Uf.app);
         $r.Message | Should -Match 'exactly 1'
     }
 
-    It 'aborts on a MIXED state (only one anchor already patched)' {
-        $a1 = $script:Anchors[0]
-        $half = $script:Fixture.Replace($a1.Find, $a1.Replace)
-        $r = Invoke-IdentitySplice -Text $half
+    It 'aborts when an anchor is neither present nor already spliced (layout change)' {
+        # strip the whole tray-builder block: the tray anchor's Find text no
+        # longer exists and its done-text was never spliced -> hard drift.
+        $noTray = ($script:Fixture -split "`n" | Where-Object { $_ -notmatch '^var SU =|^var pTr|^function PG|^function xr|^function fTr|^function mTr|^function UUr|^var FUr|^UUr\(' }) -join "`n"
+        $r = Invoke-IdentitySplice -Text $noTray
         $r.Ok | Should -BeFalse
-        $r.Message | Should -Match 'process-aumid'
+        $r.Message | Should -Match 'tray-icon'
+        $r.Message | Should -Match 'exactly 1'
     }
 
     It 'produces a node --check-clean bundle' -Skip:(-not ((Get-Command node -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $script:VendorNode))) {
@@ -160,7 +207,7 @@ Yqn(Uf.app);
         $LASTEXITCODE | Should -Be 0 -Because "the spliced bundle must stay valid JavaScript"
     }
 
-    It 'spliced fixture is functionally env-driven under node (clone identity)' -Skip:(-not ((Get-Command node -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $script:VendorNode))) {
+    It 'spliced fixture is functionally env-driven under node (clone window + tray identity)' -Skip:(-not ((Get-Command node -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $script:VendorNode))) {
         $cmd = Get-Command node -ErrorAction SilentlyContinue
         $node = if ($cmd) { $cmd.Source } else { Join-Path $env:LOCALAPPDATA 'Programs\AutoClaw2\resources\vendor\node\node.exe' }
         if (-not (Test-Path -LiteralPath $node)) { Set-ItResult -Skipped -Because "node is not runnable"; return }
@@ -175,11 +222,14 @@ console.log(JSON.stringify({
   appId: globalThis.__details ? globalThis.__details.appId : null,
   iconPath: globalThis.__details ? globalThis.__details.appIconPath : null,
   relaunch: globalThis.__details ? globalThis.__details.relaunchCommand : null,
-  winIcon: globalThis.__winIcon === undefined ? null : globalThis.__winIcon
+  winIcon: globalThis.__winIcon === undefined ? null : globalThis.__winIcon,
+  traySrc: globalThis.__traySrc === undefined ? null : globalThis.__traySrc,
+  trayTemplate: globalThis.__trayTemplate === undefined ? null : globalThis.__trayTemplate
 }));
 '@ | Set-Content -LiteralPath $driver -Encoding UTF8
 
-        # Clone launch: env drives the AUMID, the taskbar icon AND the window icon.
+        # Clone launch: env drives the AUMID, the taskbar icon, the window
+        # icon AND the notification-tray icon source.
         $env:ZWORK_AUMID = 'com.zhipuai.autoclaw2.c1'
         $env:ZWORK_CLONE_ICON = 'C:\clone\blue.ico'
         try {
@@ -190,6 +240,8 @@ console.log(JSON.stringify({
             $v.appId | Should -Be 'com.zhipuai.autoclaw2.c1'
             $v.iconPath | Should -Be 'C:\clone\blue.ico'
             $v.winIcon | Should -Be 'C:\clone\blue.ico'
+            $v.traySrc | Should -Be 'C:\clone\blue.ico' -Because "the tray builder must receive the clone's tinted icon when ZWORK_CLONE_ICON is set"
+            $v.trayTemplate | Should -BeFalse -Because "the tinted ico is not a macOS template image"
             # relaunchCommand stays the EXE (the parameter e), never the icon.
             $v.relaunch | Should -Be ('"' + (Get-Item -LiteralPath $node).FullName + '"')
         } finally {
@@ -197,7 +249,8 @@ console.log(JSON.stringify({
             Remove-Item Env:ZWORK_CLONE_ICON -ErrorAction SilentlyContinue
         }
 
-        # Stock launch: no env = byte-for-byte stock behaviour.
+        # Stock launch: no env = byte-for-byte stock behaviour (tray keeps the
+        # app's own trayTemplate.png).
         Remove-Item Env:ZWORK_AUMID -ErrorAction SilentlyContinue
         Remove-Item Env:ZWORK_CLONE_ICON -ErrorAction SilentlyContinue
         $out2 = & $node $driver $fixture 2>&1
@@ -207,5 +260,7 @@ console.log(JSON.stringify({
         $v2.appId | Should -Be 'com.zhipuai.autoclaw2'
         $v2.iconPath | Should -Be ($v2.relaunch -replace '^"|"$', '') -Because "stock appIconPath is process.execPath, same as the relaunch command"
         $v2.winIcon | Should -BeNullOrEmpty
+        $v2.traySrc | Should -Be 'C:\app\resources\trayTemplate.png' -Because "stock tray icon source is the app's own trayTemplate.png"
+        $v2.trayTemplate | Should -BeFalse
     }
 }
