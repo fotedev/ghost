@@ -109,7 +109,7 @@ see [docs/ZCODE_TELEGRAM_BOTS.md](ZCODE_TELEGRAM_BOTS.md).
 
 The per-clone branding rides on an `app.asar` patch (`ZCODE_ICON_DIR`,
 `ZCODE_AUMID_SUFFIX`, `ZCODE_ACCENT_HEX`, `ZCODE_INSTANCE_NAME`) that a ZCode
-app update silently reverts. Re-apply it once — `GHOST.bat` → ZCode [27], or
+app update silently reverts. Re-apply it once — `GHOST.bat` → ZCode [28], or
 `tools\patch_zcode_icon_override.ps1` — and every clone restores its icon,
 accent color, taskbar button and "ZCode <Color>" window title.
 
@@ -128,7 +128,7 @@ exhaustion, not an app leak, a GPU problem, or a GHOST-side fault.
 
 What to do:
 
-- Run the diagnostic: `GHOST.bat` → ZCode [26]
+- Run the diagnostic: `GHOST.bat` → ZCode [27]
   (`tools\diagnose_zcode_freeze.ps1`) — prints the per-instance crash
   timeline, dump annotations and live commit pressure.
 - After the splash-then-close, just launch the instance again. The quit path
@@ -140,6 +140,68 @@ What to do:
   1.5-2x RAM, or system-managed) and/or run fewer instances concurrently.
 - Not the cause (checked 2026-09-25): GPU caches, the icon asar patch, the
   captcha watchdog (idle since 09-17) and db.sqlite locking.
+
+## A chat section crashes with "Minified React error #185"
+
+One chat section shows the app's error panel ("This section ran into a
+problem ... Try this section again / Reload app") while the rest of the app
+keeps running. React error #185 is "Maximum update depth exceeded" — a
+component kept scheduling state updates until React stopped it. This is an
+app-internal renderer bug, triggered by the CONTENT of large sessions:
+verified twice — 2026-11-09 on a long multi-subagent codebase-review
+session and 2026-11-11 on a different session AND a different account — so
+it is deterministic per session, multi-instance, and it PERSISTS across the
+2026-11-10 app update (do not wait for an update to fix it).
+
+It is NOT caused by the GHOST `app.asar` patch:
+
+- The bidi injection lives only in `out\preload\index.cjs` and its entire
+  surface is one stylesheet plus a childList-only `MutationObserver` that
+  stamps `dir="auto"` on newly added chat nodes — it never calls React
+  APIs, dispatches events, patches globals, or observes the attribute
+  changes it writes itself, so it cannot schedule a React update.
+- The crash is caught by the app's own section error boundary — the
+  renderer stays ALIVE, so there is no `render-process-gone`, no crash
+  dump and no diagnostics file anywhere on disk (all 6 instance homes'
+  `.zcode\v2\logs`, the shared CLI JSONL, the crash archives and the
+  roaming user data were searched: zero hits). The UI's "View component
+  stack" capture is the only evidence that exists — SAVE it.
+
+Source-level identification (mined from the vendored OSS checkout `ZCode\`,
+v3.14.0, cross-checked against upstream v3.17.2): the crashing panel is the
+app's `workspace-chat` `ScopedErrorBoundary`
+(`packages/ui/src/ErrorBoundary.tsx`) wrapping the WHOLE chat pane
+(`V4WorkspaceChatArea`, `packages/ui/src/app-shell/WorkspaceShellLayout.tsx`)
+— "Try this section again" just remounts it. The captured stack's
+`pptxElementReference-*.js` chunk maps to
+`packages/ui/src/lib/pptxElementReference.ts` plus its React importers (the
+user-message row's pptx element-reference chip area). The obvious structural
+suspect — the composer reset effect in
+`packages/ui/src/v4/composer/usePptxElementReferences.ts`
+(`setReferences([])` on `[remoteSessionId, scopeId, workspaceKey]`, the
+exact shape that loops #185 if any dep goes unstable, duplicated in
+`useWebElementContexts.ts`) — was checked through upstream v3.17.2: hook
+and call site are unchanged with stable string deps, benign there too. The
+regression therefore sits somewhere in the large v3.15.x-3.17.2 chat-region
+rewrite (~190 changed files under `packages/ui/src/v4`), and pinning the
+exact component needs the live "View component stack" capture.
+
+What to do:
+
+- "Try this section again" / "Reload app" first. If the section keeps
+  crashing it is content-triggered — the session transcript itself is
+  intact in the shared `~\.zcode\cli\db\db.sqlite` even when the UI
+  cannot render it.
+- Expand "View component stack" and save the text — it is the ONLY
+  evidence that names the component, and everything else (logs, dumps,
+  diagnostics) stays empty for this crash class.
+- Conclusive discrimination test (optional): launch that instance once
+  with `ZCODE_BIDI_OFF=1` in the environment — the injected bidi code
+  returns before doing anything, and the SAME crash proves the patch
+  unrelated.
+- A real fix is upstream: report the symptom plus the captured component
+  stack to the app vendor. GHOST deliberately does not extend its asar
+  patching to repair app logic.
 
 ## "Reconnecting... x/10" / "The system is busy..." on every turn
 
@@ -172,7 +234,7 @@ The sync chain is: Primary `~\.zcode\cli\config.json` →
 `tools\sync_zcode_assets.ps1 -McpOnly -Target All` → each clone's OWN
 `<CloneHome>\.zcode\cli\config.json`. Debug order:
 
-- One-shot convergence: `GHOST.bat` → ZCode [20] (sync + apply live) or [18]
+- One-shot convergence: `GHOST.bat` → ZCode [21] (sync + apply live) or [19]
   (sync only). Both are safe against RUNNING instances — verified 2026-10-27:
   the app holds no handle on `config.json`, never rewrites it on exit, and
   re-reads `mcp.servers` at every app-server spawn, so a synced definition
@@ -181,21 +243,21 @@ The sync chain is: Primary `~\.zcode\cli\config.json` →
   second copy. A silent log is normal while stores are correct. Log:
   `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`.
 - The FULL asset sync (skills junction + plugin cache mirror) still requires
-  the target clones closed first (ZCode [17]) — only `-McpOnly` is live-safe.
+  the target clones closed first (ZCode [18]) — only `-McpOnly` is live-safe.
 
 ## Chats from one ZCode instance don't appear in another instance's sidebar
 
 All instances share one session store, but each sidebar index is seeded at
 app-server spawn with no snapshot backfill — the data is there, the index is
-stale. Refresh without restarting the app: `GHOST.bat` → ZCode [21] (Second
-only) or [22] (all instances), or keep the detached watcher running (ZCode [23],
+stale. Refresh without restarting the app: `GHOST.bat` → ZCode [22] (Second
+only) or [23] (all instances), or keep the detached watcher running (ZCode [24],
 `-Watch -Target All`) to auto-refresh every running instance on quota/captcha
 failures. The hot-activity guard may defer the refresh while a turn streams;
 `-Force` bypasses it.
 
 ## ZCode windows stay merged in one taskbar button even though identities are stamped
 
-The watcher (ZCode [25]) stamps every window's `System.AppUserModel.ID`, but a
+The watcher (ZCode [26]) stamps every window's `System.AppUserModel.ID`, but a
 taskbar group that was formed while identities were still missing can PERSIST
 after the stamps land — the shell does not always re-evaluate an existing
 group, and a stale group can even keep the WRONG ICON (verified 2026-09-26:
@@ -221,7 +283,7 @@ If the watcher is running it re-stamps the final value within one interval
 even if the kick script dies mid-toggle, so this is safe. A silent watcher
 log does NOT mean the watcher is dead — check the mutex first (a second
 instance logs "watcher already running"). A watcher process started BEFORE
-a script edit keeps the old code — close its window and relaunch ZCode [25].
+a script edit keeps the old code — close its window and relaunch ZCode [26].
 
 ## A clone launched with the Primary's profile or taskbar icon
 
@@ -235,10 +297,33 @@ A pin rewrite can also empty that shortcut icon field (verified 2026-09-28:
 the hijacked Start-menu ZCode.lnk carried dev.zcode.app.4 with an empty icon,
 so a green clone running alone showed the Primary icon even though its window
 identity was correct). -RepairPrimaryAumid now restores the Primary shortcut
-icon to <ZCode.exe>,0 too. The resident watcher (ZCode [25]) self-heals a hijack
+icon to <ZCode.exe>,0 too. The resident watcher (ZCode [26]) self-heals a hijack
 every ~5 min (REPAIR/FAIL logged to taskbar.log); -RunOnce -CheckPrimaryHijack
 repairs once without starting the resident loop. Restart the resident watcher
 after any watcher-script edit: an old copy keeps the old code.
+
+## All clones look the same in Task Manager
+
+Task Manager's process list does not use the taskbar identity stack. Its
+background-process groups take the display name and the icon from the
+executable image itself (embedded icon resource + VERSIONINFO
+FileDescription), so every instance running the stock `ZCode.exe` renders as
+an identical stock `ZCode (N)` row — shortcuts, AUMIDs and window stamping
+color the taskbar and the app rows, never these groups. The fix is the
+per-color exe copies: `tools\patch_zcode_exe_identity.ps1` (ZCode [31]) builds
+`ZCode-Blue.exe` … `ZCode-Orange.exe` in the install dir with the clone's
+icon + `ZCode <Color>` name patched in, and the launcher starts each clone
+from its copy (step 2f; drift-healed after app updates). If a clone's Task
+Manager row is still stock: the copy is missing or stale — run ZCode [31]
+with the clones closed, then relaunch the clone via its shortcut.
+
+Two things to expect: the copies are exe modifications, so their Authenticode
+signature is invalidated — AV-protected machines may show a SmartScreen
+prompt the first time a copy launches (this dev box runs no AV; treat any
+timing/prompts on locked-down machines as untested estimates); and Task
+Manager may keep showing a stale icon for a few seconds after the first
+launch of a rebuilt copy (shell icon cache) — it corrects on the next list
+refresh. The Primary always keeps the stock `ZCode.exe` and its stock row.
 
 ## System ID changes need a restart
 

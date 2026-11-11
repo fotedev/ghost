@@ -14,6 +14,12 @@ a cross-tool correlation trail — that's why the toolkit covers each app
 explicitly, and why machine-wide `change_device_id.ps1` exists as a separate
 optional step.
 
+**Why not just run the copies inside Sandboxie?**
+Sandboxie isolates an app's file writes — the app inside the box still reports
+the same identity. GHOST gives each instance its own fresh ID set, a permanent
+clone profile, and its own Windows taskbar presence. Full comparison:
+[why-not-sandboxie.md](why-not-sandboxie.md).
+
 **Windsurf became Devin Desktop — which one do I reset?**
 Both, with one command: `reset_devin.ps1` auto-detects every existing data
 root under `%APPDATA%` (`Devin`, `Windsurf`) and resets all of them in a

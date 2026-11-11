@@ -7,6 +7,7 @@
 | [CLI cheat sheet](cli.md) | Direct commands for scripts and CI, plus the Python core diagnostics |
 | [Troubleshooting](troubleshooting.md) | Common failures and fixes (Python/core missing, locked processes, restoring a reset) |
 | [FAQ](faq.md) | Scope, ToS/risk, cross-tool correlation, the Windsurf → Devin rebrand, versioning policy |
+| [Why not Sandboxie?](why-not-sandboxie.md) | Sandboxie-Plus vs GHOST: identity vs file isolation, throwaway boxes vs permanent clone profiles, when to use which |
 | [ZCode chat sync plan](ZCODE_CHAT_SYNC_WATCHER_PLAN.md) | Root-cause analysis of cross-instance chat visibility + the refresh/watcher design |
 | [Python hybrid roadmap](PYTHON_HYBRID_ROADMAP.md) | The PS→Python thin-manifest migration: Phase 2 cancellation record, Phase 3 pilot design + acceptance criteria (pilot ACCEPTED 2026-10-18; devin v0.4 landed) |
 | [ZCode Telegram bots](ZCODE_TELEGRAM_BOTS.md) | Per-clone Telegram bot reconciliation: sha8 credential fingerprinting, `set_zcode_bot.ps1` audit/sync, one-token-one-instance |

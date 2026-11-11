@@ -12,11 +12,9 @@ machine IDs. Built for privacy hygiene, multi-account testing, and
 CI/dev-environment resets.
 
 <p align="center">
-  <img src="assets/preview.png" width="720"
-       alt="GHOST clone suites: ZCode, Cline, AutoClaw2 and OpenCode, each with five color-branded clones beside the Primary, plus the GHOST launcher">
-  <br>
-  <em>Multi-instance clones with per-clone color identity: taskbar icons,
-  window titles, accents and isolated profiles — all launched from one menu.</em>
+  <img src="assets/preview.png" alt="Icon grid of the GHOST clone suites: color-branded shortcuts for ZCode, Cline, AutoClaw2 and OpenCode, plus the GHOST launcher icon" />
+  <br/>
+  <em>All four clone suites — ZCode, Cline, AutoClaw2, OpenCode — each with its Primary (stock icon) plus five color-branded clones, and the GHOST launcher icon.</em>
 </p>
 
 ## Disclaimer
@@ -40,17 +38,26 @@ touches, and emits an audit log plus a self-contained restore script.
 | Reset Qoder | `reset_qoder.ps1` | — |
 | Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | — |
 | ZCode clones (Primary + 5 branded clones) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | — |
+| ZCode Primary (stock profile, never elevated) | `launch_zcode_primary.ps1` (explorer spawn, verify-after) | — |
 | ZCode light headless worker (no desktop window) | `launch_zcode_cli_light.ps1 -Instance Second\|...\|Sixth` (`-Prompt` / `-Server`) | — |
 | OpenCode light headless worker (CLI only, clone XDG state) | `launch_opencode_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` / `-Server` / `-Login` / `-StopService`) | — |
 | Reset QoderWork | `reset_qoderwork.ps1` | — |
 | Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | — |
-| Device fingerprint | `change_device_id.ps1` | `change_device_id.sh Fingerprint` |
+| Device fingerprint self-test + machine-wide ID reset | `change_device_id.ps1` (default = read-only Fingerprint; `-Mode LegacyReset` = the reset, IDE Resets [1]) | `change_device_id.sh Fingerprint` / `ResetMachineId` |
 | WMI serial spoof (BIOS/motherboard/disks/RAM via WMI) | `spoof_wmi_serials.ps1` | — |
 | System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` |
 | Interactive menu | `GHOST.bat` | `ghost.sh` |
 
 Detailed per-tool walkthroughs (paths touched, preservation lists, flags):
 **[docs/getting-started.md](docs/getting-started.md)**.
+
+## Why not just use Sandboxie?
+
+Sandboxie-Plus isolates an app's file writes — it does not change the app's
+identity. GHOST gives every instance its own fresh identity, data, and Windows
+presence, permanently. Full comparison (side-by-side table + diagram,
+including what Sandboxie does better):
+**[docs/why-not-sandboxie.md](docs/why-not-sandboxie.md)**.
 
 ## Prerequisites
 
@@ -89,12 +96,28 @@ Prefer the interactive menus:
 ./ghost.sh
 ```
 
+### Desktop app (optional)
+
+GHOST also ships a native desktop launcher, built **from visible source** with
+the C# compiler already in Windows — nothing to download, no binary to trust:
+
+```powershell
+# from GHOST.bat: System & GHOST Maintenance [5]
+powershell -ExecutionPolicy Bypass -File tools\build_ghost_exe.ps1
+```
+
+Double-click the resulting `GHOST.exe` (repo root). It mirrors the same menu
+as `GHOST.bat` and runs the very same PowerShell scripts in their own console
+windows — a new face over the same toolkit, not a rewrite (it must stay next
+to `GHOST.bat`; menu edits in `src\desktop\menu.json` need no rebuild).
+
 Or run a script directly — full examples in
 [docs/getting-started.md](docs/getting-started.md):
 
 ```powershell
 .\src\windows\reset_devin.ps1                        # Windsurf + Devin Desktop roots, one pass
 .\src\windows\reset_zcode.ps1 -Target Secondary      # survivor instances keep running
+.\src\windows\launch_zcode_primary.ps1                           # stock Primary - non-elevated (drag-drop works)
 .\src\windows\launch_zcode_second_instance.ps1 -Instance Third   # yellow-branded clone
 .\src\windows\launch_zcode_cli_light.ps1 -Instance Second        # headless account worker - low RAM
 ```
@@ -187,14 +210,14 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   (per-clone toggles stay local), replaces stale `.zcode\skills` copies with a
   junction on the shared `~\.agents` store, mirrors the plugin cache; runs
   automatically before every clone launch. `-McpOnly` syncs the MCP
-  definitions only and is safe against RUNNING instances — ZCode [18] for a
-  one-shot run (ZCode [17] for the full sync)
+  definitions only and is safe against RUNNING instances — ZCode [19] for a
+  one-shot run (ZCode [18] for the full sync)
 - `tools/watch_zcode_mcp_sync.ps1` — resident MCP sync watcher: stat-guards
   the Primary's `~\.zcode\cli\config.json` and re-invokes
   `sync_zcode_assets.ps1 -McpOnly -Target All` on every change, so all five
   clones converge within seconds (`-RunOnce`, `-ApplyLive` recycles running
   clones' app-servers idle-guarded so the open session picks the change up
-  immediately, `-InstallAutostart`). ZCode [19] (resident) / [20] (one-shot +
+  immediately, `-InstallAutostart`). ZCode [20] (resident) / [21] (one-shot +
   apply live). The merge invariant lives in `tools/zcode_mcp_merge.ps1`
   (unit-tested by `tests/zcode_mcp_merge.Tests.ps1`)
 - `tools/diagnose_zcode_throttle.ps1` — read-only diagnostic for
