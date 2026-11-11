@@ -147,6 +147,14 @@
       },
       "enabled": false
     },
+    "namecheap": {
+      "type": "http",
+      "url": "https://mcp.namecheap.com/mcp",
+      "headers": {
+        "Authorization": "${NAMECHEAP_MCP_AUTHORIZATION}"
+      },
+      "enabled": true
+    },
     "obsidian": {
       "type": "stdio",
       "command": "uvx",
