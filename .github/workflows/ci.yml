@@ -64,6 +64,10 @@ jobs:
             Write-Host "$f ENGINE_VERSION=$($Matches[1])"
           }
 
+      - name: GHOST.exe compile check
+        shell: pwsh
+        run: ./tools/build_ghost_exe.ps1 -OutDir "$env:TEMP\ghost-exe-check"
+
       - name: GHOST.bat menu harness
         shell: pwsh
         run: ./.bat-harness-test.ps1
