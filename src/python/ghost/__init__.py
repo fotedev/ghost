@@ -1,4 +1,4 @@
-"""GHOST Python core — shared identity-scrubbing logic for the GHOST toolkit.
+"""GHOST Python core â€” shared identity-scrubbing logic for the GHOST toolkit.
 
 Stdlib only (no pip dependencies): base64, json, sqlite3, os, re, secrets,
 sys, time, uuid. The package is invoked by the PowerShell scripts through
@@ -13,4 +13,4 @@ Contract notes (must stay 1:1 with the PowerShell bridges it replaces):
   string interpolation; values always go through `?` placeholders.
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
