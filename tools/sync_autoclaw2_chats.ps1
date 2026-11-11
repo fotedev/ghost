@@ -23,6 +23,11 @@
                                clean sqlite-backup-API backup first, the
                                entries' immutability triggers stay active,
                                idempotency via the sidecar content hash.
+                               -AllMissing instead copies EVERY source session
+                               each target has not already imported (the same
+                               diff the Inventory report prints) - the GHOST.bat
+                               [10] path (2026-11-09; before this the menu row
+                               ran Import with no -SessionId and always failed).
     -Revert -ImportId <id>     tombstone + delete exactly the rows one import
                                created (the sidecar is the source of truth).
 
@@ -43,7 +48,11 @@
   Source profile for Import and for the Inventory diff. Default: Primary.
 
 .PARAMETER SessionId
-  Source session id to copy (Import mode; required).
+  Source session id to copy (Import mode; required unless -AllMissing).
+
+.PARAMETER AllMissing
+  Import mode: plan and copy every non-IM source session each target has not
+  already imported, per target (mutually exclusive with -SessionId).
 
 .PARAMETER ImportId
   Import id from the sidecar (Revert; required).
@@ -68,6 +77,7 @@
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Mode Inventory
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Mode Import -SessionId <uuid> -Target c1
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Mode Import -SessionId <uuid> -Target c1 -Apply
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Mode Import -AllMissing -Apply -Target All
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Revert -ImportId <uuid> -Target c1
 #>
 [CmdletBinding()]
@@ -77,6 +87,7 @@ param(
     [string]$Mode = 'Inventory',
     [string]$Source = 'Primary',
     [string]$SessionId,
+    [switch]$AllMissing,
     [string]$ImportId,
     [switch]$Apply,
     [switch]$DryRun,
@@ -257,62 +268,128 @@ if ($Mode -eq 'Inventory') {
 }
 
 # --- Import mode ----------------------------------------------------------------
-if (-not $SessionId) {
-    Write-Host '[FAILED] -Mode Import needs -SessionId <source session id>' -ForegroundColor Red
+# Session list: one explicit -SessionId, or with -AllMissing every source
+# session each target has not already imported (the same diff the Inventory
+# report prints; GHOST.bat [10] path since 2026-11-09). IM-bound sessions are
+# skipped everywhere (D12).
+$missingByTarget = @{}
+$planRefused = 0
+if ($AllMissing) {
+    if ($SessionId) {
+        Write-Host '[FAILED] -SessionId and -AllMissing are mutually exclusive.' -ForegroundColor Red
+        exit 1
+    }
+    $srcCall = Invoke-Ac2 'ac2-chat-inventory' @{ profile = $Source }
+    if ($srcCall.exit -eq 2) {
+        Write-Host ("[REFUSED] source {0}: {1}" -f $Source, $srcCall.verdict.message) -ForegroundColor Red
+        exit 2
+    }
+    if ($srcCall.verdict.status -eq 'skipped') {
+        Write-Host ("[SKIP] source {0} - {1}" -f $Source, $srcCall.verdict.reason) -ForegroundColor Yellow
+        exit 0
+    }
+    $srcSessions = @($srcCall.verdict.sessions)
+    if ($srcSessions.Count -eq 0) {
+        Write-Host ("[ok] source {0} has no sessions - nothing to import." -f $Source) -ForegroundColor Green
+        exit 0
+    }
+    foreach ($tname in $targets) {
+        $tCall = Invoke-Ac2 'ac2-chat-inventory' @{ profile = $tname }
+        if ($tCall.exit -eq 2) {
+            Write-Tag 'REFUSED' ("{0}: {1}" -f $tname, $tCall.verdict.message) 'Yellow'
+            Write-AuditLine $tname @{ status = 'refused'; refused = $tCall.verdict.refused
+                                      mode = 'import-plan' }
+            $missingByTarget[$tname] = $null
+            $planRefused++
+            continue
+        }
+        if ($tCall.verdict.status -eq 'skipped') {
+            Write-Tag 'SKIP' ("{0} - {1}" -f $tname, $tCall.verdict.reason) 'Yellow'
+            $missingByTarget[$tname] = @()
+            continue
+        }
+        $seen = @{}
+        foreach ($r in $tCall.verdict.source_imports) { $seen[$r.source_session_id] = $true }
+        $ids = @()
+        $imSkipped = 0
+        foreach ($s in $srcSessions) {
+            if ($s.external_provider) { $imSkipped++; continue }
+            if (-not $seen.ContainsKey($s.session_id)) { $ids += $s.session_id }
+        }
+        $missingByTarget[$tname] = $ids
+        $note = ''
+        if ($imSkipped -gt 0) { $note = " - $imSkipped IM-refused skipped" }
+        Write-Tag 'PLAN' ("{0}: {1} session(s) to import{2}" -f $tname, $ids.Count, $note) 'Cyan'
+        Write-AuditLine $tname @{ status = 'import-plan'; sessions = $ids.Count }
+    }
+}
+elseif (-not $SessionId) {
+    Write-Host '[FAILED] -Mode Import needs -SessionId <source session id> (or -AllMissing).' -ForegroundColor Red
     exit 1
 }
+
 $attempted = 0; $refused = 0
 foreach ($tname in $targets) {
-    $payload = @{
-        source    = $Source
-        target    = $tname
-        session_id = $SessionId
-        dry_run   = (-not $Apply)
-        max_unresolved_pct = $MaxUnresolvedPct
+    if ($AllMissing) {
+        $ids = $missingByTarget[$tname]
+        if ($null -eq $ids) { $refused++; continue }   # target refused during planning
+        if ($ids.Count -eq 0) { continue }
     }
-    if ($TitleTag -ne '') { $payload.title_tag = $TitleTag }
-    $attempted++
-    $call = Invoke-Ac2 'ac2-chat-import' $payload
-    if ($call.exit -eq 2) {
-        $refused++
-        Write-Tag 'REFUSED' ("{0}: {1}" -f $tname, $call.verdict.message) 'Yellow'
-        Write-AuditLine $tname @{ status = 'refused'; refused = $call.verdict.refused
-                                  session_id = $SessionId }
-        continue
+    else {
+        $ids = @($SessionId)
     }
-    $v = $call.verdict
-    if ($v.status -eq 'skipped') {
-        Write-Tag 'SKIP' ("{0} - already-imported ({1})" -f $tname, $v.import_id) 'Yellow'
-        Write-AuditLine $tname @{ status = 'skipped'; reason = 'already-imported'
-                                  session_id = $SessionId }
-        continue
-    }
-    if ($v.status -eq 'dry-run') {
-        Write-Tag 'DRY' ("{0} - {1} entries, {2} events, {3} runs, {4} artifacts -> {5} as '{6}'" -f
-            $tname, $v.entries, $v.events, $v.runs, $v.artifacts,
-            $v.target_workspace, $v.title) 'Cyan'
-        if ($v.dropped -gt 0) {
-            Write-Tag 'WARN' ("  {0} entr(ies) would be dropped (unresolved refs)" -f $v.dropped) 'Yellow'
+    foreach ($sid in $ids) {
+        $payload = @{
+            source    = $Source
+            target    = $tname
+            session_id = $sid
+            dry_run   = (-not $Apply)
+            max_unresolved_pct = $MaxUnresolvedPct
         }
-        Write-AuditLine $tname @{ status = 'dry-run'; session_id = $SessionId }
-        continue
+        if ($TitleTag -ne '') { $payload.title_tag = $TitleTag }
+        $attempted++
+        $call = Invoke-Ac2 'ac2-chat-import' $payload
+        if ($call.exit -eq 2) {
+            $refused++
+            Write-Tag 'REFUSED' ("{0}: {1}" -f $tname, $call.verdict.message) 'Yellow'
+            Write-AuditLine $tname @{ status = 'refused'; refused = $call.verdict.refused
+                                      session_id = $sid }
+            continue
+        }
+        $v = $call.verdict
+        if ($v.status -eq 'skipped') {
+            Write-Tag 'SKIP' ("{0} - already-imported ({1})" -f $tname, $v.import_id) 'Yellow'
+            Write-AuditLine $tname @{ status = 'skipped'; reason = 'already-imported'
+                                      session_id = $sid }
+            continue
+        }
+        if ($v.status -eq 'dry-run') {
+            Write-Tag 'DRY' ("{0} - {1} entries, {2} events, {3} runs, {4} artifacts -> {5} as '{6}'" -f
+                $tname, $v.entries, $v.events, $v.runs, $v.artifacts,
+                $v.target_workspace, $v.title) 'Cyan'
+            if ($v.dropped -gt 0) {
+                Write-Tag 'WARN' ("  {0} entr(ies) would be dropped (unresolved refs)" -f $v.dropped) 'Yellow'
+            }
+            Write-AuditLine $tname @{ status = 'dry-run'; session_id = $sid }
+            continue
+        }
+        if ($v.status -eq 'ok') {
+            Write-Tag 'ok' ("{0} - imported as {1}; verify {2}; backup {3}" -f
+                $tname, $v.new_session_id, ($v.verify | ConvertTo-Json -Compress),
+                (Split-Path $v.backup -Leaf)) 'Green'
+            Write-AuditLine $tname @{ status = 'ok'; import_id = $v.import_id
+                                      new_session_id = $v.new_session_id
+                                      session_id = $sid
+                                      backup = $v.backup }
+            continue
+        }
+        Write-Tag 'FAILED' ("{0} - verify-after mismatch: {1} vs expected {2}" -f
+            $tname, ($v.verify | ConvertTo-Json -Compress),
+            ($v.expected | ConvertTo-Json -Compress)) 'Red'
+        Write-AuditLine $tname @{ status = 'failed'; session_id = $sid
+                                  verify = $v.verify; expected = $v.expected }
+        $script:Failed = $true
     }
-    if ($v.status -eq 'ok') {
-        Write-Tag 'ok' ("{0} - imported as {1}; verify {2}; backup {3}" -f
-            $tname, $v.new_session_id, ($v.verify | ConvertTo-Json -Compress),
-            (Split-Path $v.backup -Leaf)) 'Green'
-        Write-AuditLine $tname @{ status = 'ok'; import_id = $v.import_id
-                                  new_session_id = $v.new_session_id
-                                  session_id = $SessionId
-                                  backup = $v.backup }
-        continue
-    }
-    Write-Tag 'FAILED' ("{0} - verify-after mismatch: {1} vs expected {2}" -f
-        $tname, ($v.verify | ConvertTo-Json -Compress),
-        ($v.expected | ConvertTo-Json -Compress)) 'Red'
-    Write-AuditLine $tname @{ status = 'failed'; session_id = $SessionId
-                              verify = $v.verify; expected = $v.expected }
-    $script:Failed = $true
 }
 
 if (-not $Apply) {
@@ -320,4 +397,5 @@ if (-not $Apply) {
 }
 if ($script:Failed) { exit 1 }
 if ($attempted -gt 0 -and $refused -eq $attempted) { exit 2 }
+if ($attempted -eq 0 -and $planRefused -gt 0 -and $planRefused -eq $targets.Count) { exit 2 }
 exit 0

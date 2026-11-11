@@ -80,6 +80,7 @@ CREATE TABLE work_runs (run_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
     retried_from_run_id TEXT REFERENCES work_runs(run_id),
     attachments_json TEXT NOT NULL DEFAULT '[]', created_at TEXT,
     updated_at TEXT);
+CREATE UNIQUE INDEX uniq_work_accept_order ON work_runs(accept_order);
 CREATE TABLE work_events (cursor INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id TEXT UNIQUE NOT NULL CHECK(length(event_id) = 36),
     run_id TEXT NOT NULL CHECK(length(run_id) = 36),
@@ -151,6 +152,7 @@ class _Fixture:
         os.makedirs(self.roaming, exist_ok=True)
         self.owner = UUID4()
         self.db_paths = {}
+        self._accept_seq = {}
         # Primary + c1 seeded; c2/c3/c5 exist but never signed in;
         # c4 does not exist at all (profile-missing).
         self._make_profile("Primary", os.path.join(self.roaming, "AutoClaw-oversea-official"))
@@ -205,10 +207,16 @@ class _Fixture:
             " VALUES (?,?,?,?,?,?,?)",
             (sid, "2026-01-01T00:00:00.000Z", "2026-01-01T00:01:00.000Z",
              title, self.owner, ws, external_provider))
+        # accept_order is globally unique in the real schema
+        # (uniq_work_accept_order) - the seeder hands out a per-profile
+        # increasing counter instead of relying on the DEFAULT 0
+        acc = self._accept_seq.get(profile, 0) + 1
+        self._accept_seq[profile] = acc
         conn.execute(
             "INSERT INTO work_runs (run_id, session_id, status, text,"
-            " connection_model, credential_version) VALUES (?,?,?,?,?,?)",
-            (run_id, sid, "completed", title, "glm-5.3", "cred-version-1"))
+            " connection_model, credential_version, accept_order)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (run_id, sid, "completed", title, "glm-5.3", "cred-version-1", acc))
         for seq in (1, 2):
             conn.execute(
                 "INSERT INTO work_events (event_id, run_id, session_id,"
@@ -1292,6 +1300,39 @@ class ChatImportTests(_PatchedHome):
         self.assertEqual(len(events), 2)
         self.assertTrue(all(e[1] == head[0] for e in events))  # run remapped
         self.assertEqual(sorted(json.loads(e[2])["seq"] for e in events), [1, 2])
+
+    def test_accept_order_remapped_not_copied(self):
+        # live-schema regression (2026-11-09): the real schema carries
+        # CREATE UNIQUE INDEX uniq_work_accept_order ON work_runs(accept_order)
+        # - globally unique per account DB - so verbatim copies collide with
+        # the target's existing runs. The import must assign fresh values
+        # from the target's tail while preserving relative order.
+        self.fixture.session("c1", title="local")            # accept_order 1
+        sid, _ = self.fixture.session("Primary")             # accept_order 1
+        conn = sqlite3.connect(self.fixture.db_paths["Primary"])
+        conn.execute(
+            "INSERT INTO work_runs (run_id, session_id, status, text,"
+            " accept_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+            (UUID4(), sid, "completed", "second run", 7,
+             "2026-01-01T00:02:00.000Z", "2026-01-01T00:02:00.000Z"))
+        conn.commit()
+        conn.close()
+        result = autoclaw2.chat_import(self._import_payload(sid))
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["verify"]["runs"], 2)
+        conn = autoclaw2.ro_connect(self.fixture.db_paths["c1"])
+        try:
+            rows = conn.execute(
+                "SELECT session_id, accept_order FROM work_runs"
+                " ORDER BY accept_order").fetchall()
+        finally:
+            conn.close()
+        orders = [o for _, o in rows]
+        self.assertEqual(len(orders), len(set(orders)))   # uniqueness holds
+        imp = [o for s, o in rows if s == result["new_session_id"]]
+        self.assertEqual(sorted(imp), [2, 3])             # target tail, not 1/7
+        self.assertNotIn(1, imp)                          # collision avoided
+        self.assertLess(imp[0], imp[1])                   # relative order kept
 
     def test_reimport_skips_on_same_content(self):
         sid, _ = self.fixture.session("Primary")

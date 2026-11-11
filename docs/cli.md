@@ -366,6 +366,7 @@ powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_mcp.ps1" -Restore
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Inventory  # [9] — read-only cross-profile chat report
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Import -SessionId <uuid> -Target c1          # [10] dry-run plan
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Import -SessionId <uuid> -Target c1 -Apply   # guarded one-way copy
+powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Import -AllMissing -Apply -Target All         # [10] — every missing chat per target
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Revert -ImportId <uuid> -Target c1                # undo one import
 ```
 

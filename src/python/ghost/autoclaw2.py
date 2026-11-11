@@ -1839,13 +1839,32 @@ def chat_import(payload):
             "INSERT INTO work_sessions ({0}) VALUES ({1})".format(
                 ", ".join(cols), ", ".join(["?"] * len(cols))),
             [sess[c] for c in cols])
-        # 2. runs (credential_version nulled, self-refs remapped-or-nulled)
+        # 1b. accept_order remap (live-schema bug fix, 2026-11-09): the real
+        # schema carries CREATE UNIQUE INDEX uniq_work_accept_order ON
+        # work_runs(accept_order) - GLOBALLY unique per account DB, not per
+        # session - so copying the source values verbatim collides with any
+        # existing run in the target (first live c1 apply failed with
+        # "UNIQUE constraint failed: work_runs.accept_order"; the dry-run
+        # passed because it never touches the DB). Assign fresh values from
+        # the target's tail, preserving the source's relative order: the
+        # app's queue ordering reads (session_id, status, accept_order), so
+        # per-session relative order is the contract. content_hash excludes
+        # accept_order, so idempotency/re-import detection is unaffected.
+        accept_base = conn.execute(
+            "SELECT COALESCE(MAX(accept_order), -1) FROM work_runs").fetchone()[0]
+        accept_map = {}
+        for offset, run in enumerate(sorted(
+                tree["runs"].values(), key=lambda r: r["accept_order"])):
+            accept_map[run["run_id"]] = accept_base + 1 + offset
+        # 2. runs (credential_version nulled, self-refs remapped-or-nulled,
+        # accept_order remapped per 1b)
         run_cols = tree["cols"]["work_runs"]
         for old_id, run in tree["runs"].items():
             rec = dict(run)
             rec["run_id"] = run_map[old_id]
             rec["session_id"] = new_session_id
             rec["credential_version"] = None
+            rec["accept_order"] = accept_map[old_id]
             for ref in ("merged_into_run_id", "retried_from_run_id"):
                 if rec.get(ref):
                     rec[ref] = run_map.get(rec[ref])
