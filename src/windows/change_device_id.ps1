@@ -510,23 +510,11 @@ try {
 $newDeviceID = [System.Guid]::NewGuid().ToString().ToUpper()
 $newMachineGUID = [System.Guid]::NewGuid().ToString()
 $newProductID = "00331-" + (Get-Random -Minimum 10000 -Maximum 99999) + "-" + (Get-Random -Minimum 10000 -Maximum 99999) + "-" + (Get-Random -Minimum 10000 -Maximum 99999)
-# Factory-default-style name (DESKTOP-XXXXXXX): the old RESET-PC-XXXX pattern
-# is a recognizable reset-tool signature. This file is standalone (no
-# identity_utils dot-source), so the pattern is generated inline, mirroring
-# Get-NewHostname in identity_utils.ps1.
-$hostnameAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-$hostnameRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-try {
-    $hostnameChars = for ($i = 0; $i -lt 7; $i++) {
-        $hb = New-Object byte[] 1
-        $hostnameRng.GetBytes($hb)
-        $hostnameAlphabet[$hb[0] % $hostnameAlphabet.Length]
-    }
-    $newComputerName = "DESKTOP-" + (-join $hostnameChars)
-}
-finally {
-    if ($hostnameRng) { $hostnameRng.Dispose() }
-}
+# Factory-default-style hostname (DESKTOP-XXXXXXX) via the shared helper -
+# identity_utils.ps1 IS dot-sourced at the top of this file. The old inline
+# copy here was a stale duplicate whose comment claimed this file was
+# standalone, and it lacked the helper's rejection-sampling RNG fix.
+$newComputerName = Get-NewHostname
 
 # New CPU name: Win32_Processor.Name is read from ProcessorNameString
 # (HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\<n>) - the one
@@ -644,14 +632,19 @@ foreach ($profile in $userProfiles) {
         # Load the user's registry hive if it's not already loaded
         $hiveMounted = $false
         if (-not (Test-Path "Registry::HKEY_USERS\$sid")) {
-            try {
-                reg load "HKU\$sid" "$userHivePath" | Out-Null
-                $hiveMounted = $true
-                Write-Host "Loaded user hive for SID: $sid" -ForegroundColor Green
-            } catch {
-                Write-Host "Failed to load hive for SID $sid`: $($_.Exception.Message)" -ForegroundColor Red
+            # reg.exe never throws - only $LASTEXITCODE reports failure. The old
+            # try/catch here was dead code: a failed load still set
+            # $hiveMounted = $true, and this SID's writes then failed one by one,
+            # aborting the WHOLE run with a full rollback (same failure class as
+            # the .bak exclusion below). A load failure now skips the profile
+            # loudly instead of killing the reset.
+            reg load "HKU\$sid" "$userHivePath" | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Could not load hive for SID $sid - skipping this profile's ID writes" -ForegroundColor Yellow
                 continue
             }
+            $hiveMounted = $true
+            Write-Host "Loaded user hive for SID: $sid" -ForegroundColor Green
         }
         
         # Add user-specific registry paths for this user
@@ -709,6 +702,9 @@ $registryPaths += @(
 # Update registry values
 $successCount = 0
 $totalChanges = $registryPaths.Count
+# SIDs whose writes were skipped (hive load failure or a per-user write error).
+# Per-user failures never abort the run - machine entries still do.
+$skippedSids = @()
 
 foreach ($reg in $registryPaths) {
     try {
@@ -804,6 +800,12 @@ foreach ($reg in $registryPaths) {
                         $successCount++
                     } else {
                         Write-Host "Failed to verify creation for $($reg.Path)\$($reg.Name)" -ForegroundColor Red
+                        if ($reg.ContainsKey('SID')) {
+                            # Per-user failure: skip this profile loudly, keep the run alive.
+                            Write-Host "Skipping user profile $($reg.SID) - its ID entries stay unchanged" -ForegroundColor Yellow
+                            if ($skippedSids -notcontains $reg.SID) { $skippedSids += $reg.SID }
+                            continue
+                        }
                         $rollbackNeeded = $true
                         break
                     }
@@ -834,17 +836,35 @@ foreach ($reg in $registryPaths) {
                     $successCount++
                 } else {
                     Write-Host "Failed to verify change for $($reg.Path)\$($reg.Name)" -ForegroundColor Red
+                    if ($reg.ContainsKey('SID')) {
+                        # Per-user failure: skip this profile loudly, keep the run alive.
+                        Write-Host "Skipping user profile $($reg.SID) - its ID entries stay unchanged" -ForegroundColor Yellow
+                        if ($skippedSids -notcontains $reg.SID) { $skippedSids += $reg.SID }
+                        continue
+                    }
                     $rollbackNeeded = $true
                     break
                 }
             } catch {
                 Write-Host "Failed to update $($reg.Path)\$($reg.Name)`: $($_.Exception.Message)" -ForegroundColor Red
+                if ($reg.ContainsKey('SID')) {
+                    # Per-user failure: skip this profile loudly, keep the run alive.
+                    Write-Host "Skipping user profile $($reg.SID) - its ID entries stay unchanged" -ForegroundColor Yellow
+                    if ($skippedSids -notcontains $reg.SID) { $skippedSids += $reg.SID }
+                    continue
+                }
                 $rollbackNeeded = $true
                 break
             }
         }
     } catch {
         Write-Host "Error processing $($reg.Path)\$($reg.Name)`: $($_.Exception.Message)" -ForegroundColor Red
+        if ($reg.ContainsKey('SID')) {
+            # Per-user failure: skip this profile loudly, keep the run alive.
+            Write-Host "Skipping user profile $($reg.SID) - its ID entries stay unchanged" -ForegroundColor Yellow
+            if ($skippedSids -notcontains $reg.SID) { $skippedSids += $reg.SID }
+            continue
+        }
         $rollbackNeeded = $true
         break
     }
@@ -956,6 +976,10 @@ Write-Host "`n=================================================" -ForegroundColo
 $percentComplete = [math]::Round(($successCount / ($totalChanges + 1)) * 100)
 Write-Host "CHANGES COMPLETE: $percentComplete% Success Rate" -ForegroundColor Green
 Write-Host "=================================================" -ForegroundColor Cyan
+if ($skippedSids.Count -gt 0) {
+    Write-Host "`nWARNING: $($skippedSids.Count) user profile(s) were skipped (their hives could not be" -ForegroundColor Yellow
+    Write-Host "written) - those users keep their OLD identity values: $($skippedSids -join ', ')" -ForegroundColor Yellow
+}
 Write-Host "`nBackup created at: $backupDir" -ForegroundColor Cyan
 Write-Host "`nIMPORTANT: System must restart for all changes to take effect." -ForegroundColor Yellow
 Write-Host "After restart, your system will have:" -ForegroundColor Yellow
@@ -964,6 +988,10 @@ Write-Host "- New Machine GUID: $newMachineGUID" -ForegroundColor Yellow
 Write-Host "- New Product ID: $newProductID" -ForegroundColor Yellow
 Write-Host "- New Computer Name: $newComputerName" -ForegroundColor Yellow
 Write-Host "- New CPU Name: $newCpuName" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "NOTE: the Fingerprint self-test still reports sameIdentity after this reset -" -ForegroundColor DarkGray
+Write-Host "registry GUIDs are not WMI fingerprint signals. For the hardware/BIOS identity" -ForegroundColor DarkGray
+Write-Host "layer use GHOST Maintenance [3] - spoof WMI hardware serials." -ForegroundColor DarkGray
 
 # Create restore script
 $restoreScriptPath = "$backupDir\restore_original_values.ps1"
