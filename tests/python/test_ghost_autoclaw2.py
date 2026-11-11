@@ -78,6 +78,7 @@ CREATE TABLE work_runs (run_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
     credential_version TEXT, connection_base_url TEXT, connection_protocol TEXT,
     merged_into_run_id TEXT REFERENCES work_runs(run_id),
     retried_from_run_id TEXT REFERENCES work_runs(run_id),
+    request_entry_id TEXT, answer_entry_id TEXT,
     attachments_json TEXT NOT NULL DEFAULT '[]', created_at TEXT,
     updated_at TEXT);
 CREATE UNIQUE INDEX uniq_work_accept_order ON work_runs(accept_order);
@@ -214,9 +215,11 @@ class _Fixture:
         self._accept_seq[profile] = acc
         conn.execute(
             "INSERT INTO work_runs (run_id, session_id, status, text,"
-            " connection_model, credential_version, accept_order)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (run_id, sid, "completed", title, "glm-5.3", "cred-version-1", acc))
+            " connection_model, credential_version, accept_order,"
+            " request_entry_id, answer_entry_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (run_id, sid, "completed", title, "glm-5.3", "cred-version-1", acc,
+             "{0}:request".format(run_id), "{0}:answer".format(run_id)))
         for seq in (1, 2):
             conn.execute(
                 "INSERT INTO work_events (event_id, run_id, session_id,"
@@ -1267,7 +1270,8 @@ class ChatImportTests(_PatchedHome):
         self.assertTrue(result["title"].startswith("[import] "))
         self.assertEqual(result["verify"],
                          {"sessions": 1, "entries": 2, "runs": 1, "events": 2,
-                          "heads": 1, "fts": 2, "artifacts": 1})
+                          "heads": 1, "fts": 2, "artifacts": 1,
+                          "run_entry_refs": 0})
         conn = autoclaw2.ro_connect(self.fixture.db_paths["c1"])
         try:
             run = conn.execute(
@@ -1333,6 +1337,59 @@ class ChatImportTests(_PatchedHome):
         self.assertEqual(sorted(imp), [2, 3])             # target tail, not 1/7
         self.assertNotIn(1, imp)                          # collision avoided
         self.assertLess(imp[0], imp[1])                   # relative order kept
+
+    def test_run_entry_refs_remapped(self):
+        # 2026-11-10 empty-pane regression: work_runs.request_entry_id /
+        # answer_entry_id are '<run_id>:<suffix>' ids rebuilt under the NEW
+        # run id; leaving them verbatim made both refs resolve to 0 rows in
+        # the target and the app rendered the imported transcript empty.
+        # The verify step counts unresolved refs and fails the apply.
+        self.fixture.session("c1", title="local")
+        sid, _ = self.fixture.session("Primary")
+        result = autoclaw2.chat_import(self._import_payload(sid))
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["verify"]["run_entry_refs"], 0)
+        conn = autoclaw2.ro_connect(self.fixture.db_paths["c1"])
+        try:
+            run_id, req_ref, ans_ref = conn.execute(
+                "SELECT run_id, request_entry_id, answer_entry_id FROM"
+                " work_runs WHERE session_id = ?",
+                (result["new_session_id"],)).fetchone()
+            entries = conn.execute(
+                "SELECT entry_id FROM neutral_session_entries"
+                " WHERE session_id = ?",
+                (result["new_session_id"],)).fetchall()
+        finally:
+            conn.close()
+        ids = {e[0] for e in entries}
+        self.assertEqual(req_ref, run_id + ":request")
+        self.assertEqual(ans_ref, run_id + ":answer")
+        self.assertIn(req_ref, ids)
+        self.assertIn(ans_ref, ids)
+
+    def test_reverted_import_is_reimportable(self):
+        # 2026-11-10: the revert marks the sidecar record; both the planner
+        # (source_imports) and the idempotency check must ignore reverted
+        # records, or a corrected re-import is impossible (the -AllMissing
+        # plan reported 0 missing after every revert during the live
+        # empty-pane remediation).
+        sid, _ = self.fixture.session("Primary")
+        first = autoclaw2.chat_import(self._import_payload(sid))
+        self.assertEqual(first["status"], "ok")
+        rev = autoclaw2.chat_revert(
+            {"target": "c1", "import_id": first["import_id"]})
+        self.assertEqual(rev["status"], "ok")
+        profile_dir = os.path.dirname(os.path.dirname(
+            self.fixture.db_paths["c1"]))
+        sidecar = autoclaw2._read_sidecar(profile_dir)
+        self.assertEqual(
+            [r for r in sidecar["imports"] if not r.get("reverted")], [])
+        inv = autoclaw2.chat_inventory(
+            self.fixture.db_paths["c1"], profile_dir)
+        self.assertEqual(inv["source_imports"], [])
+        second = autoclaw2.chat_import(self._import_payload(sid))
+        self.assertEqual(second["status"], "ok")
+        self.assertNotEqual(second["import_id"], first["import_id"])
 
     def test_reimport_skips_on_same_content(self):
         sid, _ = self.fixture.session("Primary")

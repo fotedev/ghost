@@ -1599,11 +1599,14 @@ def chat_inventory(db_path, profile_dir):
             # provenance ids only (no titles/bodies) - the PS wrapper's
             # cross-profile diff (AC2S-040) matches source sessions against
             # these to report missing / already-imported / refused-im
+            # 2026-11-10: reverted records are excluded - the PS -AllMissing
+            # planner matches against this list, and a reverted import must
+            # be plannable again.
             "source_imports": [
                 {"source_session_id": r.get("source_session_id"),
                  "new_session_id": r.get("new_session_id"),
                  "import_id": r.get("import_id")}
-                for r in imports],
+                for r in imports if not r.get("reverted")],
         }
     finally:
         conn.close()
@@ -1706,6 +1709,8 @@ def chat_import(payload):
     content_hash = _content_hash(tree)
     sidecar = _read_sidecar(tgt["path"])
     for rec in sidecar["imports"]:
+        if rec.get("reverted"):
+            continue  # 2026-11-10: a reverted import is re-importable
         if (rec.get("source_profile") == payload["source"]
                 and rec.get("source_session_id") == payload["session_id"]):
             if rec.get("content_hash") == content_hash:
@@ -1868,6 +1873,17 @@ def chat_import(payload):
             for ref in ("merged_into_run_id", "retried_from_run_id"):
                 if rec.get(ref):
                     rec[ref] = run_map.get(rec[ref])
+            # 2c (2026-11-10 empty-pane fix): request/answer entry ids are
+            # '<run_id>:<suffix>' ids rebuilt under the NEW run id - remap
+            # them like the head columns, or the app's timeline lookup
+            # misses (work_runs.request_entry_id resolving to 0 rows
+            # rendered the imported transcript empty; live c3 2026-11-10:
+            # both refs resolved to 0 rows before this fix).
+            for ref in ("request_entry_id", "answer_entry_id"):
+                if rec.get(ref):
+                    prefix, _, suffix = rec[ref].partition(":")
+                    if run_map.get(prefix):
+                        rec[ref] = "{0}:{1}".format(run_map[prefix], suffix)
             conn.execute(
                 "INSERT INTO work_runs ({0}) VALUES ({1})".format(
                     ", ".join(run_cols), ", ".join(["?"] * len(run_cols))),
@@ -1982,6 +1998,16 @@ def chat_import(payload):
             "artifacts": conn.execute(
                 "SELECT COUNT(*) FROM governed_tool_artifacts"
                 " WHERE session_id = ?", (new_session_id,)).fetchone()[0],
+            # 2026-11-10: run entry-id refs must resolve inside the copied
+            # session (0 = healthy) - the empty-pane regression class.
+            "run_entry_refs": conn.execute(
+                "SELECT COUNT(*) FROM work_runs r WHERE r.session_id = ? AND ("
+                "(r.request_entry_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM"
+                " neutral_session_entries e WHERE e.entry_id ="
+                " r.request_entry_id)) OR (r.answer_entry_id IS NOT NULL AND"
+                " NOT EXISTS (SELECT 1 FROM neutral_session_entries e WHERE"
+                " e.entry_id = r.answer_entry_id)))",
+                (new_session_id,)).fetchone()[0],
         }
     finally:
         conn.close()
@@ -1990,7 +2016,8 @@ def chat_import(payload):
                 "heads": 1 if tree["head"] else 0,
                 "fts": sum(1 for e in kept_entries
                            if e["entry_type"] in FTS_ENTRY_TYPES),
-                "artifacts": len(artifact_map)}
+                "artifacts": len(artifact_map),
+                "run_entry_refs": 0}
     ok = all(verify[k] == expected[k] for k in expected)
 
     import_id = str(uuid.uuid4())
