@@ -2,8 +2,8 @@
 
 Date: 2026-09-23. Status: **mechanism proven end-to-end; one-shot refresh
 AND error-triggered watcher IMPLEMENTED** as
-`tools/refresh_zcode_second_chats.ps1` (one-shot = ZCode submenu [21], watcher =
-`-Watch -Target All` = ZCode submenu [23]). The signature-poll watcher draft in §4 is
+`tools/refresh_zcode_second_chats.ps1` (one-shot = ZCode submenu [22], watcher =
+`-Watch -Target All` = ZCode submenu [24]). The signature-poll watcher draft in §4 is
 kept for reference; the shipped watcher triggers on failure events instead
 (see §4 note).
 
@@ -69,7 +69,7 @@ kill Secondary's workspace app-server process(es)
 ## 4. Watcher design — `tools/watch_zcode_chat_sync.ps1` (new)
 
 > **Shipped differently (2026-09-23):** the continuous watcher is the
-> `-Watch` mode of `tools/refresh_zcode_second_chats.ps1` (ZCode submenu [23],
+> `-Watch` mode of `tools/refresh_zcode_second_chats.ps1` (ZCode submenu [24],
 > `-Target All`; no separate file). It does NOT poll the store signature
 > below — per request it tails the agent runtime JSONL logs
 > (`~/.zcode/cli/log/zcode-*.jsonl`, offset-based incremental reader) and

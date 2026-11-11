@@ -4,13 +4,13 @@ Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 **`./ghost.sh`** (Linux). This page is the direct-command cheat sheet for
 scripts and CI. `GHOST.bat` groups its tasks into six submenus with
 continuous local numbering (IDE Resets [1]-[8] / ZCode Multi-Instance &
-Clones [1]-[29] / System & GHOST Maintenance [1]-[4] / AutoClaw2
-Multi-Instance & Clones [1]-[12] / Cline Multi-Instance & Clones
-[1]-[9] / OpenCode Multi-Instance & Clones [1]-[10]); chain several tasks in one
+Clones [1]-[31] / System & GHOST Maintenance [1]-[5] / AutoClaw2
+Multi-Instance & Clones [1]-[13] / Cline Multi-Instance & Clones
+[1]-[9] / OpenCode Multi-Instance & Clones [1]-[12]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
 from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
 [1] [3] [4]) or a bare global id — this page cites menu positions as
-`<submenu> [n]`, e.g. `ZCode [27]` for the icon patch. `[U]` on the main menu
+`<submenu> [n]`, e.g. `ZCode [28]` for the icon patch. `[U]` on the main menu
 (and Maintenance [2]) runs the self-updater.
 
 ## Windows resets (PowerShell as Administrator, from the repo root)
@@ -28,13 +28,16 @@ powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target F
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Fifth
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Sixth
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target All
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_primary.ps1"          # ZCode [9] — launch the Primary non-elevated (explorer spawn, verify-after)
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1"
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1" -Instance Third
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1" -Instance Fourth
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1" -Instance Fifth
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1" -Instance Sixth
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_minimax_opencode.ps1"
-powershell -ExecutionPolicy Bypass -File "src\windows\change_device_id.ps1"
+powershell -ExecutionPolicy Bypass -File "src\windows\change_device_id.ps1"                            # default mode = Fingerprint - READ-ONLY self-test (diagnostic, changes nothing)
+powershell -ExecutionPolicy Bypass -File "src\windows\change_device_id.ps1" -Mode LegacyReset          # IDE Resets [1] — machine-wide ID reset (MachineGuid, ProductId, hostname - reboot required)
+powershell -ExecutionPolicy Bypass -File "src\windows\change_device_id.ps1" -Mode RepairProfiles       # repair ProfileList .bak temp-profile keys
 powershell -ExecutionPolicy Bypass -File "src\windows\spoof_wmi_serials.ps1"            # Maintenance [3] — WMI serial spoof
 powershell -ExecutionPolicy Bypass -File "src\windows\spoof_wmi_serials.ps1" -DryRun     # plan only, no writes
 ```
@@ -55,15 +58,30 @@ survives; app-only servers are never deleted. Secrets ride `${VAR}` names
 resolved from machine env. Plan: `docs/MCP_CENTRAL_REGISTRY_PLAN.md`.
 
 Menu equivalents for the reset targets: `reset_zcode.ps1 -Target Primary` =
-IDE Resets [7] **and** ZCode [14] (the same task from both menus);
+IDE Resets [7] **and** ZCode [15] (the same task from both menus);
 `-Target Secondary` / `Both` / `Third` / `Fourth` / `Fifth` / `Sixth` / `All` =
-ZCode [9] Reset **Blue** clone / [15] **Blue** + Primary / [10] **Yellow** /
-[11] **Green** / [12] **Red** / [13] **Orange** / [16] **ALL SIX** (menus display
+ZCode [10] Reset **Blue** clone / [16] **Blue** + Primary / [11] **Yellow** /
+[12] **Green** / [13] **Red** / [14] **Orange** / [17] **ALL SIX** (menus display
 the COLOR names; the CLI params keep the frozen keys). The AutoClaw v1.20 suite
 (`reset_autoclaw.ps1` and friends) was REMOVED 2026-10-31 with the v1.20 app
 (uninstalled from the dev host 2026-10-29) — recover it from git history or
 `archive/autoclaw-v1.20/` for a v1.20 host. AutoClaw2 has no reset script
 by design: stop the instance and delete its `AutoClaw2ClonesHome\<cN>` folder.
+
+## Desktop launcher (Maintenance [5])
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "tools\build_ghost_exe.ps1"                      # Maintenance [5] — build GHOST.exe (in-box csc.exe, no SDK)
+powershell -ExecutionPolicy Bypass -File "tools\build_ghost_exe.ps1" -OutDir "$env:TEMP\ghost-exe-check"  # compile check only (CI does this too)
+```
+
+`GHOST.exe` lands in the repo root — double-click it (UAC asks first) for the
+desktop launcher. It mirrors the `GHOST.bat` menu and runs the very same
+PowerShell scripts in their own console windows; UAC elevation comes from its
+baked-in manifest. It must stay next to `GHOST.bat`, reads
+`src\desktop\menu.json` at runtime (menu edits need no rebuild), and warns in
+its header when the build is older than the tree. Parity with the `.bat` menu
+is test-enforced (`tests\ghost_hub_menu.Tests.ps1`).
 
 ## ZCode captcha watchdog (unattended; no admin needed)
 
@@ -102,7 +120,7 @@ resident watchers an install needs are alive and set to autostart (launcher
 step 2e, mutex-guarded, best-effort): the MCP sync watcher and the taskbar
 identity watcher — you never have to start them from GHOST manually.
 All instances share one install, so one update covers all — but re-run the
-icon patch (`tools\patch_zcode_icon_override.ps1`, ZCode [27]) after every app
+icon patch (`tools\patch_zcode_icon_override.ps1`, ZCode [28]) after every app
 update; it is what makes the `ZCODE_ICON_DIR` / `ZCODE_AUMID_SUFFIX` /
 `ZCODE_ACCENT_HEX` / `ZCODE_INSTANCE_NAME` branding overrides work. Since
 engine v9 the patch runs in-place asar surgery (`tools/asar_surgery.mjs`) —
@@ -111,6 +129,23 @@ machines (estimate, not measured) — still far below the old minutes. The
 surgery writes one big file instead of ~32k small ones, so per-file AV
 overhead is mostly gone, and the swap retries briefly if antivirus holds
 the fresh candidate. Close the app first or pass -WaitForClose.
+
+### ZCode Task Manager identity (per-color exe copies; ZCode [31])
+
+Task Manager's process list takes each background group's name and icon from
+the executable image itself, so all clones running the stock `ZCode.exe`
+rendered as identical stock `ZCode (N)` rows regardless of the taskbar work.
+`tools\patch_zcode_exe_identity.ps1` (ZCode [31], gid 83) builds a per-color
+copy of the exe in the install dir — `ZCode-Blue.exe` … `ZCode-Orange.exe`
+(~235 MB each, support files shared) — and patches its embedded icon group +
+`FileDescription` to `ZCode <Color>`, so Task Manager shows one colored,
+named group per clone. The clone launcher's step 2f fast-checks a sidecar
+marker and rebuilds a copy on drift (app update, icon change), then starts
+that clone from its copy — the Primary always keeps the stock exe. Two
+caveats: resource edits invalidate the copies' Authenticode signature, so
+AV-protected machines may see a SmartScreen prompt on first launch of a copy;
+and each copy costs disk (5 copies ≈ 1.2 GB). Manual rebuild after closing
+clones: `powershell -NoProfile -ExecutionPolicy Bypass -File "tools\patch_zcode_exe_identity.ps1" -Target All` (-DryRun supported).
 
 ### ZCode light headless worker (no desktop window; ZCode [7])
 
@@ -137,7 +172,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\install_zcode_second_
 Creates `ZCode Blue` / `ZCode Yellow` / `ZCode Green` / `ZCode Red` /
 `ZCode Orange` shortcuts (matching color icons — the shortcut name equals the
 window title) that run the launcher above; a taskbar pin groups with
-that clone's running window. Remove with `-Remove` (ZCode [29]); install /
+that clone's running window. Remove with `-Remove` (ZCode [30]); install /
 scope with `-Instance` (ZCode [8]).
 Repair a hijacked Primary pin (clone AUMID + wiped icon) with
 `-RepairPrimaryAumid` — the taskbar watcher also self-heals it every ~5 min
@@ -151,8 +186,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\refresh_zcode_second_
 
 Shows chats created in another instance inside a running sidebar by recycling
 the target's app-server (auto-respawn reseeds its index; verify-after). ZCode
-[21] = Blue clone only, ZCode [22] = all instances. A hot-activity guard waits out
-in-flight turns (`-Force` bypasses). Watcher mode (`-Watch`, ZCode [23]) tails
+[22] = Blue clone only, ZCode [23] = all instances. A hot-activity guard waits out
+in-flight turns (`-Force` bypasses). Watcher mode (`-Watch`, ZCode [24]) tails
 the CLI JSONL logs for terminal failures (captcha stall / quota / rate-limit)
 and refreshes every RUNNING instance on a 300 s cooldown.
 
@@ -173,13 +208,13 @@ mirrors the plugin cache + marketplaces. A running instance is skipped with
 a warning (skills/plugin mirroring must not race a live app — close it
 first, or add `-McpOnly`); an unseeded home is skipped (the launcher seeds
 it on first launch). Every write is backed up and verified by re-read; audit
-trail at `<CloneHome>\.zcode\asset-sync-audit.jsonl`. ZCode [17]. The
+trail at `<CloneHome>\.zcode\asset-sync-audit.jsonl`. ZCode [18]. The
 launcher also runs it automatically before every clone launch (step 2d).
 
 With `-McpOnly` only the MCP definitions sync, and that is verified safe
 against RUNNING instances (2026-10-27: the app holds no handle on
 config.json, never rewrites it on exit, and reads `mcp.servers` at every
-app-server spawn — one per new session): ZCode [18].
+app-server spawn — one per new session): ZCode [19].
 
 ## ZCode MCP sync watcher (per-user, no admin needed)
 
@@ -196,12 +231,12 @@ seconds, running instances included. A synced definition is picked up by
 each instance's next chat automatically (every new session re-reads the
 config at app-server spawn — no restart). The first pass on start converges
 existing drift; a deep re-verify runs every ~5 min. `-ApplyLive` (ZCode
-[20]) additionally recycles running instances' app-servers after a real
+[21]) additionally recycles running instances' app-servers after a real
 change — idle-guarded, never mid-turn — so the currently open session gets
 the new MCP immediately. `-InstallAutostart` writes a hidden Startup-folder
 shortcut (like the taskbar watcher); single-instance via a named mutex plus
 a startup process scan. Log: `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`.
-ZCode [19] (resident) / [20] (one-shot + live apply). You normally never
+ZCode [20] (resident) / [21] (one-shot + live apply). You normally never
 start it yourself: every clone launch (launcher step 2e) starts it hidden
 and installs its autostart shortcut if missing — install-and-forget.
 
@@ -214,7 +249,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\diagnose_zcode_freeze
 Explains the "window drags but content is dead" freeze from the app's own
 telemetry: scans every instance's `<home>\.zcode\v2\logs` for renderer /
 child-process deaths and freeze events, reads the crash archive's dump
-annotations, and prints live RAM / commit / pagefile pressure. ZCode [26].
+annotations, and prints live RAM / commit / pagefile pressure. ZCode [27].
 Read-only. Verified root cause (2026-09-25): renderer OOM from OS
 commit-limit exhaustion with 4 instances; the splash-then-close relaunch is
 the app's post-crash quit path, not corruption — just launch again. See
