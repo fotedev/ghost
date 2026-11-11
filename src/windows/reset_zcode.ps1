@@ -1307,12 +1307,23 @@ $script:ZcodeCloneMarkers = @{
     Fifth     = @('*ZCode-Fifth*', '*ZCodeFifthHome*')
     Sixth     = @('*ZCode-Sixth*', '*ZCodeSixthHome*')
 }
+# Per-color exe copies (2026-11-11 Task Manager identity): a main running FROM
+# ZCode-<Color>.exe is that clone outright - deterministic even mid-splash.
+$script:ZcodeCloneExeNames = @{
+    Secondary = 'ZCode-Blue.exe'
+    Third     = 'ZCode-Yellow.exe'
+    Fourth    = 'ZCode-Green.exe'
+    Fifth     = 'ZCode-Red.exe'
+    Sixth     = 'ZCode-Orange.exe'
+}
 $script:ZcodeAllLabels = @('Primary', 'Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth')
 
 function Get-ZcodeTargetMains {
     $result = @{}
     foreach ($k in $script:ZcodeAllLabels) { $result[$k] = @() }
-    $procs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)
+    # Filter covers the whole copy family - a bare Name='ZCode.exe' silently
+    # drops clones running from their per-color exe copies.
+    $procs = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'ZCode%'" -ErrorAction SilentlyContinue)
     if ($procs.Count -eq 0) { return $result }
 
     $byParent = @{}
@@ -1326,14 +1337,21 @@ function Get-ZcodeTargetMains {
         $cmd = ([string]$_.CommandLine).Trim()
         # Empty CommandLine is a known WMI race on fresh mains: keep them as
         # candidates (subtree walk below still classifies them correctly).
+        # [^"]* (not [^\s"]*) so spaced install paths match (see launcher note).
         ([string]::IsNullOrWhiteSpace($cmd)) -or
-        ($cmd -match '^"[^"]*ZCode\.exe"$') -or ($cmd -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+        ($cmd -match '^"[^"]*ZCode(?:-[A-Za-z]+)?\.exe"$') -or ($cmd -match '^[A-Za-z]:\\[^"]*ZCode(?:-[A-Za-z]+)?\.exe$')
     })
     foreach ($m in $mains) {
         $seen = @{}
         $queue = New-Object System.Collections.Queue
         $queue.Enqueue([int]$m.ProcessId) | Out-Null
         $matchedLabel = $null
+        # Copy-exe identity first: the main's own command line is decisive even
+        # mid-splash, before any child carries the marker strings.
+        $rootCmd = ([string]$m.CommandLine).Trim()
+        foreach ($label in @('Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth')) {
+            if ($rootCmd -match ('(?i)' + [regex]::Escape($script:ZcodeCloneExeNames[$label]))) { $matchedLabel = $label; break }
+        }
         while (($queue.Count -gt 0) -and (-not $matchedLabel)) {
             $childPid = $queue.Dequeue()
             if ($seen.ContainsKey($childPid)) { continue }
@@ -1391,7 +1409,7 @@ function Stop-ZcodeTargetTree {
     if (($Label -eq 'Primary') -and ($entryTargets -ge 2) -and ($entrySurvivors -eq 0)) {
         Write-Host "[FAILED] ambiguous classification: $($entryTargets) ZCode mains running but none classify as a clone." -ForegroundColor Red
         Write-Host "    Refusing to kill: every main looks like Primary, so a Primary tree-kill would close ALL windows." -ForegroundColor Red
-        foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)) {
+        foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name LIKE 'ZCode%'" -ErrorAction SilentlyContinue)) {
             Write-Host ("    PID {0} PPID {1}: {2}" -f $p.ProcessId, $p.ParentProcessId, [string]$p.CommandLine) -ForegroundColor Red
         }
         Write-Host "    Hint: restart the clone via its shortcut / launcher (env-var isolated launch) so its subtree carries the clone home marker, then retry." -ForegroundColor Yellow

@@ -102,11 +102,11 @@ $LogFile = Join-Path $LogDir 'sync_zcode_assets.log'
 # and refresh_zcode_second_chats.ps1 ($InstanceDefs): classification is by
 # process markers (home/roaming dir names in the command line), never titles.
 $InstanceDefs = @(
-    @{ Name = 'Second'; HomeRel = 'ZCodeSecondHome'; Color = 'Blue';   Markers = @('ZCode-Second',  'ZCodeSecondHome') }
-    @{ Name = 'Third';  HomeRel = 'ZCodeThirdHome';  Color = 'Yellow'; Markers = @('ZCode-Third',   'ZCodeThirdHome')  }
-    @{ Name = 'Fourth'; HomeRel = 'ZCodeFourthHome'; Color = 'Green';  Markers = @('ZCode-Fourth',  'ZCodeFourthHome') }
-    @{ Name = 'Fifth';  HomeRel = 'ZCodeFifthHome';  Color = 'Red';    Markers = @('ZCode-Fifth',   'ZCodeFifthHome')  }
-    @{ Name = 'Sixth';  HomeRel = 'ZCodeSixthHome';  Color = 'Orange'; Markers = @('ZCode-Sixth',   'ZCodeSixthHome')  }
+    @{ Name = 'Second'; HomeRel = 'ZCodeSecondHome'; Color = 'Blue';   ExeName = 'ZCode-Blue.exe';   Markers = @('ZCode-Second',  'ZCodeSecondHome') }
+    @{ Name = 'Third';  HomeRel = 'ZCodeThirdHome';  Color = 'Yellow'; ExeName = 'ZCode-Yellow.exe'; Markers = @('ZCode-Third',   'ZCodeThirdHome')  }
+    @{ Name = 'Fourth'; HomeRel = 'ZCodeFourthHome'; Color = 'Green';  ExeName = 'ZCode-Green.exe';  Markers = @('ZCode-Fourth',  'ZCodeFourthHome') }
+    @{ Name = 'Fifth';  HomeRel = 'ZCodeFifthHome';  Color = 'Red';    ExeName = 'ZCode-Red.exe';    Markers = @('ZCode-Fifth',   'ZCodeFifthHome')  }
+    @{ Name = 'Sixth';  HomeRel = 'ZCodeSixthHome';  Color = 'Orange'; ExeName = 'ZCode-Orange.exe'; Markers = @('ZCode-Sixth',   'ZCodeSixthHome')  }
 )
 
 # Display vocabulary (2026-11-03): colors lead every user-visible tag/header;
@@ -573,13 +573,22 @@ if (-not (Test-Path -LiteralPath $PrimaryConfig)) {
 $RunningNames = @{}
 if (-not $McpOnly) {
     try {
-        $zprocs = Get-CimInstance -ClassName Win32_Process -Filter "Name = 'ZCode.exe'" -ErrorAction Stop
+        # Filter covers the whole copy family (ZCode.exe + ZCode-<Color>.exe
+        # clone copies - 2026-11-11 Task Manager identity): a bare Name='ZCode.exe'
+        # would leave clones running from their per-color exe copies invisible,
+        # and the skills/plugin mirroring would race a live app.
+        $zprocs = Get-CimInstance -ClassName Win32_Process -Filter "Name LIKE 'ZCode%'" -ErrorAction Stop
         foreach ($p in $zprocs) {
             foreach ($d in $InstanceDefs) {
                 foreach ($m in $d.Markers) {
                     if ($p.CommandLine -and ($p.CommandLine.IndexOf($m, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) {
                         $RunningNames[$d.Name] = $true
                     }
+                }
+                # Copy-exe identity: a process running FROM the clone's exe copy
+                # marks that clone running even mid-splash (no marker children yet).
+                if ($d.ExeName -and $p.CommandLine -and ($p.CommandLine -match ('(?i)' + [regex]::Escape($d.ExeName)))) {
+                    $RunningNames[$d.Name] = $true
                 }
             }
         }

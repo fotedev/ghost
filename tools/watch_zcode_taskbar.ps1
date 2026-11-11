@@ -80,12 +80,12 @@ $ErrorActionPreference = 'Continue'
 # Primary (same rule as the launcher's bare-exe classification). Base kept in
 # sync with install_zcode_second_shortcuts.ps1 / launch_zcode_second_instance.ps1.
 $Instances = @(
-    @{ Name = 'Primary'; Title = 'ZCode';        Aumid = 'dev.zcode.app';   Markers = @() },
-    @{ Name = 'Second';  Title = 'ZCode Blue';   Aumid = 'dev.zcode.app.2'; Markers = @('ZCode-Second', 'ZCodeSecondHome') },
-    @{ Name = 'Third';   Title = 'ZCode Yellow'; Aumid = 'dev.zcode.app.3'; Markers = @('ZCode-Third',  'ZCodeThirdHome') },
-    @{ Name = 'Fourth';  Title = 'ZCode Green';  Aumid = 'dev.zcode.app.4'; Markers = @('ZCode-Fourth', 'ZCodeFourthHome') },
-    @{ Name = 'Fifth';   Title = 'ZCode Red';    Aumid = 'dev.zcode.app.5'; Markers = @('ZCode-Fifth',  'ZCodeFifthHome') },
-    @{ Name = 'Sixth';   Title = 'ZCode Orange'; Aumid = 'dev.zcode.app.6'; Markers = @('ZCode-Sixth',  'ZCodeSixthHome') }
+    @{ Name = 'Primary'; Title = 'ZCode';        Aumid = 'dev.zcode.app';   Markers = @(); ExeName = $null },
+    @{ Name = 'Second';  Title = 'ZCode Blue';   Aumid = 'dev.zcode.app.2'; Markers = @('ZCode-Second', 'ZCodeSecondHome'); ExeName = 'ZCode-Blue.exe' },
+    @{ Name = 'Third';   Title = 'ZCode Yellow'; Aumid = 'dev.zcode.app.3'; Markers = @('ZCode-Third',  'ZCodeThirdHome');  ExeName = 'ZCode-Yellow.exe' },
+    @{ Name = 'Fourth';  Title = 'ZCode Green';  Aumid = 'dev.zcode.app.4'; Markers = @('ZCode-Fourth', 'ZCodeFourthHome'); ExeName = 'ZCode-Green.exe' },
+    @{ Name = 'Fifth';   Title = 'ZCode Red';    Aumid = 'dev.zcode.app.5'; Markers = @('ZCode-Fifth',  'ZCodeFifthHome');  ExeName = 'ZCode-Red.exe' },
+    @{ Name = 'Sixth';   Title = 'ZCode Orange'; Aumid = 'dev.zcode.app.6'; Markers = @('ZCode-Sixth',  'ZCodeSixthHome');  ExeName = 'ZCode-Orange.exe' }
 )
 
 Add-Type -TypeDefinition @"
@@ -201,8 +201,11 @@ $SeenHwnds = @{}
 # One WMI snapshot per pass, keyed by pid, with parent->children links so the
 # subtree walks below never re-query.
 function Get-ZcodeProcessMap {
+    # WMI filter covers the WHOLE copy family (ZCode.exe + ZCode-<Color>.exe
+    # clone copies) - a bare Name='ZCode.exe' silently drops clones running
+    # from their per-color exe copies (2026-11-11 Task Manager identity).
     $map = @{}
-    $procs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
+    $procs = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'ZCode%'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
     foreach ($p in $procs) {
         $map[[int]$p.ProcessId] = @{ Parent = [int]$p.ParentProcessId; Cmdline = [string]$p.CommandLine; Children = @() }
     }
@@ -235,6 +238,17 @@ function Get-WindowInstance {
     $seen = @{}
     $queue = New-Object System.Collections.Queue
     $queue.Enqueue($root)
+    # Copy-exe identity FIRST (2026-11-11): a root whose command line is the
+    # clone's per-color exe copy IS that clone - deterministic even mid-splash,
+    # before any child exists to carry the marker strings.
+    if ($ProcMap.ContainsKey($root)) {
+        $rootCl = $ProcMap[$root].Cmdline
+        if ($rootCl) {
+            foreach ($inst in $Instances) {
+                if ($inst.ExeName -and ($rootCl -match ('(?i)' + [regex]::Escape($inst.ExeName)))) { return $inst }
+            }
+        }
+    }
     while ($queue.Count -gt 0) {
         $cur = [int]$queue.Dequeue()
         if ($seen.ContainsKey($cur)) { continue }
@@ -256,7 +270,7 @@ function Get-WindowInstance {
 }
 
 function Invoke-IdentityPass {
-    $wins = @(Get-Process -Name ZCode -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+    $wins = @(Get-Process -Name 'ZCode*' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
     if ($wins.Count -eq 0) {
         # Nothing alive: drop the whole seen-map so a later window that reuses
         # an old hwnd value is treated as first-seen again (kick restored).

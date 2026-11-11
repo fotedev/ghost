@@ -132,11 +132,21 @@ function Get-ZCodeExeCandidates {
 function Get-LiveZCodeExePath {
     # The running instance's own exe path - the highest-fidelity relaunch
     # source. Empty string when nothing is running or paths are unreadable.
+    # STOCK EXE ONLY (2026-11-11): the per-color clone copies (ZCode-<Color>.exe)
+    # also match the "ZCode*" wildcard; relaunching the Primary from a copy
+    # would give it that copy's Task Manager icon+name. The Primary always
+    # relaunches from the stock ZCode.exe.
+    $candidates = Get-ZCodeExeCandidates
     foreach ($p in @(Get-Process -Name "ZCode*" -ErrorAction SilentlyContinue)) {
         $path = ""
         try { $path = [string]$p.Path } catch { }
         if (-not $path) { try { $path = [string]$p.MainModule.FileName } catch { } }
-        if ($path) { return $path }
+        if ($path) {
+            foreach ($c in $candidates) {
+                if ($path -ieq $c) { return $path }
+            }
+            # A live path that is NOT the stock exe is a clone copy: skip it.
+        }
     }
     return ""
 }
@@ -390,7 +400,12 @@ function Stop-ZCodeProcesses {
         if ((Get-ZCodeProcesses).Count -eq 0) { return $true }
     }
     # Final hammer: tree kill (catches wedged children, e.g. crash handlers).
+    # The copy family too - a clone running from ZCode-<Color>.exe is not
+    # covered by /IM ZCode.exe (2026-11-11 Task Manager identity copies).
     try { & taskkill /F /T /IM ZCode.exe 2>$null | Out-Null } catch { }
+    foreach ($img in @('ZCode-Blue.exe', 'ZCode-Yellow.exe', 'ZCode-Green.exe', 'ZCode-Red.exe', 'ZCode-Orange.exe')) {
+        try { & taskkill /F /T /IM $img 2>$null | Out-Null } catch { }
+    }
     for ($i = 0; $i -lt 5; $i++) {
         Start-Sleep -Seconds 2
         if ((Get-ZCodeProcesses).Count -eq 0) { return $true }
@@ -450,13 +465,19 @@ function Get-ZcodeInstanceSnapshot {
     # unmarked. Empty CommandLine is the known WMI race: on a box where
     # clones were found it is ambiguous - logged, never guessed as Primary.
     $markers = @(
-        @{ Label = 'Second'; Pattern = 'ZCode-Second|ZCodeSecondHome' },
-        @{ Label = 'Third';  Pattern = 'ZCode-Third|ZCodeThirdHome' },
-        @{ Label = 'Fourth'; Pattern = 'ZCode-Fourth|ZCodeFourthHome' },
-        @{ Label = 'Fifth';  Pattern = 'ZCode-Fifth|ZCodeFifthHome' },
-        @{ Label = 'Sixth';  Pattern = 'ZCode-Sixth|ZCodeSixthHome' }
+        # 2026-11-11: the per-color exe copies add a THIRD signal - the clone
+        # main AND all its Electron children carry the copy's exe name in their
+        # command lines (children spawn from process.execPath), so a copy tree
+        # classifies even mid-splash. The stock ZCode.exe never matches these.
+        @{ Label = 'Second'; Pattern = 'ZCode-Second|ZCodeSecondHome|ZCode-Blue\.exe' },
+        @{ Label = 'Third';  Pattern = 'ZCode-Third|ZCodeThirdHome|ZCode-Yellow\.exe' },
+        @{ Label = 'Fourth'; Pattern = 'ZCode-Fourth|ZCodeFourthHome|ZCode-Green\.exe' },
+        @{ Label = 'Fifth';  Pattern = 'ZCode-Fifth|ZCodeFifthHome|ZCode-Red\.exe' },
+        @{ Label = 'Sixth';  Pattern = 'ZCode-Sixth|ZCodeSixthHome|ZCode-Orange\.exe' }
     )
-    $mains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)
+    # Filter covers the whole copy family - a bare Name='ZCode.exe' silently
+    # drops clones running from their per-color exe copies.
+    $mains = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'ZCode%'" -ErrorAction SilentlyContinue)
     if ($mains.Count -eq 0) { return @() }
     $map = @{}
     foreach ($p in $mains) {

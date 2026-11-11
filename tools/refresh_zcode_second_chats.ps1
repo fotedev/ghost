@@ -69,12 +69,12 @@ $LogFile     = Join-Path $LogDir 'refresh_zcode_second_chats.log'
 # Primary marker read. Markers and titles come from
 # tools\patch_zcode_icon_override.ps1 (the Primary keeps the plain title).
 $InstanceDefs = @(
-  @{ Name = 'Primary'; HomeRel = '';                Title = 'ZCode';        Markers = @() }
-  @{ Name = 'Second';  HomeRel = 'ZCodeSecondHome'; Title = 'ZCode Blue';   Markers = @('ZCode-Second', 'ZCodeSecondHome') }
-  @{ Name = 'Third';   HomeRel = 'ZCodeThirdHome';  Title = 'ZCode Yellow'; Markers = @('ZCode-Third', 'ZCodeThirdHome') }
-  @{ Name = 'Fourth';  HomeRel = 'ZCodeFourthHome'; Title = 'ZCode Green';  Markers = @('ZCode-Fourth', 'ZCodeFourthHome') }
-  @{ Name = 'Fifth';   HomeRel = 'ZCodeFifthHome';  Title = 'ZCode Red';    Markers = @('ZCode-Fifth', 'ZCodeFifthHome') }
-  @{ Name = 'Sixth';   HomeRel = 'ZCodeSixthHome';  Title = 'ZCode Orange'; Markers = @('ZCode-Sixth', 'ZCodeSixthHome') }
+  @{ Name = 'Primary'; HomeRel = '';                Title = 'ZCode';        Markers = @(); ExeName = $null }
+  @{ Name = 'Second';  HomeRel = 'ZCodeSecondHome'; Title = 'ZCode Blue';   Markers = @('ZCode-Second', 'ZCodeSecondHome'); ExeName = 'ZCode-Blue.exe' }
+  @{ Name = 'Third';   HomeRel = 'ZCodeThirdHome';  Title = 'ZCode Yellow'; Markers = @('ZCode-Third', 'ZCodeThirdHome');   ExeName = 'ZCode-Yellow.exe' }
+  @{ Name = 'Fourth';  HomeRel = 'ZCodeFourthHome'; Title = 'ZCode Green';  Markers = @('ZCode-Fourth', 'ZCodeFourthHome'); ExeName = 'ZCode-Green.exe' }
+  @{ Name = 'Fifth';   HomeRel = 'ZCodeFifthHome';  Title = 'ZCode Red';    Markers = @('ZCode-Fifth', 'ZCodeFifthHome');   ExeName = 'ZCode-Red.exe' }
+  @{ Name = 'Sixth';   HomeRel = 'ZCodeSixthHome';  Title = 'ZCode Orange'; Markers = @('ZCode-Sixth', 'ZCodeSixthHome');   ExeName = 'ZCode-Orange.exe' }
 )
 
 function Write-RunLog([string]$line) {
@@ -170,8 +170,11 @@ function Get-DescendantProcesses([int[]]$rootIds) {
 # One WMI snapshot per classification, keyed by pid, with parent->children
 # links (same shape as the taskbar watcher's Get-ZcodeProcessMap).
 function Get-ZcodeProcessMap {
+  # WMI filter covers the whole copy family (ZCode.exe + ZCode-<Color>.exe
+  # clone copies - 2026-11-11 Task Manager identity); a bare Name='ZCode.exe'
+  # silently drops clones running from their per-color exe copies.
   $map = @{}
-  $procs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
+  $procs = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'ZCode%'" -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
   foreach ($p in $procs) {
     $map[[int]$p.ProcessId] = @{ Parent = [int]$p.ParentProcessId; Cmdline = [string]$p.CommandLine; Children = @() }
   }
@@ -201,6 +204,17 @@ function Get-WindowMarkerInstance {
   $seen = @{}
   $queue = New-Object System.Collections.Queue
   $queue.Enqueue($root)
+  # Copy-exe identity FIRST (2026-11-11): a root whose command line is the
+  # clone's per-color exe copy IS that clone - deterministic even mid-splash,
+  # before any child exists to carry the marker strings.
+  if ($ProcMap.ContainsKey($root)) {
+    $rootCl = $ProcMap[$root].Cmdline
+    if ($rootCl) {
+      foreach ($inst in $InstanceDefs) {
+        if ($inst.ExeName -and ($rootCl -match ('(?i)' + [regex]::Escape($inst.ExeName)))) { return $inst }
+      }
+    }
+  }
   while ($queue.Count -gt 0) {
     $cur = [int]$queue.Dequeue()
     if ($seen.ContainsKey($cur)) { continue }
@@ -242,7 +256,7 @@ function Get-InstanceState([hashtable]$def) {
   $st = @{ Def = $def; Status = 'ok'; ErrText = ''; Mains = @(); Servers = @()
            TasksIndex = (Get-TasksIndexPath $def); MissingCount = 0; MissingLines = @() }
   if (-not (Test-Path $st.TasksIndex)) { $st.Status = 'not-installed'; return $st }
-  $wins = @(Get-Process -Name ZCode -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+  $wins = @(Get-Process -Name 'ZCode*' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
   if ($wins.Count -gt 0) {
     $procMap = Get-ZcodeProcessMap
     $mains = @($wins | Where-Object { (Resolve-WindowInstance -ProcMap $procMap -Win $_).Name -eq $def.Name })
@@ -369,7 +383,7 @@ function Invoke-RefreshPass {
     if ($st.Status -eq 'not-running') {
       if ($strictSingle) {
         if ($def.Name -eq 'Primary') { Stop-WithError "no window titled `"$($def.Title)`" found -- launch the Primary ZCode first" }
-        $anyZ = @(Get-Process -Name ZCode -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+        $anyZ = @(Get-Process -Name 'ZCode*' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
         if ($anyZ.Count -eq 0) { Stop-WithError "no ZCode window found at all -- launch $($def.Title) via the menu first" }
         Stop-WithError "no window titled `"$($def.Title)`" found -- cannot tell instances apart (branding patch lost after an app update?). Re-run menu [13], then retry. Refusing to guess."
       }

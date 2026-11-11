@@ -110,7 +110,10 @@ function Assert-ZCodeClosed {
   # exe from THAT dir is what corrupts things. Same-user processes expose .Path;
   # inaccessible/null paths belong to other contexts and cannot hold this dir open.
   param([string]$InstallPath)
-  $allProcs = @(Get-Process -Name "ZCode" -ErrorAction SilentlyContinue)
+  # "ZCode*" covers the whole copy family: the per-color clone copies
+  # (ZCode-<Color>.exe) live IN this install dir and hold app.asar open just
+  # like the stock exe - they must hold the patch wait too (2026-11-11).
+  $allProcs = @(Get-Process -Name "ZCode*" -ErrorAction SilentlyContinue)
   $procs = @($allProcs |
     Where-Object { $_.Path -and ($_.Path -like "$InstallPath*") })
   # Guard-strength (bug sweep 15): a process whose .Path is unreadable cannot
@@ -143,7 +146,7 @@ function Assert-ZCodeClosed {
   $lastStatus = Get-Date
   while ($true) {
     Start-Sleep -Seconds 2
-    $remaining = @(Get-Process -Name "ZCode" -ErrorAction SilentlyContinue |
+    $remaining = @(Get-Process -Name "ZCode*" -ErrorAction SilentlyContinue |
       Where-Object { $_.Path -and ($_.Path -like "$InstallPath*") })
     if ($remaining.Count -eq 0) {
       $clearStreak++
