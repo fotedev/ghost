@@ -98,6 +98,10 @@ tools/block_qoder_domains.ps1
 # with tools\install_ghost_shortcut.ps1 instead of committing.
 *.lnk
 
+# GHOST.exe is built locally from visible source (tools\build_ghost_exe.ps1 -
+# the in-box csc.exe, no SDK) and never committed; rebuild it after updates.
+GHOST.exe
+
 # Local analysis scratch (agent sessions) - never commit.
 _analysis/
 

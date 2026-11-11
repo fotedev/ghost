@@ -140,9 +140,11 @@ if ($hits -ne 1)                           { $failures += "E: expected 1 Unknown
 if ($out -match '%PENDING_CHAIN%')         { $failures += 'E: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'E: ZCode submenu not reached via sub-path' }
 
-# F) ZCode submenu entry renders: [26] Freeze diagnostic is listed
+# F) ZCode submenu entry renders: [27] Freeze diagnostic is listed
+# (2026-11-10 renumber: locals 9-29 shifted to 10-30 when Launch ZCode
+# Primary [9] was added)
 $out = Invoke-Scenario 'F_new_entry_render' @('2', '0', '0')
-if ($out -notmatch '\[26\].*Freeze diagnostic') { $failures += 'F: ZCode submenu [26] Freeze diagnostic not rendered' }
+if ($out -notmatch '\[27\].*Freeze diagnostic') { $failures += 'F: ZCode submenu [27] Freeze diagnostic not rendered' }
 
 # G) invalid ZCode submenu id -> exactly one legit Unknown task "42"
 $out = Invoke-Scenario 'G_invalid_zcode' @('2', '42', '0', '0')
@@ -177,20 +179,20 @@ if ($out -match 'calc')               { $failures += 'L: injection attempt leake
 if ($out -notmatch 'Invalid input')   { $failures += 'L: rejection hint missing' }
 
 # M) ZCode reset block renders the reset entries incl. the Fifth reset, the
-#    all-six reset, the Primary reset and the Sixth reset (2026-10-29 numbering;
-#    2026-10-31: color moved into the tail, [29] Remove row added). The label
-#    and tail are split by ANSI codes in the colored render, so the color
-#    assertions use .* between them.
+#    all-six reset, the Primary reset and the Sixth reset (2026-11-10 numbering
+#    after the [9] Launch ZCode Primary insertion shifted locals 9-29 to 10-30;
+#    2026-10-31: color moved into the tail). The label and tail are split by
+#    ANSI codes in the colored render, so the color assertions use .* between.
 $out = Invoke-Scenario 'M_zcode_reset_render' @('2', '0', '0')
-if ($out -notmatch '\[ 9\].*Reset Blue clone')     { $failures += 'M: ZCode [9] Blue reset not rendered' }
-if ($out -notmatch '\[10\].*Reset Yellow clone')   { $failures += 'M: ZCode [10] Yellow reset not rendered' }
-if ($out -notmatch '\[11\].*Reset Green clone')    { $failures += 'M: ZCode [11] Green reset not rendered' }
-if ($out -notmatch '\[12\].*Reset Red clone')      { $failures += 'M: ZCode [12] Red reset not rendered' }
-if ($out -notmatch '\[13\].*Reset Orange clone')   { $failures += 'M: ZCode [13] Orange reset not rendered' }
-if ($out -notmatch '\[16\].*Reset ALL SIX instances')      { $failures += 'M: ZCode [16] all-six reset not rendered' }
-if ($out -notmatch '\[14\].*Reset ZCode Primary instance') { $failures += 'M: ZCode [14] Primary reset not rendered' }
-if ($out -notmatch '\[ 9\].*survivors kept running')       { $failures += 'M: ZCode [9] reset tail not rendered' }
-if ($out -notmatch '\[29\].*Remove clone shortcuts')       { $failures += 'M: ZCode [29] Remove shortcuts not rendered' }
+if ($out -notmatch '\[10\].*Reset Blue clone')     { $failures += 'M: ZCode [10] Blue reset not rendered' }
+if ($out -notmatch '\[11\].*Reset Yellow clone')   { $failures += 'M: ZCode [11] Yellow reset not rendered' }
+if ($out -notmatch '\[12\].*Reset Green clone')    { $failures += 'M: ZCode [12] Green reset not rendered' }
+if ($out -notmatch '\[13\].*Reset Red clone')      { $failures += 'M: ZCode [13] Red reset not rendered' }
+if ($out -notmatch '\[14\].*Reset Orange clone')   { $failures += 'M: ZCode [14] Orange reset not rendered' }
+if ($out -notmatch '\[17\].*Reset ALL SIX instances')      { $failures += 'M: ZCode [17] all-six reset not rendered' }
+if ($out -notmatch '\[15\].*Reset ZCode Primary instance') { $failures += 'M: ZCode [15] Primary reset not rendered' }
+if ($out -notmatch '\[10\].*survivors kept running')       { $failures += 'M: ZCode [10] reset tail not rendered' }
+if ($out -notmatch '\[30\].*Remove clone shortcuts')       { $failures += 'M: ZCode [30] Remove shortcuts not rendered' }
 
 # N) Cline submenu (main [5]): renders clean, entries listed, no chain leak;
 #    invalid Cline chain id -> exactly one legit Unknown task
@@ -232,16 +234,21 @@ if ($out -match 'calc')                          { $failures += 'Q: injection at
 if ($out -notmatch 'Invalid input')              { $failures += 'Q: rejection hint missing' }
 
 # R) MCP sync block renders in the ZCode submenu: the live sync, the watcher
-#    and the one-shot live-apply entries (2026-10-27; 2026-10-29 numbering)
+#    and the one-shot live-apply entries (2026-11-10 numbering: locals +1
+#    after the [9] Launch ZCode Primary insertion)
 $out = Invoke-Scenario 'R_mcp_sync_render' @('2', '0', '0')
-if ($out -notmatch '\[18\].*Sync MCPs to all clones')      { $failures += 'R: ZCode [18] Sync MCPs not rendered' }
-if ($out -notmatch '\[19\].*MCP sync watcher')             { $failures += 'R: ZCode [19] MCP sync watcher not rendered' }
-if ($out -notmatch '\[20\].*Sync MCPs \+ apply live now')  { $failures += 'R: ZCode [20] Sync + apply live not rendered' }
+if ($out -notmatch '\[19\].*Sync MCPs to all clones')      { $failures += 'R: ZCode [19] Sync MCPs not rendered' }
+if ($out -notmatch '\[20\].*MCP sync watcher')             { $failures += 'R: ZCode [20] MCP sync watcher not rendered' }
+if ($out -notmatch '\[21\].*Sync MCPs \+ apply live now')  { $failures += 'R: ZCode [21] Sync + apply live not rendered' }
 
-# S) light headless worker entry renders in the ZCode submenu (2026-10-28)
+# S) light headless worker + the 2026-11-10 Launch ZCode Primary row render
+#    in the ZCode submenu; [31] Task Manager icon rebuild added 2026-11-11
+#    (gid 83)
 $out = Invoke-Scenario 'S_light_worker_render' @('2', '0', '0')
 if ($out -notmatch '\[ 7\].*Launch light headless worker') { $failures += 'S: ZCode [7] light worker not rendered' }
-if ($out -notmatch '\[28\].*Login clone account')           { $failures += 'S: ZCode [28] login helper not rendered' }
+if ($out -notmatch '\[ 9\].*Launch ZCode Primary')          { $failures += 'S: ZCode [9] Launch ZCode Primary not rendered' }
+if ($out -notmatch '\[29\].*Login clone account')           { $failures += 'S: ZCode [29] login helper not rendered' }
+if ($out -notmatch '\[31\].*Rebuild clone Task Manager icons') { $failures += 'S: ZCode [31] Task Manager icon row not rendered' }
 
 # U) AutoClaw2 Sync + Chat Import rows render (2026-11-04): [8] Import MCPs,
 #    [9] Chat inventory, [10] Import chats; Maintenance shifted to [11]/[12];
@@ -261,6 +268,7 @@ $out = Invoke-Scenario 'T_maint_render' @('3', '0', '0')
 if ($out -match 'Unknown task')                 { $failures += 'T: Unknown task on Maintenance submenu render' }
 if ($out -notmatch '\[ 3\].*Spoof WMI')         { $failures += 'T: Maintenance [3] WMI row not rendered' }
 if ($out -notmatch '\[ 4\].*Sync MCP registry') { $failures += 'T: Maintenance [4] MCP registry row not rendered' }
+if ($out -notmatch '\[ 5\].*Build GHOST desktop app') { $failures += 'T: Maintenance [5] build-exe row not rendered' }
 $out = Invoke-Scenario 'T_maint_invalid' @('3 99', '0', '0')
 $hits = ([regex]::Matches($out, 'Unknown task "99"')).Count
 if ($hits -ne 1)                                { $failures += "T: expected 1 Unknown task from Maintenance chain, got $hits" }

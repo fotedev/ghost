@@ -1,0 +1,266 @@
+{
+  "_comment": "GHOST desktop launcher menu data. Mirrors GHOST.bat's :DispatchOne table (gids NEVER move). Parity with GHOST.bat is enforced by tests/ghost_hub_menu.Tests.ps1 - keep both sides in sync. Modes: inline = :Run, inline-note = :RunWith (waitForClose passes -WaitForClose), zcode-reset = :RunZcodeReset, confirm-reset = :ConfirmReset (dialog then zcode-reset behavior), confirm-run = :ConfirmRun (dialog then inline), detached = :Detached (psFlags carries the .bat powershell flags verbatim), windows-staggered = the gid 18 five-window block, chain-pause = the gid 35/51/61 five-command status blocks.",
+  "sections": [
+    {
+      "name": "IDE Resets",
+      "rows": [
+        { "gid": 1, "label": "Change Device ID", "tail": "- machine-wide: ALL instances + Qoder - reboot required", "mode": "confirm-run", "confirmTitle": "Change Device ID - machine-wide identity reset", "confirmText": "This rewrites MachineGuid, SQM DeviceId, ProductId, RegisteredOwner, per-user session IDs and renames the PC to a DESKTOP-style name. A reboot is required. Registry backups and a restore script are generated first.", "script": "src/windows/change_device_id.ps1", "args": ["-Mode", "LegacyReset"], "notes": [
+          "Note: the Fingerprint self-test still reports sameIdentity afterwards - registry GUIDs are not WMI fingerprint signals. For the hardware/BIOS layer use Maintenance [3] spoof WMI serials."
+        ] },
+        { "gid": 2, "label": "Reset Cursor", "mode": "inline", "script": "src/windows/reset_cursor.ps1", "args": [], "notes": [] },
+        { "gid": 3, "label": "Reset Windsurf/Devin", "mode": "inline", "script": "src/windows/reset_devin.ps1", "args": [], "notes": [] },
+        { "gid": 4, "label": "Reset Trae", "mode": "inline", "script": "src/windows/reset_trae.ps1", "args": [], "notes": [] },
+        { "gid": 5, "label": "Reset Qoder", "mode": "inline", "script": "src/windows/reset_qoder.ps1", "args": [], "notes": [] },
+        { "gid": 6, "label": "Reset QoderWork", "mode": "inline", "script": "src/windows/reset_qoderwork.ps1", "args": [], "notes": [] },
+        { "gid": 7, "label": "Reset ZCode Primary instance", "tail": "- Primary profile - chats kept", "mode": "zcode-reset", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "Primary"], "notes": [
+          "Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.",
+          "NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 8, "label": "Reset MiniMax/OpenCode", "mode": "inline", "script": "src/windows/reset_minimax_opencode.ps1", "args": [], "notes": [] }
+      ]
+    },
+    {
+      "name": "ZCode",
+      "rows": [
+        { "gid": 10, "label": "Launch Blue clone", "tail": "- independent window", "mode": "detached", "title": "ZCode Blue", "psFlags": "-NoProfile", "script": "src/windows/launch_zcode_second_instance.ps1", "args": [], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 16, "label": "Launch Yellow clone", "tail": "- independent window", "mode": "detached", "title": "ZCode Yellow", "psFlags": "-NoProfile", "script": "src/windows/launch_zcode_second_instance.ps1", "args": ["-Instance", "Third"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 17, "label": "Launch Green clone", "tail": "- independent window", "mode": "detached", "title": "ZCode Green", "psFlags": "-NoProfile", "script": "src/windows/launch_zcode_second_instance.ps1", "args": ["-Instance", "Fourth"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 41, "label": "Launch Red clone", "tail": "- independent window", "mode": "detached", "title": "ZCode Red", "psFlags": "-NoProfile", "script": "src/windows/launch_zcode_second_instance.ps1", "args": ["-Instance", "Fifth"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 64, "label": "Launch Orange clone", "tail": "- independent window", "mode": "detached", "title": "ZCode Orange", "psFlags": "-NoProfile", "script": "src/windows/launch_zcode_second_instance.ps1", "args": ["-Instance", "Sixth"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 18, "label": "Launch ALL clones", "tail": "- Blue..Orange, one after another", "mode": "windows-staggered", "steps": [
+          { "title": "ZCode Blue", "script": "src/windows/launch_zcode_second_instance.ps1", "args": [], "delaySec": 3 },
+          { "title": "ZCode Yellow", "script": "src/windows/launch_zcode_second_instance.ps1", "args": ["-Instance", "Third"], "delaySec": 3 },
+          { "title": "ZCode Green", "script": "src/windows/launch_zcode_second_instance.ps1", "args": ["-Instance", "Fourth"], "delaySec": 3 },
+          { "title": "ZCode Red", "script": "src/windows/launch_zcode_second_instance.ps1", "args": ["-Instance", "Fifth"], "delaySec": 3 },
+          { "title": "ZCode Orange", "script": "src/windows/launch_zcode_second_instance.ps1", "args": ["-Instance", "Sixth"], "delaySec": 3 }
+        ], "notes": [
+          "Five launcher windows opened - each closes automatically when done.",
+          "First runs clone the Primary profile, so expect a short delay per clone.",
+          "Launch logs: tools\\logs - one launch_zcode log file per clone."
+        ] },
+        { "gid": 70, "label": "Launch light headless worker", "tail": "- run a clone account with no desktop window - low RAM", "mode": "detached", "title": "ZCode Light Worker", "psFlags": "-NoProfile", "script": "src/windows/launch_zcode_cli_light.ps1", "args": [], "notes": [
+          "Light worker opened in a separate window - type tasks there, empty input exits.",
+          "Headless: about a quarter of the RAM of a full instance. Read the model note it prints on first run."
+        ] },
+        { "gid": 14, "label": "Install clone shortcuts", "tail": "- all 5 - Desktop + Start menu", "mode": "inline-note", "script": "tools/install_zcode_second_shortcuts.ps1", "args": [], "notes": [
+          "Look for the new ZCode Blue, ZCode Yellow, ZCode Green, ZCode Red and ZCode Orange shortcuts on your Desktop and in the Start menu."
+        ] },
+        { "gid": 82, "label": "Launch ZCode Primary", "tail": "- non-elevated - Primary profile", "mode": "detached", "title": "ZCode Primary", "psFlags": "-NoProfile", "script": "src/windows/launch_zcode_primary.ps1", "args": [], "notes": [
+          "Launches the stock Primary profile via explorer.exe so the app is never elevated - drag-drop breaks into elevated instances.",
+          "No clone env vars are set: default look, base AUMID. Relaunching while the Primary runs just focuses its window."
+        ] },
+        { "gid": 11, "label": "Reset Blue clone", "tail": "- survivors kept running", "mode": "zcode-reset", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "Secondary"], "notes": [
+          "Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.",
+          "NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 19, "label": "Reset Yellow clone", "tail": "- survivors kept running", "mode": "zcode-reset", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "Third"], "notes": [
+          "Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.",
+          "NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 20, "label": "Reset Green clone", "tail": "- survivors kept running", "mode": "zcode-reset", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "Fourth"], "notes": [
+          "Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.",
+          "NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 42, "label": "Reset Red clone", "tail": "- survivors kept running", "mode": "zcode-reset", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "Fifth"], "notes": [
+          "Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.",
+          "NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 65, "label": "Reset Orange clone", "tail": "- survivors kept running", "mode": "zcode-reset", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "Sixth"], "notes": [
+          "Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.",
+          "NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 7, "label": "Reset ZCode Primary instance", "tail": "- Primary profile - chats kept", "mode": "zcode-reset", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "Primary"], "notes": [
+          "Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.",
+          "NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 12, "label": "Reset Blue + Primary", "tail": "(independent IDs)", "mode": "confirm-reset", "confirmTitle": "Reset Blue + Primary - independent IDs", "confirmText": "This tree-kills the affected instances and rewrites their identity stores.", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "Both"], "notes": [
+          "Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.",
+          "NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 21, "label": "Reset ALL SIX instances", "tail": "(independent IDs)", "mode": "confirm-reset", "confirmTitle": "Reset ALL SIX instances - independent IDs", "confirmText": "This tree-kills the affected instances and rewrites their identity stores.", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "All"], "notes": [
+          "Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.",
+          "NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 43, "label": "Sync clone assets", "tail": "- MCPs + skills + plugins from Primary", "mode": "inline", "script": "tools/sync_zcode_assets.ps1", "args": [], "notes": [] },
+        { "gid": 67, "label": "Sync MCPs to all clones", "tail": "- live - running instances included", "mode": "inline", "script": "tools/sync_zcode_assets.ps1", "args": ["-McpOnly", "-Target", "All"], "notes": [] },
+        { "gid": 68, "label": "MCP sync watcher", "tail": "- auto-sync on Primary change (separate window)", "mode": "detached", "title": "ZCode MCP Sync Watcher", "psFlags": "-NoProfile", "script": "tools/watch_zcode_mcp_sync.ps1", "args": [], "notes": [
+          "Watcher launched in a separate window - leave it open. It syncs MCPs from the Primary on every change - running instances included; a synced definition lands on each instance's next chat.",
+          "Log: %LOCALAPPDATA%\\watch-zcode-mcp-sync\\mcp-sync.log"
+        ] },
+        { "gid": 69, "label": "Sync MCPs + apply live now", "tail": "- recycles running instances - idle-guarded", "mode": "inline", "script": "tools/watch_zcode_mcp_sync.ps1", "args": ["-RunOnce", "-ApplyLive", "-Target", "All"], "notes": [] },
+        { "gid": 15, "label": "Refresh Blue chats", "tail": "- show Primary chats without app restart", "mode": "inline-note", "script": "tools/refresh_zcode_second_chats.ps1", "args": [], "notes": [
+          "The Blue clone window refreshes its chat list by itself in a few seconds."
+        ] },
+        { "gid": 23, "label": "Refresh ALL chats", "tail": "- re-index every running sidebar", "mode": "inline", "script": "tools/refresh_zcode_second_chats.ps1", "args": ["-Target", "All"], "notes": [] },
+        { "gid": 22, "label": "Watch errors", "tail": "- auto-refresh chats on quota or captcha failure", "mode": "detached", "title": "ZCode error chat refresh", "psFlags": "-NoExit -NoProfile", "script": "tools/refresh_zcode_second_chats.ps1", "args": ["-Target", "All", "-Watch"], "notes": [
+          "Error watcher launched in a separate window - leave it open.",
+          "On quota, captcha or rate-limit failures it refreshes chats in every running ZCode instance."
+        ] },
+        { "gid": 9, "label": "Captcha watchdog", "tail": "(unattended, separate window)", "mode": "detached", "title": "ZCode captcha watch", "psFlags": "-NoExit -NoProfile", "script": "tools/watch_zcode_captcha.ps1", "args": [], "notes": [
+          "Watchdog launched in a separate window - leave it open.",
+          "To verify it runs: check %LOCALAPPDATA%\\watch-zcode-captcha\\watch.log"
+        ] },
+        { "gid": 25, "label": "Taskbar identity watcher", "tail": "- auto-fix taskbar merges (separate window)", "mode": "detached", "title": "ZCode taskbar identity", "psFlags": "-NoProfile", "script": "tools/watch_zcode_taskbar.ps1", "args": [], "notes": [
+          "Taskbar identity watcher launched in a separate window - leave it open.",
+          "It re-stamps any ZCode window that loses its taskbar identity within seconds."
+        ] },
+        { "gid": 27, "label": "Freeze diagnostic", "tail": "- dead windows, renderer OOM, commit pressure", "mode": "inline", "script": "tools/diagnose_zcode_freeze.ps1", "args": [], "notes": [] },
+        { "gid": 13, "label": "Re-apply app patch", "tail": "- v9, icons + bidi auto (after app update)", "mode": "inline-note", "waitForClose": true, "script": "tools/patch_zcode_icon_override.ps1", "args": [], "notes": [
+          "Patch finished - relaunch instances via their ZCode shortcuts - a bare ZCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 71, "label": "Login clone account", "tail": "- one-time plan setup (light workers + T3 bridge)", "mode": "detached", "title": "ZCode Clone Login", "psFlags": "-NoProfile", "script": "src/windows/launch_zcode_cli_light.ps1", "args": ["-Login"], "notes": [
+          "Login window opened - a browser will ask you to sign in with THIS clone's account.",
+          "One-time per clone home: it routes light workers and the T3 bridge to the Start Plan instead of the free model."
+        ] },
+        { "gid": 72, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_zcode_second_shortcuts.ps1", "args": ["-Remove"], "notes": [] },
+        { "gid": 83, "label": "Rebuild clone Task Manager icons", "tail": "- colored rows in Task Manager - run after app updates", "mode": "inline", "script": "tools/patch_zcode_exe_identity.ps1", "args": ["-Target", "All"], "notes": [] }
+      ]
+    },
+    {
+      "name": "AutoClaw2",
+      "rows": [
+        { "gid": 28, "label": "Launch Blue clone", "tail": "- own profile, identity, sign-in", "mode": "detached", "title": "AutoClaw2 Blue", "psFlags": "-NoProfile", "script": "src/windows/launch_autoclaw2_clone.ps1", "args": [], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 29, "label": "Launch Yellow clone", "mode": "detached", "title": "AutoClaw2 Yellow", "psFlags": "-NoProfile", "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c2"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 30, "label": "Launch Green clone", "mode": "detached", "title": "AutoClaw2 Green", "psFlags": "-NoProfile", "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c3"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 31, "label": "Launch Red clone", "mode": "detached", "title": "AutoClaw2 Red", "psFlags": "-NoProfile", "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c4"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 32, "label": "Launch Orange clone", "mode": "detached", "title": "AutoClaw2 Orange", "psFlags": "-NoProfile", "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c5"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 33, "label": "Launch ALL clones", "tail": "- Blue..Orange, one after another", "mode": "detached", "title": "AutoClaw2 all clones", "psFlags": "-NoProfile", "script": "src/windows/launch_autoclaw2_clones_all.ps1", "args": [], "notes": [
+          "Sequential all-five launcher opened in a separate window - it closes when done.",
+          "Clones launch one at a time with a pause between each - do not launch them in parallel."
+        ] },
+        { "gid": 34, "label": "Install clone shortcuts", "tail": "- all 5 - Desktop + Start menu", "mode": "inline-note", "script": "tools/install_autoclaw2_clone_shortcuts.ps1", "args": [], "notes": [
+          "Look for the new AutoClaw2 Blue..Orange shortcuts on your Desktop and in the Start menu."
+        ] },
+        { "gid": 73, "label": "Import MCPs to clones", "tail": "- from the central master manifest", "mode": "inline", "script": "tools/sync_autoclaw2_mcp.ps1", "args": ["-Target", "All"], "notes": [] },
+        { "gid": 75, "label": "Chat inventory", "tail": "- read-only cross-profile report", "mode": "inline", "script": "tools/sync_autoclaw2_chats.ps1", "args": ["-Mode", "Inventory", "-Target", "All"], "notes": [] },
+        { "gid": 76, "label": "Import chats to clones", "tail": "- one-way Primary to clones - DB backed up first", "mode": "inline", "script": "tools/sync_autoclaw2_chats.ps1", "args": ["-Mode", "Import", "-Apply", "-Target", "All"], "notes": [] },
+        { "gid": 35, "label": "Clone status", "tail": "- all 5 - locks, device-id, sign-in state", "mode": "chain-pause", "steps": [
+          { "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c1", "-Status"] },
+          { "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c2", "-Status"] },
+          { "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c3", "-Status"] },
+          { "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c4", "-Status"] },
+          { "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c5", "-Status"] }
+        ], "notes": [] },
+        { "gid": 36, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_autoclaw2_clone_shortcuts.ps1", "args": ["-Remove"], "notes": [] },
+        { "gid": 78, "label": "Apply clone identity patch", "tail": "- colored taskbar buttons - waits for AutoClaw2 to close", "mode": "inline-note", "waitForClose": true, "script": "tools/patch_autoclaw2_identity.ps1", "args": [], "notes": [
+          "Patch finished - relaunch the clones via their AutoClaw2 shortcuts for colored taskbar buttons."
+        ] }
+      ]
+    },
+    {
+      "name": "Cline",
+      "rows": [
+        { "gid": 44, "label": "Launch Blue clone", "tail": "- own state, web login, ports", "mode": "detached", "title": "Cline Blue", "psFlags": "-NoProfile", "script": "src/windows/launch_cline_clone.ps1", "args": [], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 46, "label": "Launch Yellow clone", "mode": "detached", "title": "Cline Yellow", "psFlags": "-NoProfile", "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c2"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 47, "label": "Launch Green clone", "mode": "detached", "title": "Cline Green", "psFlags": "-NoProfile", "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c3"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 49, "label": "Launch Red clone", "mode": "detached", "title": "Cline Red", "psFlags": "-NoProfile", "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c4"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 50, "label": "Launch Orange clone", "mode": "detached", "title": "Cline Orange", "psFlags": "-NoProfile", "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c5"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 48, "label": "Launch ALL clones", "tail": "- Blue..Orange, one after another", "mode": "detached", "title": "Cline all clones", "psFlags": "-NoProfile", "script": "src/windows/launch_cline_clones_all.ps1", "args": [], "notes": [
+          "Sequential all-five launcher opened in a separate window - it closes when done.",
+          "Clones launch one at a time with a pause between each - do not launch them in parallel."
+        ] },
+        { "gid": 45, "label": "Install clone shortcuts", "tail": "- all 5 - Desktop + Start menu", "mode": "inline-note", "script": "tools/install_cline_clone_shortcuts.ps1", "args": [], "notes": [
+          "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu."
+        ] },
+        { "gid": 51, "label": "Clone status", "tail": "- all 5 - locks, ports, sign-in state", "mode": "chain-pause", "steps": [
+          { "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c1", "-Status"] },
+          { "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c2", "-Status"] },
+          { "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c3", "-Status"] },
+          { "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c4", "-Status"] },
+          { "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c5", "-Status"] }
+        ], "notes": [] },
+        { "gid": 52, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_cline_clone_shortcuts.ps1", "args": ["-Remove"], "notes": [] }
+      ]
+    },
+    {
+      "name": "OpenCode",
+      "rows": [
+        { "gid": 53, "label": "Launch Blue clone", "tail": "- own clone home, login, identity", "mode": "detached", "title": "OpenCode Blue", "psFlags": "-NoProfile", "script": "src/windows/launch_opencode_clone.ps1", "args": [], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 54, "label": "Launch Yellow clone", "mode": "detached", "title": "OpenCode Yellow", "psFlags": "-NoProfile", "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c2"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 55, "label": "Launch Green clone", "mode": "detached", "title": "OpenCode Green", "psFlags": "-NoProfile", "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c3"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 56, "label": "Launch Red clone", "mode": "detached", "title": "OpenCode Red", "psFlags": "-NoProfile", "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c4"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 57, "label": "Launch Orange clone", "mode": "detached", "title": "OpenCode Orange", "psFlags": "-NoProfile", "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c5"], "notes": [
+          "Launcher opened in a separate window - it closes automatically when done."
+        ] },
+        { "gid": 58, "label": "Launch ALL clones", "tail": "- Blue..Orange, one after another", "mode": "detached", "title": "OpenCode all clones", "psFlags": "-NoProfile", "script": "src/windows/launch_opencode_clones_all.ps1", "args": [], "notes": [
+          "Sequential all-five launcher opened in a separate window - it closes when done.",
+          "Clones launch one at a time with a pause between each - do not launch them in parallel."
+        ] },
+        { "gid": 79, "label": "Launch light headless worker", "tail": "- CLI only - no desktop window - low RAM", "mode": "detached", "title": "OpenCode Light Worker", "psFlags": "-NoProfile", "script": "src/windows/launch_opencode_cli_light.ps1", "args": [], "notes": [
+          "Light worker opened in a separate window - type tasks there, empty input exits.",
+          "Headless CLI on the clone's own state. A fresh clone runs the FREE model - the Login row attaches its account."
+        ] },
+        { "gid": 80, "label": "Login clone account", "tail": "- one-time setup for the light worker", "mode": "detached", "title": "OpenCode Clone Login", "psFlags": "-NoProfile", "script": "src/windows/launch_opencode_cli_light.ps1", "args": ["-Login"], "notes": [
+          "Login window opened - follow the interactive flow for THIS clone's account.",
+          "One-time per clone home: it writes the clone's own auth.json instead of running on the free model."
+        ] },
+        { "gid": 60, "label": "Install clone shortcuts", "tail": "- all 5 - Desktop + Start menu", "mode": "inline-note", "script": "tools/install_opencode_clone_shortcuts.ps1", "args": [], "notes": [
+          "Look for the new OpenCode Blue..Orange shortcuts on your Desktop and in the Start menu."
+        ] },
+        { "gid": 59, "label": "Apply clone-home patch", "tail": "- required once - waits until OpenCode closes", "mode": "inline-note", "waitForClose": true, "script": "tools/patch_opencode_clone_home.ps1", "args": [], "notes": [
+          "Patch finished - relaunch clones via their OpenCode shortcuts - a bare OpenCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 61, "label": "Clone status", "tail": "- all 5 - locks, identity, sign-in state", "mode": "chain-pause", "steps": [
+          { "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c1", "-Status"] },
+          { "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c2", "-Status"] },
+          { "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c3", "-Status"] },
+          { "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c4", "-Status"] },
+          { "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c5", "-Status"] }
+        ], "notes": [] },
+        { "gid": 62, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_opencode_clone_shortcuts.ps1", "args": ["-Remove"], "notes": [] }
+      ]
+    },
+    {
+      "name": "Maintenance",
+      "rows": [
+        { "gid": 24, "label": "Install or repair the GHOST shortcut", "tail": "- Desktop + repo folder", "mode": "inline-note", "script": "tools/install_ghost_shortcut.ps1", "args": [], "notes": [
+          "Check your Desktop for the GHOST shortcut - re-run this after moving this repo folder."
+        ] },
+        { "gid": 26, "label": "Check for updates / update GHOST", "tail": "- from GitHub", "mode": "inline", "script": "tools/update_ghost.ps1", "args": [], "notes": [] },
+        { "gid": 66, "label": "Spoof WMI hardware serials", "tail": "- BIOS, motherboard, disk, RAM + Bluetooth MAC", "mode": "confirm-run", "confirmTitle": "Spoof WMI hardware serials - BIOS, motherboard, disk, RAM + Bluetooth MAC", "confirmText": "This changes system-wide hardware identity data. A WMI repository backup + restore script are generated first.", "script": "src/windows/spoof_wmi_serials.ps1", "args": [], "notes": [] },
+        { "gid": 77, "label": "Sync MCP registry to apps", "tail": "- ZCode, Windsurf, VS Code + MiniMax", "mode": "inline", "script": "tools/sync_mcp_registry.ps1", "args": [], "notes": [] },
+        { "gid": 81, "label": "Build GHOST desktop app", "tail": "- GHOST.exe in the repo root", "mode": "inline-note", "script": "tools/build_ghost_exe.ps1", "args": [], "notes": [
+          "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or repo moves."
+        ] }
+      ]
+    }
+  ]
+}

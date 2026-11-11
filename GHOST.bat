@@ -80,7 +80,7 @@ goto MAIN
 cls
 call :Crumb "IDE Resets"
 echo.
-call :Opt 1 "Change Device ID" "(machine-wide: ALL instances + Qoder)"
+call :Opt 1 "Change Device ID" "- machine-wide: ALL instances + Qoder - reboot required"
 call :Opt 2 "Reset Cursor" ""
 call :Opt 3 "Reset Windsurf\Devin" ""
 call :Opt 4 "Reset Trae" ""
@@ -120,35 +120,37 @@ call :Opt 5 "Launch Orange clone" "- independent window"
 call :Opt 6 "Launch ALL clones" "- Blue..Orange, one after another"
 call :Opt 7 "Launch light headless worker" "- run a clone account with no desktop window - low RAM"
 call :Opt 8 "Install clone shortcuts" "- all 5 - Desktop + Start menu"
+call :Opt 9 "Launch ZCode Primary" "- non-elevated - Primary profile"
 echo.
 call :Div "Reset Clones"
-call :Opt 9 "Reset Blue clone" "- survivors kept running"
-call :Opt 10 "Reset Yellow clone" "- survivors kept running"
-call :Opt 11 "Reset Green clone" "- survivors kept running"
-call :Opt 12 "Reset Red clone" "- survivors kept running"
-call :Opt 13 "Reset Orange clone" "- survivors kept running"
-call :Opt 14 "Reset ZCode Primary instance" ""
-call :Opt 15 "Reset Blue + Primary" "(independent IDs)"
-call :Opt 16 "Reset ALL SIX instances" "(independent IDs)"
+call :Opt 10 "Reset Blue clone" "- survivors kept running"
+call :Opt 11 "Reset Yellow clone" "- survivors kept running"
+call :Opt 12 "Reset Green clone" "- survivors kept running"
+call :Opt 13 "Reset Red clone" "- survivors kept running"
+call :Opt 14 "Reset Orange clone" "- survivors kept running"
+call :Opt 15 "Reset ZCode Primary instance" "- Primary profile - chats kept"
+call :Opt 16 "Reset Blue + Primary" "(independent IDs)"
+call :Opt 17 "Reset ALL SIX instances" "(independent IDs)"
 echo.
 call :Div "Sync + Chat Refresh"
-call :Opt 17 "Sync clone assets" "- MCPs + skills + plugins from Primary"
-call :Opt 18 "Sync MCPs to all clones" "- live - running instances included"
-call :Opt 19 "MCP sync watcher" "- auto-sync on Primary change (separate window)"
-call :Opt 20 "Sync MCPs + apply live now" "- recycles running instances - idle-guarded"
-call :Opt 21 "Refresh Blue chats" "- show Primary chats without app restart"
-call :Opt 22 "Refresh ALL chats" "- re-index every running sidebar"
-call :Opt 23 "Watch errors" "- auto-refresh chats on quota or captcha failure"
+call :Opt 18 "Sync clone assets" "- MCPs + skills + plugins from Primary"
+call :Opt 19 "Sync MCPs to all clones" "- live - running instances included"
+call :Opt 20 "MCP sync watcher" "- auto-sync on Primary change (separate window)"
+call :Opt 21 "Sync MCPs + apply live now" "- recycles running instances - idle-guarded"
+call :Opt 22 "Refresh Blue chats" "- show Primary chats without app restart"
+call :Opt 23 "Refresh ALL chats" "- re-index every running sidebar"
+call :Opt 24 "Watch errors" "- auto-refresh chats on quota or captcha failure"
 echo.
 call :Div "Watchers + Diagnostics"
-call :Opt 24 "Captcha watchdog" "(unattended, separate window)"
-call :Opt 25 "Taskbar identity watcher" "- auto-fix taskbar merges (separate window)"
-call :Opt 26 "Freeze diagnostic" "- dead windows, renderer OOM, commit pressure"
+call :Opt 25 "Captcha watchdog" "(unattended, separate window)"
+call :Opt 26 "Taskbar identity watcher" "- auto-fix taskbar merges (separate window)"
+call :Opt 27 "Freeze diagnostic" "- dead windows, renderer OOM, commit pressure"
 echo.
 call :Div "Maintenance"
-call :Opt 27 "Re-apply app patch" "- v9, icons + bidi auto (after app update)"
-call :Opt 28 "Login clone account" "- one-time plan setup (light workers + T3 bridge)"
-call :Opt 29 "Remove clone shortcuts" "- Desktop + Start menu"
+call :Opt 28 "Re-apply app patch" "- v9, icons + bidi auto (after app update)"
+call :Opt 29 "Login clone account" "- one-time plan setup (light workers + T3 bridge)"
+call :Opt 30 "Remove clone shortcuts" "- Desktop + Start menu"
+call :Opt 31 "Rebuild clone Task Manager icons" "- colored rows in Task Manager - run after app updates"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -176,6 +178,7 @@ call :Opt 1 "Install or repair the GHOST shortcut" "- Desktop + repo folder"
 call :Opt 2 "Check for updates / update GHOST" "- from GitHub"
 call :Opt 3 "Spoof WMI hardware serials" "- BIOS, motherboard, disk, RAM + Bluetooth MAC"
 call :Opt 4 "Sync MCP registry to apps" "- ZCode, Windsurf, VS Code + MiniMax"
+call :Opt 5 "Build GHOST desktop app" "- GHOST.exe in the repo root"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -360,6 +363,11 @@ rem Renumbered 2026-10-29: local ids follow display order (1-29 ascending,
 rem grouped Launch / Reset / Sync + Chat Refresh / Watchers + Diagnostics /
 rem Maintenance [27]-[29]). Gids unchanged - old local -> gid map in
 rem CHANGELOG 2026-10-29; [29] Remove = gid 72 (2026-10-31).
+rem Renumbered 2026-11-10: "Launch ZCode Primary" (gid 82) inserted as local
+rem [9]; locals 9-29 shifted to 10-30. Gids unchanged - old->new map:
+rem 9-29 -> 10-30 (CHANGELOG 2026-11-10).
+rem Added 2026-11-11: [31] Rebuild clone Task Manager icons = gid 83 (new,
+rem appended in display order - no renumber, gids never move).
 set "RESOLVED="
 if "%~1"=="1"  set "RESOLVED=10"
 if "%~1"=="2"  set "RESOLVED=16"
@@ -369,27 +377,29 @@ if "%~1"=="5"  set "RESOLVED=64"
 if "%~1"=="6"  set "RESOLVED=18"
 if "%~1"=="7"  set "RESOLVED=70"
 if "%~1"=="8"  set "RESOLVED=14"
-if "%~1"=="9"  set "RESOLVED=11"
-if "%~1"=="10" set "RESOLVED=19"
-if "%~1"=="11" set "RESOLVED=20"
-if "%~1"=="12" set "RESOLVED=42"
-if "%~1"=="13" set "RESOLVED=65"
-if "%~1"=="14" set "RESOLVED=7"
-if "%~1"=="15" set "RESOLVED=12"
-if "%~1"=="16" set "RESOLVED=21"
-if "%~1"=="17" set "RESOLVED=43"
-if "%~1"=="18" set "RESOLVED=67"
-if "%~1"=="19" set "RESOLVED=68"
-if "%~1"=="20" set "RESOLVED=69"
-if "%~1"=="21" set "RESOLVED=15"
-if "%~1"=="22" set "RESOLVED=23"
-if "%~1"=="23" set "RESOLVED=22"
-if "%~1"=="24" set "RESOLVED=9"
-if "%~1"=="25" set "RESOLVED=25"
-if "%~1"=="26" set "RESOLVED=27"
-if "%~1"=="27" set "RESOLVED=13"
-if "%~1"=="28" set "RESOLVED=71"
-if "%~1"=="29" set "RESOLVED=72"
+if "%~1"=="9"  set "RESOLVED=82"
+if "%~1"=="10" set "RESOLVED=11"
+if "%~1"=="11" set "RESOLVED=19"
+if "%~1"=="12" set "RESOLVED=20"
+if "%~1"=="13" set "RESOLVED=42"
+if "%~1"=="14" set "RESOLVED=65"
+if "%~1"=="15" set "RESOLVED=7"
+if "%~1"=="16" set "RESOLVED=12"
+if "%~1"=="17" set "RESOLVED=21"
+if "%~1"=="18" set "RESOLVED=43"
+if "%~1"=="19" set "RESOLVED=67"
+if "%~1"=="20" set "RESOLVED=68"
+if "%~1"=="21" set "RESOLVED=69"
+if "%~1"=="22" set "RESOLVED=15"
+if "%~1"=="23" set "RESOLVED=23"
+if "%~1"=="24" set "RESOLVED=22"
+if "%~1"=="25" set "RESOLVED=9"
+if "%~1"=="26" set "RESOLVED=25"
+if "%~1"=="27" set "RESOLVED=27"
+if "%~1"=="28" set "RESOLVED=13"
+if "%~1"=="29" set "RESOLVED=71"
+if "%~1"=="30" set "RESOLVED=72"
+if "%~1"=="31" set "RESOLVED=83"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -402,6 +412,7 @@ if "%~1"=="1" set "RESOLVED=24"
 if "%~1"=="2" set "RESOLVED=26"
 if "%~1"=="3" set "RESOLVED=66"
 if "%~1"=="4" set "RESOLVED=77"
+if "%~1"=="5" set "RESOLVED=81"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -479,11 +490,17 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-80; 63 unused; 74 reserved for the deferred
+rem Runs one task by global id (1-83; 63 unused; 74 reserved for the deferred
 rem AutoClaw2 MCP watcher; 78 = the AutoClaw2 identity patch; 79/80 = the
-rem OpenCode light worker + clone login). Unknown ids
+rem OpenCode light worker + clone login; 81 = the desktop-app builder;
+rem 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe identity).
+rem Unknown ids
 rem print an error. Returns to caller.
-if "%~1"=="1"  (call :Run "src\windows\change_device_id.ps1" & exit /b)
+rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
+rem (-Mode Fingerprint), a READ-ONLY self-test that printed JSON and changed
+rem nothing - the menu row never reset anything. It now runs the actual reset
+rem (-Mode LegacyReset) behind the :ConfirmRun gate.
+if "%~1"=="1"  (call :ConfirmRun "Change Device ID - machine-wide identity reset" "src\windows\change_device_id.ps1" "This rewrites MachineGuid, SQM DeviceId, ProductId, RegisteredOwner, per-user session IDs + renames the PC to a DESKTOP-style name. A reboot is required. Registry backups + a restore script are generated first." -Mode LegacyReset & exit /b)
 if "%~1"=="2"  (call :Run "src\windows\reset_cursor.ps1" & exit /b)
 if "%~1"=="3"  (call :Run "src\windows\reset_devin.ps1" & exit /b)
 if "%~1"=="4"  (call :Run "src\windows\reset_trae.ps1" & exit /b)
@@ -558,6 +575,7 @@ if "%~1"=="75" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Inventory -Targ
 if "%~1"=="76" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Import -Apply -AllMissing -Target All & exit /b)
 if "%~1"=="77" (call :Run "tools\sync_mcp_registry.ps1" & exit /b)
 if "%~1"=="78" (call :RunWith "tools\patch_autoclaw2_identity.ps1" "Patch finished - relaunch the clones via their AutoClaw2 shortcuts for colored taskbar buttons." -WaitForClose & exit /b)
+if "%~1"=="81" (call :RunWith "tools\build_ghost_exe.ps1" "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or after moving this repo folder." & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
 if "%~1"=="46" (call :Detached "Cline Yellow" "-NoProfile" "src\windows\launch_cline_clone.ps1" "-Instance c2" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
@@ -595,7 +613,9 @@ if "%~1"=="61" (
 if "%~1"=="62" (call :Run "tools\install_opencode_clone_shortcuts.ps1" -Remove & exit /b)
 if "%~1"=="79" (call :Detached "OpenCode Light Worker" "-NoProfile" "src\windows\launch_opencode_cli_light.ps1" "" "Light worker opened in a separate window - type tasks there, empty input exits." "Headless CLI on the clone's own state. A fresh clone runs the FREE model - the Login row attaches its account." & exit /b)
 if "%~1"=="80" (call :Detached "OpenCode Clone Login" "-NoProfile" "src\windows\launch_opencode_cli_light.ps1" "-Login" "Login window opened - follow the interactive flow for THIS clone's account." "One-time per clone home: it writes the clone's own auth.json instead of running on the free model." & exit /b)
-if "%~1"=="66" (call :ConfirmRun "Spoof WMI hardware serials - BIOS, motherboard, disk, RAM + Bluetooth MAC" "src\windows\spoof_wmi_serials.ps1" & exit /b)
+if "%~1"=="66" (call :ConfirmRun "Spoof WMI hardware serials - BIOS, motherboard, disk, RAM + Bluetooth MAC" "src\windows\spoof_wmi_serials.ps1" "This changes system-wide hardware identity data. A WMI repository backup + restore script are generated first." & exit /b)
+if "%~1"=="82" (call :Detached "ZCode Primary" "-NoProfile" "src\windows\launch_zcode_primary.ps1" "" "Launcher opened in a separate window - it closes automatically when done." "Launches the Primary non-elevated - drag-drop breaks into elevated instances." & exit /b)
+if "%~1"=="83" (call :Run "tools\patch_zcode_exe_identity.ps1" -Target All & exit /b)
 call :UnknownTask "%~1"
 exit /b
 
@@ -709,15 +729,17 @@ pause
 exit /b
 
 :ConfirmRun
-rem Confirmation gate for system-level maintenance actions (gid 66 WMI serial
-rem spoof). choice reads the CONSOLE - not stdin - so menu chains and the .bat
-rem harness stay unaffected.
-rem Usage: call :ConfirmRun <label> <script> [args]
+rem Confirmation gate for system-level actions (gid 66 WMI serial spoof,
+rem gid 1 device-ID reset). choice reads the CONSOLE - not stdin - so menu
+rem chains and the .bat harness stay unaffected. 2026-11-10: the confirm text
+rem moved into the call site (%~3) so each action describes itself; script
+rem args start at %~4 (forwarded to :Run, max 6).
+rem Usage: call :ConfirmRun <label> <script> <confirm-text> [args]
 echo About to run: %~1
-echo This changes system-wide hardware identity data. A WMI repository backup + restore script are generated first.
+echo %~3
 choice /C YN /N /M "Continue? Y = run, N = cancel: "
 if errorlevel 2 goto ConfirmRunNo
-call :Run "%~2" %~3
+call :Run "%~2" %4 %5 %6 %7 %8 %9
 exit /b
 :ConfirmRunNo
 echo Cancelled - nothing was run.
