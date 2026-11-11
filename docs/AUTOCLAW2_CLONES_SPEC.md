@@ -117,8 +117,9 @@ READ (AUMID discovery), never written.
 - `tools/install_autoclaw2_clone_shortcuts.ps1` — Desktop + Start Menu
   shortcuts, per-clone icons + suffixed AUMIDs, `-Remove` support,
   `-RepairPrimaryAumid` (EC-C01) since 2026-11-06.
-- `tools/patch_autoclaw2_identity.ps1` — window identity patch (2026-11-06,
-  §7); tested by `tests/autoclaw2_identity_patch.Tests.ps1`.
+- `tools/patch_autoclaw2_identity.ps1` — window + notification-tray identity
+  patch (2026-11-06, §7; v2 2026-11-09 adds the tray anchor); tested by
+  `tests/autoclaw2_identity_patch.Tests.ps1`.
 - `tools/autoclaw2-{blue,yellow,green,red,orange}-branding\` — icons.
 
 ## 7. Known limitations / future work
@@ -145,6 +146,16 @@ READ (AUMID discovery), never written.
   3. `Uf.app.isPackaged&&Xqn(l,process.execPath)` →
      `Uf.app.isPackaged&&(process.env.ZWORK_CLONE_ICON&&l.setIcon(process.env.ZWORK_CLONE_ICON),Xqn(l,process.execPath))`
      (main-window title-bar/taskbar icon).
+  4. `t=r(e(n.iconPath));` →
+     `t=r(e(process.env.ZWORK_CLONE_ICON||n.iconPath));`
+     (inside the generic tray builder mTr: the NOTIFICATION-AREA tray icon,
+     patch v2 2026-11-09. Stock passes the app's own monochrome
+     trayTemplate.png - a Windows template asset every copy shares, which is
+     why all five tray icons stayed uncolored after the 2026-11-06 window
+     anchors landed; with ZWORK_CLONE_ICON set, createFromPath receives the
+     clone's tinted tray_icon.ico and the stock 18x18 resize/template-flag
+     logic is untouched. Overriding the read INSIDE mTr covers every call
+     site; the Find text is unique in the bundle.)
   The launcher then sets `ZWORK_AUMID=com.zhipuai.autoclaw2.cN`
   (matching the SHORTCUT AUMIDs, so pins and running windows group
   together) + `ZWORK_CLONE_ICON=tools\autoclaw2-<color>-branding\tray_icon.ico`
@@ -155,8 +166,13 @@ READ (AUMID discovery), never written.
   before/after); `node --check` gate through the app's own vendor node;
   verify-after re-read with auto-restore; `-Restore`; after an app update
   wipes the patch the script detects the stock bundle and re-applies with
-  a FRESH backup. The installer gained `-RepairPrimaryAumid` (EC-C01) in
-  the same pass. Inherited quirk (stock behaviour, unchanged): the
+  a FRESH backup. Patch v2 (2026-11-09) skips anchors whose replacement is
+  already present (per-anchor resume), so a v1-patched bundle upgrades in
+  place: only the new tray anchor is spliced, the fresh backup holds the
+  v1-patched file, and the marker records `preDoneAnchors` so `-Restore`
+  verifies against that pre-upgrade state. The installer gained
+  `-RepairPrimaryAumid` (EC-C01) in the same pass.
+  Inherited quirk (stock behaviour, unchanged): the
   window's `relaunchCommand` still points at AutoClaw2.exe, so a taskbar
   "relaunch" on a clone button would open the Primary profile. The new
   env vars are deliberately NOT added to the bundle's agent-shell env
@@ -165,6 +181,25 @@ READ (AUMID discovery), never written.
   shared "AutoClaw" (the renderer `<title>` would re-override it;
   `page-title-updated` suppression is out of scope — playbook feature #6
   remains degraded, reported).
+
+  **Taskbar grouping needs a KICK (2026-11-09).** The patched
+  `setAppDetails` call writes `System.AppUserModel.ID` on the window at
+  construction time, but the shell has already created that window's
+  taskbar group by then and does NOT rebuild it on a plain property
+  write - two clones keep ONE taskbar button while their stores read
+  `...c1` / `...c5` (live-reproduced: c1 + c5 running, distinct stores,
+  one AutoClaw button). `launch_autoclaw2_clone.ps1` therefore KICKS the
+  window after the launch (temp `<aumid>.kick` -> real `<aumid>`): the
+  same window-property route and kick idiom as the ZCode suite, verified
+  with a read-back and a FAILED verdict, never silent. Spacing is
+  load-bearing - a 300-400 ms temp->real pair can be coalesced by the
+  shell and leave the window with NO button at all (reproduced on c5; a
+  slower kick restored it), so the writes are 1.2 s apart with a settle
+  re-read. Live-verified the same day: four instances (blue / yellow /
+  green / orange) -> four separate taskbar buttons with their own tinted
+  icons. The kick also works on a STOCK bundle: window-level AUMID has
+  top precedence, so the button separates even when the app never sets
+  the value (the icon then stays stock).
 - If a future AutoClaw2 update adds a shared-port listener, revisit a port
   lever (none observed through v2.1.1.262 with 5 copies).
 - Each clone's first window shows first-run onboarding: one manual sign-in

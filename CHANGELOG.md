@@ -7,6 +7,80 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **AutoClaw2 chat import: the menu rows [9]/[10] never worked + no batch import**
+  (2026-11-09): `GHOST.bat :Run` forwarded only 3 script args, so gid 75 ran
+  Inventory as `-Mode Inventory -Target` (missing-argument error) and gid 76
+  ran Import as `-Mode Import -Apply` — the script's "needs -SessionId"
+  failure; the menu's only chat-import affordance always exited without
+  copying anything (today's real imports were manual per-session runs, and the
+  c3 attempt was refused target-running mid-sequence). `:Run` now forwards 8
+  args and `sync_autoclaw2_chats.ps1` gained `-AllMissing` (Import mode): per
+  target, every non-IM source session the target has not already imported —
+  the same diff the Inventory report prints — dry-run plans + `-Apply` writes,
+  per-call backups/audit untouched, exit 2 only when every target refused.
+  gid 76 now runs `-Mode Import -Apply -AllMissing -Target All`; the [10] row
+  tail warns that clone windows must be closed (D10 gate). Batch dry-run +
+  full .bat harness verified 2026-11-09.
+- **AutoClaw2 clone windows shared ONE taskbar button** (2026-11-09): the
+  2026-11-06 identity patch set `System.AppUserModel.ID` on every window
+  correctly (stores read `com.zhipuai.autoclaw2.c1` and `.c5` while both
+  windows ran), but the shell creates a window's taskbar group at window
+  construction and does not rebuild it on a plain property write - so all
+  clones stayed merged into a single AutoClaw button.
+  `launch_autoclaw2_clone.ps1` now KICKS the group after the launch (temp
+  `<aumid>.kick` -> real `<aumid>`, read-back verified, loud FAILED verdict
+  on mismatch) - the ZCode idiom applied to the window property store, with
+  `PropVariantClear` imported from `ole32` (ground truth #6). The kick
+  targets only its own window (launched PID first, expected AUMID second).
+  Spacing is load-bearing: a 300-400 ms temp->real pair can be coalesced by
+  the shell and drop the button entirely (reproduced live on c5; a slower
+  kick restored it), so the writes are 1.2 s apart plus a settle re-read.
+  Live-verified: c1/c2/c3/c5 -> four separate buttons with their tinted
+  icons. New `tests/autoclaw2_launcher_kick.Tests.ps1` (7 green).
+- **AutoClaw2 chat import could not apply against the live 4.0.0 schema**
+  (2026-11-09): `chat_import` copied `work_runs` rows verbatim, but the real
+  schema carries `CREATE UNIQUE INDEX uniq_work_accept_order ON
+  work_runs(accept_order)` — globally unique per account DB, not per session —
+  so every apply onto a target with existing runs failed with `UNIQUE
+  constraint failed: work_runs.accept_order` (the dry-run passed because it
+  never touches the DB; both failed live applies rolled back cleanly = C6
+  held, no partial rows). `ghost.autoclaw2.chat_import` now remaps
+  `accept_order` from the target's `MAX` tail preserving the source's relative
+  order (the app's queue ordering reads `(session_id, status, accept_order)`,
+  and `content_hash` excludes `accept_order` so idempotency is unaffected).
+  The unittest fixture now models the real index (per-profile accept_order
+  counter) and carries a regression test — `python -m unittest discover -s
+  tests/python`: 155 green. First live chat imports executed on the back of
+  the fix: Primary→c1 `[import] Autoclaw2 Failure Analys` (65 entries / 264
+  events / 19 artifacts, import id a7f72373…) and `[import] Hi Ping` (6
+  entries / 7 events, import id 420d9945…), verify-after matched, backups in
+  `c1\.autoclaw2-sync-backups\`, revertable via `-Revert -ImportId`.
+
+### Added
+- **AutoClaw2 notification-tray identity — identity patch v2** (2026-11-09):
+  `tools/patch_autoclaw2_identity.ps1` splices a FOURTH byte-anchor inside the
+  generic tray builder (`mTr`): `t=r(e(n.iconPath))` ->
+  `t=r(e(process.env.ZWORK_CLONE_ICON||n.iconPath))` — the notification-area
+  tray icon now follows `ZWORK_CLONE_ICON` too (the stock bundle passes its own
+  monochrome `trayTemplate.png` to every tray, which is why all five tray icons
+  stayed uncolored after the 2026-11-06 window anchors landed). The splice core
+  is resumable per anchor: an anchor whose replacement text is already present
+  is skipped (recorded as `preDoneAnchors` in the marker) instead of failing as
+  drift, so a v1-patched bundle upgrades in place with a fresh pre-upgrade
+  backup and `-Restore` verifies against that state. Anchor 4 is verified
+  unique in the 4.0.0 bundle; the Pester suite gains the tray fixture, the
+  resume test and functional node assertions (tray source follows the env var,
+  stock keeps `trayTemplate.png`).
+- **Netlify MCP server added to the central registry** (2026-11-08): the
+  29th entry `netlify-mcp` in `tools/mcp/master-mcp.json` (stdio, `npx -y
+  @netlify/mcp`, unscoped — every target). Token template = the official
+  PAT env var `${NETLIFY_PERSONAL_ACCESS_TOKEN}` (env-guard: unset =
+  key omitted loudly, never written empty; fill via `setx
+  NETLIFY_PERSONAL_ACCESS_TOKEN <PAT>` user-scope like the other 26
+  tokens). Requires Node >= 22 (local node 24.19.0). Registry edit only —
+  sync to the agents' configs runs on a later instruction.
+
 ## [1.4.0] - 2026-11-07
 
 ### Security
