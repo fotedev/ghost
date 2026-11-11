@@ -42,6 +42,16 @@ jobs:
           }
           Write-Host "Tag $tag -> CHANGELOG line $($section.LineNumber): $($section.Line)"
 
+      - name: Build GHOST.exe desktop app
+        shell: pwsh
+        run: |
+          ./tools/build_ghost_exe.ps1 -OutDir .
+          if (-not (Test-Path -LiteralPath "GHOST.exe")) {
+            Write-Error "GHOST.exe build failed - file missing"
+            exit 1
+          }
+          Write-Host "Built GHOST.exe ($((Get-Item GHOST.exe).Length) bytes)"
+
       - name: Build ZIP (git archive = tracked files, mirrors update_ghost.ps1's ZIP copy)
         shell: pwsh
         run: |
@@ -80,7 +90,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:GITHUB_REF_NAME
-          gh release create "$tag" "ghost-$tag.zip" --title "GHOST $tag" --notes-file release-notes.md --verify-tag
+          gh release create "$tag" "ghost-$tag.zip" "GHOST.exe" --title "GHOST $tag" --notes-file release-notes.md --verify-tag
 
       - name: Verify-after - the asset is on the release (never silent-success)
         env:
@@ -91,6 +101,10 @@ jobs:
           $assets = @(gh release view "$tag" --json assets --jq '.assets[].name')
           if ($assets -notcontains "ghost-$tag.zip") {
             Write-Error "ZIP asset missing from release $tag (assets: $($assets -join ', '))"
+            exit 1
+          }
+          if ($assets -notcontains "GHOST.exe") {
+            Write-Error "GHOST.exe asset missing from release $tag (assets: $($assets -join ', '))"
             exit 1
           }
           Write-Host "Verified: release $tag carries ghost-$tag.zip"
