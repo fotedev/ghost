@@ -31,6 +31,57 @@ Describe 'codex_toml module (dot-sourced)' {
     }
 }
 
+Describe 'Select-CodexView (codex view filter)' {
+    BeforeAll {
+        function New-View([string]$json) {
+            return ($json | ConvertFrom-Json)
+        }
+    }
+
+    It 'drops remote entries loudly (left untouched in the TOML)' {
+        $view = New-View '{"r":{"type":"http","url":"https://x/mcp","enabled":true}}'
+        $sel = Select-CodexView $view
+        @($sel.View.PSObject.Properties).Count | Should -Be 0
+        @($sel.Skipped).Count                    | Should -Be 1
+        $sel.Skipped[0].Name                     | Should -Be 'r'
+        $sel.Skipped[0].Reason                   | Should -Match 'remote entry'
+    }
+
+    It 'drops registry-disabled entries entirely (presence == enabled)' {
+        $view = New-View '{"off":{"command":"npx","args":["-y","pkg"],"enabled":false}}'
+        $sel = Select-CodexView $view
+        @($sel.View.PSObject.Properties).Count | Should -Be 0
+        @($sel.Skipped).Count                    | Should -Be 1
+        $sel.Skipped[0].Reason                   | Should -Match 'registry-disabled'
+    }
+
+    It 'keeps enabled entries and strips type/enabled/disabled' {
+        $view = New-View '{"on":{"type":"stdio","command":"npx","args":["-y","pkg"],"enabled":true,"disabled":false}}'
+        $sel = Select-CodexView $view
+        @($sel.View.PSObject.Properties).Count | Should -Be 1
+        @($sel.Skipped).Count                    | Should -Be 0
+        $e = $sel.View.PSObject.Properties['on'].Value
+        $e.command                               | Should -Be 'npx'
+        $e.PSObject.Properties['type']           | Should -BeNullOrEmpty
+        $e.PSObject.Properties['enabled']        | Should -BeNullOrEmpty
+        $e.PSObject.Properties['disabled']       | Should -BeNullOrEmpty
+    }
+
+    It 'keeps entries with no enabled field (registry default = enabled)' {
+        $view = New-View '{"plain":{"command":"npx"}}'
+        $sel = Select-CodexView $view
+        $sel.View.PSObject.Properties['plain'].Value.command | Should -Be 'npx'
+        @($sel.Skipped).Count | Should -Be 0
+    }
+
+    It 'accepts the string form of false (JSON/overlay quirks)' {
+        $view = New-View '{"off":{"command":"npx","enabled":"false"}}'
+        $sel = Select-CodexView $view
+        @($sel.View.PSObject.Properties).Count | Should -Be 0
+        @($sel.Skipped).Count                  | Should -Be 1
+    }
+}
+
 Describe 'ConvertFrom-CodexTomlText (light TOML parser)' {
     It 'parses mcp_servers tables into the synthetic JSON-shaped view' {
         $toml = @'

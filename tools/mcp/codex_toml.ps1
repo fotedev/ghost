@@ -16,6 +16,9 @@
     - Write-CodexTomlFile: strips every existing [mcp_servers.*] block from the
       original text and appends the merged sections; the original line ending
       is detected and preserved.
+    - Select-CodexView: the codex-specific view filter (remote entries and
+      registry-disabled entries dropped, type/enabled/disabled stripped from
+      kept entries). Runs BEFORE any per-app transform can lose 'enabled'.
   Light value grammar: basic/literal strings, integers, booleans, flat string
   arrays. The only nested table handled is [mcp_servers.<n>.env].
   Never reads secret VALUES into anything but the merge pipeline's memory.
@@ -114,6 +117,45 @@ function ConvertTo-CodexTomlSection([string]$name, $entry) {
         }
     }
     return ,$lines
+}
+
+function Select-CodexView($View) {
+    # Codex config.toml has no type/enabled/disabled fields - presence == enabled - and
+    # stdio is the only fully-supported transport here (no headers sub-table writer), so:
+    #   - remote (url) entries are DROPPED loudly (left untouched in the file),
+    #   - registry entries marked enabled:false are DROPPED entirely: never written,
+    #     never removed - an existing app section for them survives untouched,
+    #   - kept entries lose type/enabled/disabled (they are not TOML config keys).
+    # Returns @{ View = <filtered container>; Skipped = @(@{ Name; Reason }) }.
+    # MUST run on the view BEFORE any per-app transform strips 'enabled'.
+    $kept = New-Object PSObject
+    $skipped = @()
+    foreach ($vp in @($View.PSObject.Properties)) {
+        $entry = $vp.Value
+        $reason = ''
+        if ($null -ne $entry.PSObject.Properties['url']) {
+            $reason = 'remote entry (codex syncs stdio servers only)'
+        }
+        else {
+            $ep = $entry.PSObject.Properties['enabled']
+            if ($null -ne $ep) {
+                $isOn = $true
+                if ($ep.Value -is [string]) { $isOn = ([string]$ep.Value).ToLowerInvariant() -notin @('false', '0', 'no', '') }
+                else { $isOn = [bool]$ep.Value }
+                if (-not $isOn) { $reason = 'registry-disabled (presence == enabled in TOML)' }
+            }
+        }
+        if ($reason -ne '') {
+            $skipped += @{ Name = $vp.Name; Reason = $reason }
+            continue
+        }
+        foreach ($f in @('type', 'enabled', 'disabled')) {
+            $fp = $entry.PSObject.Properties[$f]
+            if ($null -ne $fp) { $entry.PSObject.Properties.Remove($f) }
+        }
+        $kept | Add-Member -NotePropertyName $vp.Name -NotePropertyValue $entry
+    }
+    return @{ View = $kept; Skipped = $skipped }
 }
 
 function Write-CodexTomlFile([string]$path, $workRoot, [string]$originalText) {

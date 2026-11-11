@@ -321,9 +321,8 @@ function ConvertTo-AppEntry($canonicalEntry, [string]$mode) {
 
     if ($mode -eq 'codex') {
         # Codex config.toml has no type/enabled/disabled fields - presence == enabled.
-        Remove-PropIfExists $canonicalEntry 'type'
-        Remove-PropIfExists $canonicalEntry 'enabled'
-        Remove-PropIfExists $canonicalEntry 'disabled'
+        # The field strip + the registry-disabled skip live in Select-CodexView
+        # (tools\mcp\codex_toml.ps1) so they run BEFORE this transform loses 'enabled'.
         return $canonicalEntry
     }
 
@@ -640,19 +639,14 @@ function Sync-OneFile([string]$targetName, $spec, [string]$file, $registryServer
         #   - remote (url) entries are SKIPPED loudly - left untouched,
         #   - registry entries marked enabled:false are left alone ENTIRELY - never
         #     written, never removed; existing app sections for them survive untouched.
-        foreach ($vp in @($view.PSObject.Properties)) {
-            $urlp = $vp.Value.PSObject.Properties['url']
-            $ep   = $vp.Value.PSObject.Properties['enabled']
-            $reason = ''
-            if ($null -ne $urlp)                            { $reason = 'remote entry (codex syncs stdio servers only)' }
-            elseif ($null -ne $ep -and -not $ep.Value)       { $reason = 'registry-disabled (presence == enabled in TOML)' }
-            if ($reason) {
-                $skipName = $vp.Name
-                $view.PSObject.Properties.Remove($skipName)
-                Write-Host ("    [codex] SKIP '{0}': {1} - left untouched." -f $skipName, $reason) -ForegroundColor DarkYellow
-                Add-AuditLine -target $targetName -file $file -server $skipName -action 'skip' -ok:$true -note $reason
-            }
+        # Select-CodexView (pure, unit-tested) does the filtering on the canonical
+        # entry BEFORE ConvertTo-AppEntry's codex transform (which cannot see 'enabled').
+        $sel = Select-CodexView $view
+        foreach ($s in $sel.Skipped) {
+            Write-Host ("    [codex] SKIP '{0}': {1} - left untouched." -f $s.Name, $s.Reason) -ForegroundColor DarkYellow
+            Add-AuditLine -target $targetName -file $file -server $s.Name -action 'skip' -ok:$true -note $s.Reason
         }
+        $view = $sel.View
     }
     if (@($view.PSObject.Properties).Count -eq 0) {
         Write-Host ("[OK:{0}] registry has no servers scoped to this target - nothing to do." -f $targetName) -ForegroundColor Green
