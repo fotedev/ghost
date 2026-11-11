@@ -82,15 +82,15 @@ $PrimaryZCode = Join-Path $UserProfile '.zcode'   # contains .zcode\ (primary pr
 # Third = Yellow, Fourth = Green per the user's source artwork order.
 $InstanceMap = @{
     'Second' = @{ Home = 'ZCodeSecondHome';  UserData = 'ZCode-Second'; AumidSuffix = '2'
-                  BrandingRepo = 'zcode-blue-branding';   AccentHex = '#066BCB'; DisplayName = 'Blue' }
+                  BrandingRepo = 'zcode-blue-branding';   AccentHex = '#066BCB'; DisplayName = 'Blue';   ExeName = 'ZCode-Blue.exe' }
     'Third'  = @{ Home = 'ZCodeThirdHome';   UserData = 'ZCode-Third';  AumidSuffix = '3'
-                  BrandingRepo = 'zcode-yellow-branding'; AccentHex = '#D4AA10'; DisplayName = 'Yellow' }
+                  BrandingRepo = 'zcode-yellow-branding'; AccentHex = '#D4AA10'; DisplayName = 'Yellow'; ExeName = 'ZCode-Yellow.exe' }
     'Fourth' = @{ Home = 'ZCodeFourthHome';  UserData = 'ZCode-Fourth'; AumidSuffix = '4'
-                  BrandingRepo = 'zcode-green-branding';  AccentHex = '#13826A'; DisplayName = 'Green' }
+                  BrandingRepo = 'zcode-green-branding';  AccentHex = '#13826A'; DisplayName = 'Green';  ExeName = 'ZCode-Green.exe' }
     'Fifth'  = @{ Home = 'ZCodeFifthHome';   UserData = 'ZCode-Fifth';  AumidSuffix = '5'
-                  BrandingRepo = 'zcode-red-branding';    AccentHex = '#CA0607'; DisplayName = 'Red' }
+                  BrandingRepo = 'zcode-red-branding';    AccentHex = '#CA0607'; DisplayName = 'Red';    ExeName = 'ZCode-Red.exe' }
     'Sixth'  = @{ Home = 'ZCodeSixthHome';   UserData = 'ZCode-Sixth';  AumidSuffix = '6'
-                  BrandingRepo = 'zcode-orange-branding'; AccentHex = '#CB5D06'; DisplayName = 'Orange' }
+                  BrandingRepo = 'zcode-orange-branding'; AccentHex = '#CB5D06'; DisplayName = 'Orange'; ExeName = 'ZCode-Orange.exe' }
 }
 $cfg = $InstanceMap[$Instance]
 
@@ -100,6 +100,24 @@ $CloneUserData  = Join-Path $AppData $cfg.UserData
 $CloneSession   = Join-Path $CloneUserData 'session'
 # Strings that identify THIS clone's processes in any CommandLine (live-check).
 $CloneMarkers   = @("*$($cfg.UserData)*", "*$($cfg.Home)*")
+
+# Copy-family predicates (2026-11-11): clones launch from per-color exe copies
+# (ZCode-Blue.exe .. ZCode-Orange.exe, built by tools\patch_zcode_exe_identity.ps1
+# for the Task Manager identity). EVERY ZCode process enumeration in this script
+# must match the whole copy family - a bare Name='ZCode.exe' filter silently
+# drops every clone running from its copy (unguarded RAM count, dead PID diff,
+# no window stamping). Empty CommandLine stays a main candidate (WMI race).
+# NOTE: the unquoted-path branch uses [^"]* (NOT [^\s"]*) so machine-wide
+# installs under C:\Program Files\... (path contains a space) match too - the
+# old [^\s"]* class could never cross that space, a silent pre-existing gap.
+$script:ZcodeFamilyWmiFilter = "Name LIKE 'ZCode%'"
+function Test-ZcodeMainCmdline {
+    param([string]$Cmdline)
+    $c = ([string]$Cmdline).Trim()
+    return ([string]::IsNullOrWhiteSpace($c)) -or
+        ($c -match '^"[^"]*ZCode(?:-[A-Za-z]+)?\.exe"$') -or
+        ($c -match '^[A-Za-z]:\\[^"]*ZCode(?:-[A-Za-z]+)?\.exe$')
+}
 
 # 0) RAM guard (2026-10-28): four+ concurrent instances exhausted the commit
 #    limit once (renderer-OOM freeze, verified 2026-09-25) and the Start Plan
@@ -162,16 +180,15 @@ function Show-GhostRamGuardDialog {
     }
 }
 function Get-ZcodeMainIds {
-    @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue | Where-Object {
-        $c = ([string]$_.CommandLine).Trim()
+    @(Get-CimInstance Win32_Process -Filter $script:ZcodeFamilyWmiFilter -ErrorAction SilentlyContinue | Where-Object {
         # Empty CommandLine is a known WMI race on fresh mains: keep as candidate.
-        ([string]::IsNullOrWhiteSpace($c)) -or ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+        Test-ZcodeMainCmdline ([string]$_.CommandLine)
     } | Select-Object -ExpandProperty ProcessId)
 }
 function Test-ThisCloneRunning {
     # Same classification as the Telegram lock check (step 2c): walk every
     # main's process subtree and look for this clone's markers.
-    $allProcs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)
+    $allProcs = @(Get-CimInstance Win32_Process -Filter $script:ZcodeFamilyWmiFilter -ErrorAction SilentlyContinue)
     if ($allProcs.Count -eq 0) { return $false }
     $byParent = @{}
     foreach ($p in $allProcs) {
@@ -179,10 +196,7 @@ function Test-ThisCloneRunning {
         if (-not $byParent.ContainsKey($ppid)) { $byParent[$ppid] = @() }
         $byParent[$ppid] += $p
     }
-    foreach ($m in @($allProcs | Where-Object {
-        $c = ([string]$_.CommandLine).Trim()
-        ([string]::IsNullOrWhiteSpace($c)) -or ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
-    })) {
+    foreach ($m in @($allProcs | Where-Object { Test-ZcodeMainCmdline ([string]$_.CommandLine) })) {
         $seen = @{}; $queue = New-Object System.Collections.Queue
         $queue.Enqueue([int]$m.ProcessId) | Out-Null
         while ($queue.Count -gt 0) {
@@ -207,7 +221,7 @@ if ($mainsNow.Count -ge $MaxConcurrent) {
     if (Test-ThisCloneRunning) {
         Write-Host ("[ram-guard] {0} is already running - this relaunch only focuses its window." -f $cfg.DisplayName)
     } else {
-        $zcodeProcs = @(Get-Process -Name ZCode -ErrorAction SilentlyContinue)
+        $zcodeProcs = @(Get-Process -Name 'ZCode*' -ErrorAction SilentlyContinue)
         $zcodeCommit = ($zcodeProcs | Measure-Object -Property PrivateMemorySize64 -Sum).Sum / 1MB
         $osCommit = Get-CimInstance Win32_OperatingSystem
         $guardLines = @(
@@ -424,7 +438,7 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
     # on its next restart.
     try {
         $cloneLive = $false
-        $allProcs = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue)
+        $allProcs = @(Get-CimInstance Win32_Process -Filter $script:ZcodeFamilyWmiFilter -ErrorAction SilentlyContinue)
         if ($allProcs.Count -gt 0) {
             $byParent = @{}
             foreach ($p in $allProcs) {
@@ -432,11 +446,7 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
                 if (-not $byParent.ContainsKey($ppid)) { $byParent[$ppid] = @() }
                 $byParent[$ppid] += $p
             }
-            foreach ($m in @($allProcs | Where-Object {
-                $c = ([string]$_.CommandLine).Trim()
-                # Empty CommandLine is a known WMI race on fresh mains: keep as candidate.
-                ([string]::IsNullOrWhiteSpace($c)) -or ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
-            })) {
+            foreach ($m in @($allProcs | Where-Object { Test-ZcodeMainCmdline ([string]$_.CommandLine) })) {
                 $seen = @{}; $queue = New-Object System.Collections.Queue
                 $queue.Enqueue([int]$m.ProcessId) | Out-Null
                 while ($queue.Count -gt 0) {
@@ -575,6 +585,34 @@ if (Test-Path -LiteralPath $TaskbarWatcherScript) {
     Write-Host '[watchers] tools\watch_zcode_taskbar.ps1 not found - skipping.' -ForegroundColor Yellow
 }
 
+# 2f) Per-clone Task Manager identity (2026-11-11): ensure the ZCode-<Color>.exe
+#     copy in the install dir is present and fresh, then launch THIS clone from
+#     the copy. Task Manager renders background-process groups from the
+#     executable IMAGE itself (embedded icon + VERSIONINFO FileDescription), so
+#     every instance on the stock ZCode.exe renders as an identical stock
+#     "ZCode (N)" row no matter what the taskbar/shortcut/window stack does.
+#     The copy carries the clone's branding icon + "ZCode <Color>" name
+#     (tools\patch_zcode_exe_identity.ps1 builds, verifies and drift-heals it;
+#     the marker fast-check makes a fresh copy cost ~nothing per launch).
+#     The Primary keeps the stock exe. Best-effort by contract: any failure
+#     falls back to the stock exe with a loud warning - never blocks the launch.
+$ExeIdentityTool = Join-Path $PSScriptRoot '..\..\tools\patch_zcode_exe_identity.ps1'
+$LaunchExe = $ZCodeExe
+$CloneExe = Join-Path (Split-Path -Parent $ZCodeExe) $cfg.ExeName
+Write-Host ''
+Write-Host 'Step 2f) Task Manager identity - per-color exe copy'
+if (Test-Path -LiteralPath $ExeIdentityTool) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExeIdentityTool -Target $Instance -InstallDir (Split-Path -Parent $ZCodeExe)
+    if (($LASTEXITCODE -eq 0) -and (Test-Path -LiteralPath $CloneExe)) {
+        $LaunchExe = $CloneExe
+        Write-Host "[launch] $($cfg.DisplayName) starts from $($cfg.ExeName) (colored Task Manager group)." -ForegroundColor Green
+    } else {
+        Write-Host "[launch] exe copy unavailable (tool exit $LASTEXITCODE) - starting from the stock ZCode.exe; Task Manager keeps the stock row." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host '[launch] tools\patch_zcode_exe_identity.ps1 not found - starting from the stock ZCode.exe.' -ForegroundColor Yellow
+}
+
 # 3) Launch the clone detached from THIS console.
 # Why: ZCode.exe attaches to the parent console (AttachConsole) for its stdout
 # logging. A plain Start-Process keeps this window as that console, so ZCode
@@ -632,12 +670,11 @@ Write-Host "[launch] DATA_BASE_DIR=$($env:ZCODE_DATA_BASE_DIR)"
 Write-Host "[launch] USER_DATA_DIR=$($env:ZCODE_DESKTOP_USER_DATA_DIR)"
 Write-Host "[launch] SESSION_DIR=$($env:ZCODE_DESKTOP_SESSION_DATA_DIR)"
 
-$beforeMains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue | Where-Object {
-    $c = ([string]$_.CommandLine).Trim()
+$beforeMains = @(Get-CimInstance Win32_Process -Filter $script:ZcodeFamilyWmiFilter -ErrorAction SilentlyContinue | Where-Object {
     # Empty CommandLine is a known WMI race on fresh mains: keep as candidate.
-    ([string]::IsNullOrWhiteSpace($c)) -or ($c -match '^"[^"]*ZCode\.exe"$') -or ($c -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+    Test-ZcodeMainCmdline ([string]$_.CommandLine)
 } | Select-Object -ExpandProperty ProcessId)
-$exeArgs = @('/c', 'start', '""', "`"$ZCodeExe`"")
+$exeArgs = @('/c', 'start', '""', "`"$LaunchExe`"")
 if ($LowRam) {
     $exeArgs += '--disable-gpu'
     Write-Host '[launch] -LowRam: --disable-gpu passed (saves the per-instance GPU process; software rendering).' -ForegroundColor Yellow
@@ -648,10 +685,9 @@ $null = Start-Process -FilePath "$env:ComSpec" -ArgumentList $exeArgs -WindowSty
 $newPid = $null
     for ($i = 0; $i -lt 15; $i++) {
         Start-Sleep -Seconds 1
-        $nowMains = @(Get-CimInstance Win32_Process -Filter "Name='ZCode.exe'" -ErrorAction SilentlyContinue | Where-Object {
+        $nowMains = @(Get-CimInstance Win32_Process -Filter $script:ZcodeFamilyWmiFilter -ErrorAction SilentlyContinue | Where-Object {
             # (empty CommandLine = WMI race; keep as candidate)
-            $cc = ([string]$_.CommandLine).Trim()
-            ([string]::IsNullOrWhiteSpace($cc)) -or ($cc -match '^"[^"]*ZCode\.exe"$') -or ($cc -match '^[A-Za-z]:\\[^\s"]*ZCode\.exe$')
+            Test-ZcodeMainCmdline ([string]$_.CommandLine)
         } | Select-Object -ExpandProperty ProcessId)
     $diff = @($nowMains | Where-Object { $beforeMains -notcontains $_ })
     if ($diff.Count -gt 0) { $newPid = $diff[0]; break }
@@ -736,7 +772,7 @@ public class ZcodeWindowAumid {
 # transient relauncher process that the single-instance focus path spawns.
 $wantTitle = "ZCode $($cfg.DisplayName)"
 function Resolve-InstanceWindow {
-    $p = Get-Process -Name ZCode -ErrorAction SilentlyContinue |
+    $p = Get-Process -Name 'ZCode*' -ErrorAction SilentlyContinue |
         Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -eq $wantTitle } |
         Select-Object -First 1
     if (-not $p -and $newPid) {
