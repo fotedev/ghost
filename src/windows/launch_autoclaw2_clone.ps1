@@ -83,6 +83,110 @@ $ProfileDir = Join-Path $ClonesRoot $Instance
 # tools\install_autoclaw2_clone_shortcuts.ps1 (one installer, one vocabulary).
 $InstanceColor = @{ c1 = 'blue'; c2 = 'yellow'; c3 = 'green'; c4 = 'red'; c5 = 'orange' }
 
+# --- Window identity helper --------------------------------------------------
+# The patched bundle sets System.AppUserModel.ID on the window BEFORE it is
+# shown (setAppDetails, Xqn, right after the BrowserWindow ctor), but the shell
+# has already created the taskbar group for the new window by then and does
+# NOT rebuild it on a plain property write - two clones therefore keep sharing
+# ONE taskbar button even though their window stores differ (live 2026-11-09:
+# c1 + c5 both running, stores read com.zhipuai.autoclaw2.c1 and .c5, taskbar
+# showed a single AutoClaw button). The fix is the ZCode KICK: write a
+# temporary AUMID, then the real one - a real property CHANGE makes the shell
+# tear down and recreate the group. Same window-property route as
+# tools\watch_zcode_taskbar.ps1 (window-level AUMID has top precedence), so it
+# also works on a stock bundle, where the app never sets the value at all.
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+public class Ac2WindowIdentity {
+    [StructLayout(LayoutKind.Sequential)] public struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Explicit)]
+    public struct PROPVARIANT {
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(8)] public IntPtr pointerValue;
+        [FieldOffset(8)] public long longValue;
+    }
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore {
+        void GetCount(out uint cProps);
+        void GetAt(uint iProp, out PROPERTYKEY pkey);
+        void GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+        void SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
+        void Commit();
+    }
+    [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+    // oleaut32 dropped this export in the 2026-07 CU (ground truth #6) - ole32 keeps it
+    [DllImport("ole32.dll")] static extern int PropVariantClear(ref PROPVARIANT pv);
+
+    delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassNameW(IntPtr hWnd, StringBuilder sb, int n);
+
+    static readonly PROPERTYKEY PKEY_AUMID = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
+    static Guid IID_IPropertyStore = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+
+    public static string Read(IntPtr hwnd) {
+        IPropertyStore store;
+        int hr = SHGetPropertyStoreForWindow(hwnd, ref IID_IPropertyStore, out store);
+        if (hr != 0) return "<hr=0x" + hr.ToString("X") + ">";
+        PROPVARIANT back;
+        var key = PKEY_AUMID;
+        store.GetValue(ref key, out back);
+        string result;
+        if (back.vt == 31) result = Marshal.PtrToStringUni(back.pointerValue);
+        else if (back.vt == 0) result = "";
+        else result = "<vt=" + back.vt + ">";
+        PropVariantClear(ref back);
+        return result;
+    }
+
+    public static string Stamp(IntPtr hwnd, string aumid) {
+        IPropertyStore store;
+        int hr = SHGetPropertyStoreForWindow(hwnd, ref IID_IPropertyStore, out store);
+        if (hr != 0) return "<hr=0x" + hr.ToString("X") + ">";
+        IntPtr pStr = Marshal.StringToCoTaskMemUni(aumid);
+        try {
+            PROPVARIANT pv = new PROPVARIANT();
+            pv.vt = 31; // VT_LPWSTR
+            pv.pointerValue = pStr;
+            var key = PKEY_AUMID;
+            store.SetValue(ref key, ref pv);
+            store.Commit();
+        } finally { Marshal.FreeCoTaskMem(pStr); }
+        return Read(hwnd);
+    }
+
+    // Ownerless, visible Chrome_WidgetWin_1 windows owned by AutoClaw2.exe
+    // -> "pid|hwnd|aumid". The owner test skips tool windows; the process
+    // name test scopes the scan to this suite's app only.
+    public static string[] FindWindows() {
+        var list = new List<string>();
+        EnumWindows(delegate(IntPtr h, IntPtr l) {
+            if (!IsWindowVisible(h)) return true;
+            if (GetWindow(h, 4) != IntPtr.Zero) return true; // GW_OWNER
+            var cls = new StringBuilder(256);
+            GetClassNameW(h, cls, 256);
+            if (cls.ToString() != "Chrome_WidgetWin_1") return true;
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            try {
+                var p = Process.GetProcessById((int)pid);
+                if (!string.Equals(p.ProcessName, "AutoClaw2", StringComparison.OrdinalIgnoreCase)) return true;
+            } catch { return true; }
+            list.Add(pid + "|" + h.ToInt64() + "|" + Read(h));
+            return true;
+        }, IntPtr.Zero);
+        return list.ToArray();
+    }
+}
+"@
+
 # --- Status mode ------------------------------------------------------------
 if ($Status) {
     Write-Host "=== AutoClaw2 clone '$Instance' status ==="
@@ -218,7 +322,7 @@ Write-Host "  ZWORK_AUMID           = $env:ZWORK_AUMID"
 Write-Host "  ZWORK_CLONE_ICON      = $(if ($env:ZWORK_CLONE_ICON) { $env:ZWORK_CLONE_ICON } else { '<unset>' })"
 Write-Host "  $identityNote"
 
-Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath)
+$launched = Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath) -PassThru
 
 # Verify-after-launch (never-silent-success): Start-Process proves spawn, not
 # survival - the v1 suite's 2026-10-15 crash class died within seconds on a
@@ -238,9 +342,71 @@ for ($i = 0; $i -lt 30; $i++) {
     }
 }
 
+
+# --- Taskbar group kick [3] --------------------------------------------------
+# Step [2] sets the window AUMID but NOT the group: the shell built this
+# clone's taskbar group while the window was still identity-less, so a plain
+# property read-back looks correct while the button stays merged with another
+# instance (live 2026-11-09: c1 + c5, two distinct stores, one button).
+# Kick = temp AUMID -> real AUMID, so the shell recreates the group. Target
+# window: the launched process's own ownerless top-level window; on a focus
+# relaunch (the started process exits, the running window is focused) fall
+# back to the window already carrying this clone's AUMID. Never touches
+# another clone's window: pid first, expected AUMID second, nothing else.
+$kickOk = $false
+$kickResult = 'not attempted'
+$expectedAumid = $env:ZWORK_AUMID
+$targetHwnd = [IntPtr]::Zero
+$targetPid = 0
+for ($i = 0; $i -lt 60 -and $targetHwnd -eq [IntPtr]::Zero; $i++) {
+    $candidates = @()
+    foreach ($line in [Ac2WindowIdentity]::FindWindows()) {
+        $parts = $line -split '\|', 3
+        $candidates += [pscustomobject]@{ Pid = [int]$parts[0]; Hwnd = [IntPtr][long]$parts[1]; Aumid = $parts[2] }
+    }
+    if ($launched) {
+        $mine = @($candidates | Where-Object { $_.Pid -eq $launched.Id })
+        if ($mine.Count -gt 0) { $targetHwnd = $mine[0].Hwnd; $targetPid = $mine[0].Pid; break }
+    }
+    $stamped = @($candidates | Where-Object { $_.Aumid -eq $expectedAumid })
+    if ($stamped.Count -gt 0) { $targetHwnd = $stamped[0].Hwnd; $targetPid = $stamped[0].Pid; break }
+    Start-Sleep -Seconds 1
+}
+
+if ($targetHwnd -eq [IntPtr]::Zero) {
+    $kickResult = "FAILED: no AutoClaw2 window found within 60s (patch applied? AUMID $expectedAumid)"
+    Write-Warning "taskbar identity kick: $kickResult"
+} else {
+    # Spacing is load-bearing: a 300-400 ms temp->real pair can be COALESCED
+    # by the shell - the temporary group is destroyed and the real one is
+    # never re-created, leaving the window with NO taskbar button at all
+    # (reproduced live 2026-11-09 on c5; a slower kick restored it). 1.2 s
+    # lets the shell finish the first re-group before the second write.
+    $kickRead = ''
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        [Ac2WindowIdentity]::Stamp($targetHwnd, "$expectedAumid.kick") | Out-Null
+        Start-Sleep -Milliseconds 1200
+        $kickRead = [Ac2WindowIdentity]::Stamp($targetHwnd, $expectedAumid)
+        Start-Sleep -Milliseconds 1200
+        $kickRead = [Ac2WindowIdentity]::Read($targetHwnd)
+        if ($kickRead -eq $expectedAumid) { break }
+    }
+    if ($kickRead -eq $expectedAumid) {
+        $kickOk = $true
+        $kickResult = "window AUMID verified $expectedAumid (pid $targetPid, group kicked)"
+    } else {
+        $kickResult = "FAILED: read-back '$kickRead' != '$expectedAumid' (pid $targetPid)"
+    }
+}
+
 Write-Host ""
 if ($lockHeldSeen) {
     Write-Host "verified: profile lockfile held (instance live)." -ForegroundColor Green
+    if ($kickOk) {
+        Write-Host "verified: taskbar identity $kickResult" -ForegroundColor Green
+    } else {
+        Write-Host "FAILED: taskbar identity $kickResult" -ForegroundColor Red
+    }
     Write-Host "launched. First run of a fresh profile needs ONE manual sign-in." -ForegroundColor Green
 } else {
     Write-Host "FAILED: profile lockfile never held within 30s - the process likely exited at startup. Check the profile logs under:" -ForegroundColor Red
