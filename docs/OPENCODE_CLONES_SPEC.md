@@ -603,11 +603,12 @@ whole-file .lnk decoding — EC-C09).
   future work — never copy live secrets wholesale without a scrub design.
 - The Primary `~\.config\opencode\opencode.jsonc` holds live API keys —
   never committed, never copied verbatim (this spec redacts all values).
-- Pre-existing, NOT part of this suite: `reset_minimax_opencode.ps1`'s
-  version preflight checks `%LOCALAPPDATA%\Programs\opencode\...` /
-  `%ProgramFiles%\opencode\...`, but this install lives at
-  `Programs\@opencode-aidesktop` — the preflight is stale for the current
-  install lane and should be fixed separately.
+- `reset_minimax_opencode.ps1`'s version preflight checks
+  `%LOCALAPPDATA%\Programs\@opencode-aidesktop\...` FIRST, then
+  `Programs\opencode\...` / `%ProgramFiles%\opencode\...` and the CLI on
+  PATH (verified 2026-11-15 against the v1.4 thin manifest; an older note
+  here claimed the `@opencode-aidesktop` lane was missing — that note was
+  stale, the code already probes this lane first).
 - The 3.7 GB Primary `~\.local\share\opencode\opencode.db` stays
   Primary; clones start with fresh small DBs (no seeding, by design).
 - `MachineGuid` shared by every instance (ground truth #1) —

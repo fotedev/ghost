@@ -8,6 +8,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Bug-sweep backlog re-status + trae hardening remainder (BS-9 walk)
+  (2026-11-15)**: `reset_trae.ps1` v0.3 walked item-by-item against the
+  bug-sweep report (04) — 9 of 11 findings CLOSED with evidence (the
+  v0.3 thin manifest had incidentally fixed or pre-fixed them: all JSON
+  mutations in the core, `scrub-rows` tightened matching + reported
+  skips, watchdog step counts failures, verified purge, wrapped
+  `.Trim()`, core-generated salt, cline-host counted in the clean check,
+  `sweep-tree` verify-after by recount, watchdog probe expanded 4→6).
+  One genuine remainder APPLIED: the self-elevation relaunch now uses
+  `-PassThru` + `.ExitCode` and relays the elevated child's exit code
+  (a failing reset no longer looks green to callers that check
+  `$LASTEXITCODE`; the stale-marker half of that finding was already
+  fixed). One finding stays OPEN and recorded: no top-level guard before
+  the end-of-run audit/restore write (the W1-4 incremental-audit class).
+  `docs/TASK_BACKLOG.md` fully re-statused: BS-4/BS-5/BS-6 → FIXED (PRs
+  #72–#74), BS-9/BS-11/CS-6/DT-1 → CLOSED with evidence, the 2026-10
+  write-guard blocker §2 marked RESOLVED-IN-PRACTICE (the exact files it
+  blocked were edited repeatedly by #43-era and #67–#71 sessions), W1-5/
+  W1-8 marked done, the migration queue §4 marked COMPLETE (#67–#71),
+  and the priority order rewritten (next tier: BS-8 watchers → BS-7 walk
+  vs v0.5 → the W1 remainder). OPENCODE_CLONES_SPEC §7's stale
+  "preflight lane" note rewritten (verified: `@opencode-aidesktop` IS
+  the first probed lane). Pester 238/238, harness PASS, unittest 189 OK.
 - **Python core hardening (BS-6)** (2026-11-15): three
   `_bug_sweep\fixes\BLOCKED_FIXES.md` §5 fixes in
   `src/python/ghost/sqlite_keys.py`. (a) `_ro_connect` now URI-quotes the
