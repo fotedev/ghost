@@ -265,6 +265,15 @@ call :Div "Maintenance"
 call :Opt 8 "Clone status" "- all 5 - locks, ports, sign-in state"
 call :Opt 9 "Remove clone shortcuts" "- Desktop + Start menu"
 echo.
+call :Div "Identity Resets"
+call :Opt 10 "Reset Blue clone" "- chats + tasks kept"
+call :Opt 11 "Reset Yellow clone" "- chats + tasks kept"
+call :Opt 12 "Reset Green clone" "- chats + tasks kept"
+call :Opt 13 "Reset Red clone" "- chats + tasks kept"
+call :Opt 14 "Reset Orange clone" "- chats + tasks kept"
+call :Opt 15 "Reset Primary" "- stock profile - chats + tasks kept"
+call :Opt 16 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto CLINE_PROMPT
@@ -479,6 +488,13 @@ if "%~1"=="6" set "RESOLVED=48"
 if "%~1"=="7" set "RESOLVED=45"
 if "%~1"=="8" set "RESOLVED=51"
 if "%~1"=="9" set "RESOLVED=52"
+if "%~1"=="10" set "RESOLVED=91"
+if "%~1"=="11" set "RESOLVED=92"
+if "%~1"=="12" set "RESOLVED=93"
+if "%~1"=="13" set "RESOLVED=94"
+if "%~1"=="14" set "RESOLVED=95"
+if "%~1"=="15" set "RESOLVED=96"
+if "%~1"=="16" set "RESOLVED=97"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -508,11 +524,12 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-90; 63 unused; 74 reserved for the deferred
+rem Runs one task by global id (1-97; 63 unused; 74 reserved for the deferred
 rem AutoClaw2 MCP watcher; 78 = the AutoClaw2 identity patch; 79/80 = the
 rem OpenCode light worker + clone login; 81 = the desktop-app builder;
 rem 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe identity;
-rem 84-90 = the AutoClaw2 identity resets, appended 2026-11-14).
+rem 84-90 = the AutoClaw2 identity resets; 91-97 = the Cline identity resets,
+rem appended 2026-11-14).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -601,6 +618,13 @@ if "%~1"=="87" (call :RunAc2Reset "src\windows\reset_autoclaw2.ps1" -Target c4 &
 if "%~1"=="88" (call :RunAc2Reset "src\windows\reset_autoclaw2.ps1" -Target c5 & exit /b)
 if "%~1"=="89" (call :RunAc2Reset "src\windows\reset_autoclaw2.ps1" -Target Primary & exit /b)
 if "%~1"=="90" (call :ConfirmAc2Reset "Reset ALL profiles" "src\windows\reset_autoclaw2.ps1" "-Target All" & exit /b)
+if "%~1"=="91" (call :RunClineReset "src\windows\reset_cline.ps1" -Target c1 & exit /b)
+if "%~1"=="92" (call :RunClineReset "src\windows\reset_cline.ps1" -Target c2 & exit /b)
+if "%~1"=="93" (call :RunClineReset "src\windows\reset_cline.ps1" -Target c3 & exit /b)
+if "%~1"=="94" (call :RunClineReset "src\windows\reset_cline.ps1" -Target c4 & exit /b)
+if "%~1"=="95" (call :RunClineReset "src\windows\reset_cline.ps1" -Target c5 & exit /b)
+if "%~1"=="96" (call :RunClineReset "src\windows\reset_cline.ps1" -Target Primary & exit /b)
+if "%~1"=="97" (call :ConfirmClineReset "Reset ALL profiles" "src\windows\reset_cline.ps1" "-Target All" & exit /b)
 if "%~1"=="81" (call :RunWith "tools\build_ghost_exe.ps1" "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or after moving this repo folder." & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
@@ -762,6 +786,33 @@ if errorlevel 2 goto ConfirmAc2ResetNo
 call :RunAc2Reset "%~2" %~3
 exit /b
 :ConfirmAc2ResetNo
+echo Cancelled - nothing was run.
+pause
+exit /b
+
+:RunClineReset
+rem Cline reset wrapper (gids 91-96): runs reset_cline.ps1 with args, then
+rem prints the relaunch-safety note. Same shape as :RunZcodeReset.
+rem Usage: call :RunClineReset <script> [args...]
+echo Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~1" %2 %3 %4
+echo.
+echo NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch.
+pause
+exit /b
+
+:ConfirmClineReset
+rem Confirmation gate for the destructive Cline all-profiles reset (gid 97).
+rem choice reads the CONSOLE - not stdin - so menu chains and the .bat harness
+rem stay unaffected.
+rem Usage: call :ConfirmClineReset <label> <script> <args>
+echo About to run: %~1
+echo This tree-kills the affected profiles and rewrites their identity stores.
+choice /C YN /N /M "Continue with the reset? Y = run, N = cancel: "
+if errorlevel 2 goto ConfirmClineResetNo
+call :RunClineReset "%~2" %~3
+exit /b
+:ConfirmClineResetNo
 echo Cancelled - nothing was run.
 pause
 exit /b

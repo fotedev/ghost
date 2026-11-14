@@ -237,9 +237,22 @@ READ (base-AUMID discovery via `Shell.Application`
 - Launch clones SEQUENTIALLY (the all-five script does this); never
   elevated (UIPI), even though the app is asInvoker.
 - One manual sign-in per fresh clone — by design, never automated.
-- Clone "reset" = stop the instance, delete
-  `%USERPROFILE%\ClineClonesHome\<cN>`, launch again (no reset script in
-  this suite; the Primary reset is out of scope 2026-10-24).
+- Identity reset (2026-11-14, overrides the earlier "no reset script by
+  design" decision): `src/windows/reset_cline.ps1`
+  (`-Target Primary|c1..c5|All`, `-KeepLogin`, `-DryRun`; Cline
+  [10]-[16] = gids 91-97, the ALL row gated by `:ConfirmClineReset`).
+  Deletes `data\secrets.json` (clineAccountId + tokens) +
+  `data\settings\providers.json` (provider OAuth), sweeps stale hub
+  locks, logs, cache and the web-login Chromium profile
+  (`webview\EBWebView` per clone; the Primary's lives at
+  `%LOCALAPPDATA%\bot.cline.app`). `data\db\*.db`, `data\sessions\`,
+  `global-settings.json` and `globalState.json` are PRESERVED (chats/
+  tasks/UI state). Machine identity = HKLM MachineGuid read by the app
+  (spec §3.3) — deliberately NOT touched here (system-level scope;
+  `change_device_id.ps1` owns it). The whole-home delete below stays
+  valid as the nuclear option.
+- Clone "reset" (nuclear) = stop the instance, delete
+  `%USERPROFILE%\ClineClonesHome\<cN>`, launch again.
 - `-Status` = hub-lock exclusive-open probe (held = running, absent =
   never started / cleanly stopped, free = not running), expected-port
   check and single-instance window check.

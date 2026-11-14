@@ -780,6 +780,25 @@ reset_autoclaw2.ps1               # AutoClaw2 (Primary + clones c1..c5): 12 step
                                    #          script's dot-source guard (tests/reset_autoclaw2.Tests.ps1);
                                    #          live acceptance = user-supervised, nothing ran against
                                    #          live profiles during implementation)
+reset_cline.ps1                   # Cline (Primary ~\.cline + clones c1..c5): 11 steps/target
+                                   #          (2026-11-14, Cline [10]-[16] = gids 91-97, ALL row
+                                   #          [16] = gid 97 behind :ConfirmClineReset; OVERRIDES the
+                                   #          spec's old "no reset script by design"): deletes
+                                   #          data\secrets.json (clineAccountId + tokens) +
+                                   #          data\settings\providers.json (provider OAuth) — the ONLY
+                                   #          auth stores — and sweeps stale hub locks, logs, cache +
+                                   #          the web-login Chromium profile (clone webview\EBWebView;
+                                   #          Primary = %LOCALAPPDATA%\bot.cline.app). data\db\*.db
+                                   #          (sessions/tasks/hub/teams/connectors), data\sessions,
+                                   #          global-settings.json + globalState.json PRESERVED.
+                                   #          HKLM MachineGuid deliberately NOT touched (system-level,
+                                   #          change_device_id.ps1 owns it). -Target
+                                   #          Primary|c1..c5|All (clones first), -KeepLogin, -DryRun;
+                                   #          thin manifest over the Python core; stop step =
+                                   #          marker-classified subtree walk (WebView2 children carry
+                                   #          --user-data-dir=<clone>\webview) + fixed-port owners;
+                                   #          Pester: tests/reset_cline.Tests.ps1 via the dot-source
+                                   #          guard; live acceptance = user-supervised)
 change_device_id.ps1              # System-level: Fingerprint (self-test) / LegacyReset (registry GUIDs)
                                    #   / RepairProfiles (ProfileList .bak keys). Windows-only.
                                    #   IDE Resets [1] = LegacyReset behind :ConfirmRun (2026-11-10 — the old
@@ -893,7 +912,10 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   (gids 84-90, appended 2026-11-14 — reset_autoclaw2.ps1 c1..c5/Primary,
   [20] gid 90 = ALL behind :ConfirmAc2Reset; :RunAc2Reset = the
   :RunZcodeReset-shaped wrapper with the AutoClaw2 relaunch note); Cline: Launch Clones [1]-[7]
-  (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9]; OpenCode: Launch Clones
+  (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9] / Identity Resets
+  [10]-[16] (gids 91-97, appended 2026-11-14 — reset_cline.ps1
+  c1..c5/Primary, [16] gid 97 = ALL behind :ConfirmClineReset;
+  :RunClineReset wrapper); OpenCode: Launch Clones
   [1]-[9] (Blue..Orange, ALL, [7] light worker gid 79, [8] login clone
   account gid 80 — 2026-11-07, ZCode LIGHT pattern; shortcuts shifted to
   [9]) / Maintenance [10]-[12] (patch, status, remove — 2026-10-31: shortcuts

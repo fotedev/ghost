@@ -44,6 +44,7 @@ touches, and emits an audit log plus a self-contained restore script.
 | Reset QoderWork | `reset_qoderwork.ps1` | — |
 | Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | — |
 | Reset AutoClaw2 (Primary + clones, chats/work kept) | `reset_autoclaw2.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
+| Reset Cline (Primary + clones, chats/tasks kept) | `reset_cline.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
 | Device fingerprint self-test + machine-wide ID reset | `change_device_id.ps1` (default = read-only Fingerprint; `-Mode LegacyReset` = the reset, IDE Resets [1]) | `change_device_id.sh Fingerprint` / `ResetMachineId` |
 | WMI serial spoof (BIOS/motherboard/disks/RAM via WMI) | `spoof_wmi_serials.ps1` | — |
 | System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` |

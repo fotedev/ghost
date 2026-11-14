@@ -340,6 +340,27 @@ manual sign-in. Menu equivalents: launch c1/c2/c3/c4/c5 = Cline
 [1]/[2]/[3]/[4]/[5]; all five = Cline [6]; status = Cline [8];
 shortcuts = Cline [7] (`-Remove` = [9]).
 
+### Cline identity reset (Cline [10]-[16])
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target c1        # [10] — Blue (c2..c5 = [11]..[14])
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target Primary   # [15] — the stock ~\.cline profile
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target All       # [16] — clones first, Primary last (menu row asks first)
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target c1 -KeepLogin  # keep the sign-in
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target c1 -DryRun     # plan only
+```
+
+Deletes `data\secrets.json` + `data\settings\providers.json` (the only
+auth stores — a fresh `CLINE_DIR` starts with NO secrets), sweeps stale
+hub locks, logs, cache and the web-login Chromium profile
+(`webview\EBWebView`; the Primary's lives at
+`%LOCALAPPDATA%\bot.cline.app`). `data\db\*.db` (sessions/tasks/hub/
+teams/connectors), `data\sessions\` and the settings files are PRESERVED.
+HKLM MachineGuid is deliberately NOT touched (system-level; shared with
+every IDE). Backups + audit + restore script per target. Menu
+equivalents: Blue..Orange = [10]-[14]; Primary = [15]; ALL = [16]
+(confirmation gate).
+
 ## OpenCode multi-instance (5 clones + Primary; per-user, no admin needed)
 
 ```powershell
