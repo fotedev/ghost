@@ -143,6 +143,8 @@ ghost/
 │   │               #   launch_autoclaw2_clone.ps1 + launch_autoclaw2_clones_all.ps1,
 │   │               #   launch_cline_clone.ps1 + launch_cline_clones_all.ps1,
 │   │               #   launch_opencode_clone.ps1 + launch_opencode_clones_all.ps1)
+│   │               #   ghost_launch_guard.ps1 (shared 3-way RAM/concurrency
+│   │               #   launch guard used by all four suites' launchers)
 │   ├── linux/      # .sh resetters + id_reset_common.sh
 │   └── python/     # stdlib-only Python core (ghost/) + ghost_cli.py bootstrap —
 │                   #   owns the shared SQLite/JSON identity logic

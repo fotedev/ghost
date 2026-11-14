@@ -124,61 +124,11 @@ function Test-ZcodeMainCmdline {
 #    provider throttles high concurrency anyway. Soft guard: count running
 #    ZCode mains; at or above -MaxConcurrent show live commit numbers and ask.
 #    Relaunching an ALREADY-RUNNING clone only focuses its window, so the guard
-#    never blocks that. The ask routes by entry point:
-#      - -NonInteractive or redirected stdin (watchdog relaunch, test harness):
-#        warn and continue - never blocks an unattended caller.
-#      - visible console (GHOST.bat, Launch-ZCode-*.bat, manual runs):
-#        Read-Host prompt in that console.
-#      - hidden console (Desktop/Start-menu shortcuts run powershell with
-#        -WindowStyle Hidden; hidden stdin is NOT redirected, so a plain
-#        Read-Host would hang invisibly and the launch would look dead):
-#        Yes/No dialog instead. Fixed launcher-side so already-installed
-#        shortcuts need no reinstall.
-function Test-GhostConsoleVisible {
-    # True when this process has a console window the user can actually see.
-    # Any probe failure counts as not visible -> the dialog path is the safe
-    # default (a blocked invisible prompt is the worst outcome).
-    try {
-        if (-not ('GhostNative.Console' -as [type])) {
-            Add-Type -Namespace GhostNative -Name Console -MemberDefinition @'
-[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
-[DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-'@
-        }
-        $hwnd = [GhostNative.Console]::GetConsoleWindow()
-        if ($hwnd -eq [IntPtr]::Zero) { return $false }
-        return [bool][GhostNative.Console]::IsWindowVisible($hwnd)
-    } catch {
-        return $false
-    }
-}
-function Show-GhostRamGuardDialog {
-    # Yes/No dialog for hidden-console (shortcut) launches. Default button is
-    # No to mirror the console prompt's y/N; returns $true only on Yes.
-    param([string]$Body)
-    try { Add-Type -AssemblyName System.Windows.Forms } catch { }
-    $text = $Body + "`n`nLaunch anyway?"
-    try {
-        $answer = [System.Windows.Forms.MessageBox]::Show($text, 'GHOST - ZCode RAM guard',
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Warning,
-            [System.Windows.Forms.MessageBoxDefaultButton]::Button2,
-            [System.Windows.Forms.MessageBoxOptions]::DefaultDesktopOnly)
-        return ($answer -eq [System.Windows.Forms.DialogResult]::Yes)
-    } catch {
-        try {
-            $answer = [System.Windows.Forms.MessageBox]::Show($text, 'GHOST - ZCode RAM guard',
-                [System.Windows.Forms.MessageBoxButtons]::YesNo,
-                [System.Windows.Forms.MessageBoxIcon]::Warning,
-                [System.Windows.Forms.MessageBoxDefaultButton]::Button2)
-            return ($answer -eq [System.Windows.Forms.DialogResult]::Yes)
-        } catch {
-            # No dialog possible (no interactive desktop): never start an
-            # instance the user could not consent to - cancel like "N".
-            return $false
-        }
-    }
-}
+#    never blocks that. The 3-way ask routing (visible prompt / hidden-console
+#    dialog / non-interactive warn+continue) lives in the shared lib
+#    ghost_launch_guard.ps1 since 2026-11-14 (AutoClaw2/Cline/OpenCode launch
+#    the same guard).
+. "$PSScriptRoot\ghost_launch_guard.ps1"
 function Get-ZcodeMainIds {
     @(Get-CimInstance Win32_Process -Filter $script:ZcodeFamilyWmiFilter -ErrorAction SilentlyContinue | Where-Object {
         # Empty CommandLine is a known WMI race on fresh mains: keep as candidate.
@@ -221,41 +171,14 @@ if ($mainsNow.Count -ge $MaxConcurrent) {
     if (Test-ThisCloneRunning) {
         Write-Host ("[ram-guard] {0} is already running - this relaunch only focuses its window." -f $cfg.DisplayName)
     } else {
-        $zcodeProcs = @(Get-Process -Name 'ZCode*' -ErrorAction SilentlyContinue)
-        $zcodeCommit = ($zcodeProcs | Measure-Object -Property PrivateMemorySize64 -Sum).Sum / 1MB
-        $osCommit = Get-CimInstance Win32_OperatingSystem
-        $guardLines = @(
-            ("[ram-guard] {0} ZCode instance(s) already running - soft limit is {1}." -f $mainsNow.Count, $MaxConcurrent),
-            ("[ram-guard] Live pressure: ZCode {0:N0} MB commit; OS {1:N0} / {2:N0} MB commit limit." -f $zcodeCommit, (($osCommit.TotalVirtualMemorySize - $osCommit.FreeVirtualMemory) / 1KB), ($osCommit.TotalVirtualMemorySize / 1KB)),
-            '[ram-guard] More instances risk the renderer-OOM freeze (verified 2026-09-25) plus Start Plan throttling.',
-            '[ram-guard] Lighter option: GHOST.bat ZCode [7] runs this account headless at about a quarter of the RAM.'
-        )
-        Write-Host $guardLines[0] -ForegroundColor Yellow
-        Write-Host $guardLines[1] -ForegroundColor Yellow
-        Write-Host $guardLines[2]
-        Write-Host $guardLines[3]
-        $stdinRedirected = $false
-        try { $stdinRedirected = [bool][Console]::IsInputRedirected } catch { }
-        if ($NonInteractive -or $stdinRedirected) {
-            Write-Host '[ram-guard] Non-interactive session - continuing so watchdog/harness callers never hang.' -ForegroundColor Yellow
-        } else {
-            if (Test-GhostConsoleVisible) {
-                # Visible console (GHOST.bat, Launch-ZCode-*.bat, manual runs): prompt here.
-                $guardAnswer = Read-Host '[ram-guard] Launch anyway? (y/N)'
-                if ($guardAnswer -notmatch '^[Yy]') {
-                    Write-Host '[ram-guard] Launch cancelled - nothing was started.'
-                    Stop-LaunchLog
-                    exit 0
-                }
-            } else {
-                # Hidden console (Desktop/Start-menu shortcut): the prompt would be
-                # invisible and hang the launch forever - ask via a dialog instead.
-                if (-not (Show-GhostRamGuardDialog ($guardLines -join "`n"))) {
-                    Write-Host '[ram-guard] Launch cancelled - nothing was started.'
-                    Stop-LaunchLog
-                    exit 0
-                }
-            }
+        $guardProceed = Invoke-GhostLaunchGuard -RunningMains $mainsNow.Count -MaxConcurrent $MaxConcurrent `
+            -SuiteName 'ZCode' -WmiFamilyFilter $script:ZcodeFamilyWmiFilter -ProcessFamily 'ZCode*' `
+            -RiskLine '[ram-guard] More instances risk the renderer-OOM freeze (verified 2026-09-25) plus Start Plan throttling.' `
+            -LighterHint '[ram-guard] Lighter option: GHOST.bat ZCode [7] runs this account headless at about a quarter of the RAM.' `
+            -NonInteractive:$NonInteractive
+        if (-not $guardProceed) {
+            Stop-LaunchLog
+            exit 0
         }
     }
 }

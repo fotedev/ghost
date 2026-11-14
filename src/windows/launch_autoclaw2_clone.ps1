@@ -70,7 +70,13 @@ param(
     [ValidateSet('c1','c2','c3','c4','c5')]
     [string]$Instance = 'c1',
     [switch]$Status,
-    [switch]$SkipMcpSync
+    [switch]$SkipMcpSync,
+    # Soft RAM guard threshold: at or above this many running AutoClaw2
+    # instances, launching another one asks for confirmation (shared
+    # ghost_launch_guard.ps1, same mechanics as the ZCode launcher).
+    [ValidateRange(1, 10)]
+    [int]$MaxConcurrent = 3,
+    [switch]$NonInteractive
 )
 $ErrorActionPreference = 'Stop'
 
@@ -250,6 +256,7 @@ if (-not (Test-Path $ProfileDir)) {
 
 # Hold check: the single-instance lock keys off the profile dir, so
 # launching a RUNNING clone just focuses its window - inform, not block.
+$ac2AlreadyRunning = $false
 $lockfile = Join-Path $ProfileDir 'lockfile'
 if (Test-Path $lockfile) {
     try {
@@ -257,6 +264,24 @@ if (Test-Path $lockfile) {
         $fs.Close()
     } catch {
         Write-Warning "'$Instance' appears to be RUNNING (lockfile held) - this launch will focus it instead of starting a new copy."
+        $ac2AlreadyRunning = $true
+    }
+}
+
+# --- RAM/concurrency guard (2026-11-14, shared lib) ---------------------------
+# Same soft guard as the ZCode launcher (ghost_launch_guard.ps1): several
+# concurrent Electron instances exhausted the Windows commit limit once
+# (renderer-OOM 2026-09-25, ZCode-verified). Fires only when THIS clone is
+# not already running - a relaunch just focuses its window.
+. "$PSScriptRoot\ghost_launch_guard.ps1"
+$ac2Mains = @(Get-GhostSuiteMainIds -WmiFamilyFilter "Name LIKE 'AutoClaw2%'")
+if (($ac2Mains.Count -ge $MaxConcurrent) -and -not $ac2AlreadyRunning) {
+    $guardProceed = Invoke-GhostLaunchGuard -RunningMains $ac2Mains.Count -MaxConcurrent $MaxConcurrent `
+        -SuiteName 'AutoClaw2' -WmiFamilyFilter "Name LIKE 'AutoClaw2%'" -ProcessFamily 'AutoClaw2*' `
+        -RiskLine '[ram-guard] More instances risk the same renderer-OOM commit-limit freeze documented for ZCode (verified 2026-09-25).' `
+        -NonInteractive:$NonInteractive
+    if (-not $guardProceed) {
+        exit 0
     }
 }
 
