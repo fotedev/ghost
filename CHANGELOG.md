@@ -8,6 +8,43 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode clone launcher bug-sweep hardening (BS-4)** (2026-11-15): the
+  `_bug_sweep\fixes\10-fixes.md` staged designs (2026-10-24, then blocked by a
+  workspace write-guard false positive) applied to
+  `launch_zcode_second_instance.ps1` and adapted to the current code.
+  **Seed gate = completion marker**: `.zcode-seeded` is written only after
+  robocopy 0-7 AND the identity scrub verified — the old single-file gate
+  (`v2\setting.json`) let an aborted robocopy pass as seeded once that one
+  file existed; `.zcode-seeding` is written BEFORE the copy so a crash
+  mid-seed is auto-cleared and re-seeded on the next launch; profiles built
+  by earlier launcher versions are ADOPTED, never re-seeded over. **Primary
+  closed gate**: the copy source `~\.zcode` holds the shared CLI db held by
+  EVERY running instance, so the seed now waits up to 180 s for ALL ZCode
+  mains to close (fails CLOSED on a WMI error) instead of copying live WAL
+  stores and deleting the copied journals (torn pages + lost
+  committed-but-uncheckpointed transactions). **Every seed-scrub write
+  re-read-verifies** (telemetry deviceMid, setting.json deviceSid,
+  credentials.json `oauth:`/`zcodejwttoken` absence, provider apiKeys
+  emptiness, `.updaterId`); a FAILED scrub withholds the seed marker and
+  throws before launch — the clone can never run on Primary identity.
+  deviceSid is now CSPRNG `GetBytes()` + rejection sampling (was
+  `Get-Random`). **Telegram reconcile fail-closed + multi-bot**: ALL Primary
+  bots are fingerprinted into sha8/id sets (was first-bot-only, so a clone
+  copy of bot #2 matched nothing) and a failed/unavailable fingerprint now
+  really disables every enabled clone bot (the old code only printed
+  "falling back to disable" and then PRESERVED the seed-copy duplicate —
+  two pollers on one token, HTTP 409 + cross-account billing, locked in by
+  the marker); every disable write is re-read-verified and the
+  `.telegram-routed` marker is withheld on any write failure so the
+  reconcile retries. Window resolve is title-ONLY (the fresh-PID fallback
+  adopted any new bare-exe main, incl. a sibling clone's); branding icon
+  seed copy wrapped in try/catch; `ZcodeWindowAumid` Add-Type guarded with
+  `-as [type]` (in-session re-run no longer throws). The dead
+  `$tgPrimaryCreds` probe is gone. Behavior change (deliberate): first-time
+  seeding now requires every ZCode instance closed — remediation text
+  explains seeding several clones one at a time. Pester 238/238, harness
+  PASS, unittest 182 OK, PSSA findings 6 (baseline 7), parse clean. Live
+  acceptance pending user supervision.
 - **ZCode reset v1.5 — thin manifest over the Python core; Phase 3
   COMPLETE** (2026-11-14): the final migration (#7 of 7). The 27 steps,
   their order, audit keys, restore actions and summary are identical to

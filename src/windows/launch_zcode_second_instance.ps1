@@ -189,51 +189,144 @@ New-Item -ItemType Directory -Path $CloneUserData -Force | Out-Null
 New-Item -ItemType Directory -Path $CloneSession -Force | Out-Null
 
 # 2) One-time seed: clone history so the clone opens with same chats/projects.
-#    Never overwrites an existing clone profile (instances stay independent afterwards).
-if (-not (Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\setting.json'))) {
+#    Gate = completion MARKER (<CloneHome>\.zcode-seeded), written only after
+#    the copy AND the identity scrub verified. The old single-file gate
+#    (v2\setting.json) let an aborted robocopy pass as seeded once that one
+#    file existed (the AutoClaw partial-seed lesson, live-verified). A
+#    pre-marker profile built by an earlier launcher version is ADOPTED, never
+#    re-seeded over. <CloneHome>\.zcode-seeding is written BEFORE the copy: a
+#    crash mid-seed leaves it behind, and the next launch re-clears + re-seeds
+#    the partial profile.
+$SeedMarker    = Join-Path $CloneHome '.zcode-seeded'
+$SeedingMarker = Join-Path $CloneHome '.zcode-seeding'
+$noBom = New-Object System.Text.UTF8Encoding $false
+$seedScrubOk = $true
+if (Test-Path -LiteralPath $SeedMarker) {
+    if (Test-Path -LiteralPath $SeedingMarker) {
+        Remove-Item -LiteralPath $SeedingMarker -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "[seed] $($cfg.DisplayName) profile already exists, skipping clone (independent)."
+} elseif ((Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\setting.json')) -and
+          (-not (Test-Path -LiteralPath $SeedingMarker))) {
+    Write-Host "[seed] Pre-marker profile found for $($cfg.DisplayName) - adopting it (never re-seed over live clone data)."
+    [System.IO.File]::WriteAllText($SeedMarker, '', $noBom)
+} else {
     Write-Host "[seed] First run for $($cfg.DisplayName): cloning .zcode -> $($cfg.Home)\.zcode (excluding live locks)..."
     if (-not (Test-Path -LiteralPath $PrimaryZCode)) { throw "Primary .zcode not found: $PrimaryZCode" }
+    if (Test-Path -LiteralPath $SeedingMarker) {
+        Write-Host '[seed] Stale seeding marker found - clearing the partial profile and re-seeding.'
+        Remove-Item -LiteralPath $CloneZCode -Recurse -Force -ErrorAction SilentlyContinue
+    }
     New-Item -ItemType Directory -Path $CloneZCode -Force | Out-Null
+    # Seeding marker BEFORE any copy: a crash mid-seed leaves the marker behind
+    # so the next launch re-clears and re-seeds instead of adopting the partial.
+    [System.IO.File]::WriteAllText($SeedingMarker, '', $noBom)
+    # Primary-closed gate (2026-11-15): the copy source ~\.zcode holds the LIVE
+    # shared CLI store (cli\db\db.sqlite), held open by EVERY running instance -
+    # Primary and clones alike (verified ground truth; no stable per-profile
+    # lockfile exists under ~\.zcode). Robocopying WAL-mode SQLite while a
+    # writer is live can tear pages, and deleting the copied -wal journals
+    # afterwards discards committed-but-uncheckpointed transactions. So the
+    # seed waits for ALL ZCode mains to close (up to 180s = 36 x 5s; empty
+    # CommandLine stays a main candidate per the WMI race) and fails CLOSED on
+    # a WMI error. (The staged design said "Primary main"; implemented as "any
+    # ZCode main" because the shared store gives every instance a handle on the
+    # copied tree - strictly safer.)
+    $primaryClosed = $false
+    for ($i = 0; $i -lt 36; $i++) {
+        $anyMains = $null
+        try {
+            $anyMains = @(Get-CimInstance Win32_Process -Filter $script:ZcodeFamilyWmiFilter -ErrorAction Stop |
+                Where-Object { Test-ZcodeMainCmdline ([string]$_.CommandLine) })
+        } catch {
+            throw "[seed] ZCode process check failed (WMI unavailable) - refusing to copy a live profile. Close every ZCode instance manually and re-run."
+        }
+        if (@($anyMains).Count -eq 0) { $primaryClosed = $true; break }
+        if ($i -eq 0) {
+            Write-Host '[seed] A ZCode instance is running - the shared CLI store it holds must not be copied. Waiting up to 180s for every instance to close...' -ForegroundColor Yellow
+        }
+        Start-Sleep -Seconds 5
+    }
+    if (-not $primaryClosed) {
+        throw "[seed] ZCode is still running after 180s - refusing to copy the live profile (torn WAL copies + journal deletes lose recent chats). Close every ZCode instance (Primary AND clones), then re-run. First-time seeding of several clones: seed them ONE at a time, closing the previous clone before starting the next (the seed marker makes later launches skip)."
+    }
     # robocopy exit codes 0-7 = success; 8+ = at least one failure (disk full,
-    # path errors). Never proceed with a half-built seed profile.
+    # path errors). Never proceed with a half-built seed profile: remove the
+    # partial dir and throw (the seeding marker stays so the next launch
+    # re-clears and re-seeds).
     robocopy $PrimaryZCode $CloneZCode /E /XD 'crash' 'logs' 'tmp' 'bots-runtime-locks' 'runtime' /XF '*.log' | Out-Null
     if ($LASTEXITCODE -ge 8) {
-        throw "[seed] robocopy failed with exit code $LASTEXITCODE -- clone profile incomplete; remove '$CloneZCode' and re-run"
+        Remove-Item -LiteralPath $CloneZCode -Recurse -Force -ErrorAction SilentlyContinue
+        throw "[seed] robocopy failed with exit code $LASTEXITCODE -- partial clone dir removed; re-run to re-seed"
     }
     # Remove any copied SQLite journals so the clone starts from a consistent checkpoint
-    Get-ChildItem -Path $CloneZCode -Recurse -Force -ErrorAction SilentlyContinue |
+    # (-LiteralPath: -Path would glob a username containing [ and silently match nothing)
+    Get-ChildItem -LiteralPath $CloneZCode -Recurse -Force -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -like '*-shm' -or $_.Name -like '*-wal' } |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
-    Write-Host '[seed] Clone complete.'
 
     # 2b) Seed-hazard scrub: the clone carries PRIMARY identity + account links.
     # Without this, the clone would relaunch with duplicated IDs/tokens.
     # Rotate to fresh values now (chat history preserved; only identity scrubbed).
+    # EVERY write below re-reads and verifies (never-silent-success); any FAILED
+    # clears $seedScrubOk and the launch throws before starting the clone.
     Write-Host '[seed-scrub] Rotating cloned identity values (fresh independent IDs)...' -ForegroundColor Cyan
-    $noBom = New-Object System.Text.UTF8Encoding $false
     try {
         $telPath = Join-Path $CloneZCode 'v2\telemetry-state.json'
         if (Test-Path -LiteralPath $telPath) {
             try {
                 $tj = Get-Content -LiteralPath $telPath -Raw | ConvertFrom-Json
-                $tj.deviceMid = ([guid]::NewGuid().ToString()).ToLowerInvariant()
+                $newMid = ([guid]::NewGuid().ToString()).ToLowerInvariant()
+                $tj.deviceMid = $newMid
                 [System.IO.File]::WriteAllText($telPath, ($tj | ConvertTo-Json -Depth 20), $noBom)
-                Write-Host '[seed-scrub] telemetry-state.json deviceMid rotated.' -ForegroundColor Green
-            } catch { Write-Host "[seed-scrub] telemetry-state.json SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
+                $midBack = (Get-Content -LiteralPath $telPath -Raw | ConvertFrom-Json).deviceMid
+                if ($midBack -ne $newMid) {
+                    Write-Host '[seed-scrub] FAILED: telemetry-state.json deviceMid did not survive the write.' -ForegroundColor Red
+                    $seedScrubOk = $false
+                } else {
+                    Write-Host '[seed-scrub] telemetry-state.json deviceMid rotated (verified).' -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "[seed-scrub] FAILED: telemetry-state.json ($($_.Exception.Message))" -ForegroundColor Red
+                $seedScrubOk = $false
+            }
         }
         $setPath = Join-Path $CloneZCode 'v2\setting.json'
         if (Test-Path -LiteralPath $setPath) {
             try {
                 $sj = Get-Content -LiteralPath $setPath -Raw | ConvertFrom-Json
-                $newSid = 'd_' + (-join ((1..14) | ForEach-Object { 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[(Get-Random -Maximum 62)] }))
+                # CSPRNG deviceSid (repo convention: RandomNumberGenerator.GetBytes
+                # only - Get-Random is a time-seeded Mersenne-Twister PRNG).
+                # Rejection sampling drops bytes >= 248 (256 mod 62 = 8 bias).
+                $alnum = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+                $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+                try {
+                    $rbuf = New-Object byte[] 32
+                    $rng.GetBytes($rbuf)
+                    $picked = @($rbuf | Where-Object { $_ -lt 248 } | ForEach-Object { $alnum[[int]($_ % 62)] })
+                    while ($picked.Count -lt 14) {
+                        $rng.GetBytes($rbuf)
+                        $picked += @($rbuf | Where-Object { $_ -lt 248 } | ForEach-Object { $alnum[[int]($_ % 62)] })
+                    }
+                    $newSid = 'd_' + (-join $picked[0..13])
+                } finally { if ($rng) { $rng.Dispose() } }
                 if ($null -ne $sj.PSObject.Properties['webRemoteControlExternalRelayDevice']) {
                     $sj.webRemoteControlExternalRelayDevice.deviceSid = $newSid
                 } else {
                     Add-Member -InputObject $sj -NotePropertyName 'webRemoteControlExternalRelayDevice' -NotePropertyValue @{ deviceSid = $newSid }
                 }
                 [System.IO.File]::WriteAllText($setPath, ($sj | ConvertTo-Json -Depth 20), $noBom)
-                Write-Host '[seed-scrub] setting.json deviceSid rotated.' -ForegroundColor Green
-            } catch { Write-Host "[seed-scrub] setting.json SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
+                $sidBack = ((Get-Content -LiteralPath $setPath -Raw | ConvertFrom-Json).webRemoteControlExternalRelayDevice).deviceSid
+                if ($sidBack -ne $newSid) {
+                    Write-Host '[seed-scrub] FAILED: setting.json deviceSid did not survive the write.' -ForegroundColor Red
+                    $seedScrubOk = $false
+                } else {
+                    Write-Host '[seed-scrub] setting.json deviceSid rotated (verified).' -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "[seed-scrub] FAILED: setting.json ($($_.Exception.Message))" -ForegroundColor Red
+                $seedScrubOk = $false
+            }
         }
         $credPath = Join-Path $CloneZCode 'v2\credentials.json'
         if (Test-Path -LiteralPath $credPath) {
@@ -243,10 +336,27 @@ if (-not (Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\setting.json'))) {
                 foreach ($prop in @($cj.PSObject.Properties)) {
                     if ($prop.Name.StartsWith('oauth:', [System.StringComparison]::OrdinalIgnoreCase) -or ($prop.Name -ieq 'zcodejwttoken')) { $del += $prop.Name }
                 }
-                foreach ($k in $del) { $null = $cj.PSObject.Properties.Remove($k) }
-                [System.IO.File]::WriteAllText($credPath, ($cj | ConvertTo-Json -Depth 20), $noBom)
-                Write-Host ("[seed-scrub] credentials.json OAuth cleared: {0} keys (fresh login required)." -f $del.Count) -ForegroundColor Green
-            } catch { Write-Host "[seed-scrub] credentials.json SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
+                if ($del.Count -gt 0) {
+                    foreach ($k in $del) { $null = $cj.PSObject.Properties.Remove($k) }
+                    [System.IO.File]::WriteAllText($credPath, ($cj | ConvertTo-Json -Depth 20), $noBom)
+                    $credBack = Get-Content -LiteralPath $credPath -Raw | ConvertFrom-Json
+                    $oauthLeft = 0
+                    foreach ($prop in @($credBack.PSObject.Properties)) {
+                        if ($prop.Name.StartsWith('oauth:', [System.StringComparison]::OrdinalIgnoreCase) -or ($prop.Name -ieq 'zcodejwttoken')) { $oauthLeft++ }
+                    }
+                    if ($oauthLeft -gt 0) {
+                        Write-Host "[seed-scrub] FAILED: credentials.json still holds $oauthLeft OAuth key(s) after the write." -ForegroundColor Red
+                        $seedScrubOk = $false
+                    } else {
+                        Write-Host ("[seed-scrub] credentials.json OAuth cleared: {0} key(s), verified (fresh login required)." -f $del.Count) -ForegroundColor Green
+                    }
+                } else {
+                    Write-Host '[seed-scrub] credentials.json holds no OAuth keys - nothing to clear.' -ForegroundColor DarkGray
+                }
+            } catch {
+                Write-Host "[seed-scrub] FAILED: credentials.json ($($_.Exception.Message))" -ForegroundColor Red
+                $seedScrubOk = $false
+            }
         }
         $cfgPath = Join-Path $CloneZCode 'v2\config.json'
         if (Test-Path -LiteralPath $cfgPath) {
@@ -259,19 +369,61 @@ if (-not (Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\setting.json'))) {
                             $prop.Value.options.apiKey = ''; $n++
                         }
                     }
-                    [System.IO.File]::WriteAllText($cfgPath, ($gj | ConvertTo-Json -Depth 20), $noBom)
                 }
-                Write-Host ("[seed-scrub] config.json provider apiKeys blanked: {0} (re-enter on next login)." -f $n) -ForegroundColor Green
-            } catch { Write-Host "[seed-scrub] config.json SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
+                if ($n -gt 0) {
+                    [System.IO.File]::WriteAllText($cfgPath, ($gj | ConvertTo-Json -Depth 20), $noBom)
+                    # never-silent-success: re-read and assert every provider
+                    # apiKey is now empty before claiming success.
+                    $cfgBack = Get-Content -LiteralPath $cfgPath -Raw | ConvertFrom-Json
+                    $keyLeft = 0
+                    if (($null -ne $cfgBack) -and ($null -ne $cfgBack.PSObject.Properties['provider'])) {
+                        foreach ($prop in $cfgBack.provider.PSObject.Properties) {
+                            if (($null -ne $prop.Value) -and ($null -ne $prop.Value.PSObject.Properties['options']) -and ($null -ne $prop.Value.options.PSObject.Properties['apiKey']) -and ($prop.Value.options.apiKey -ne '')) { $keyLeft++ }
+                        }
+                    }
+                    if ($keyLeft -gt 0) {
+                        Write-Host "[seed-scrub] FAILED: config.json still holds $keyLeft non-empty provider apiKey(s) after the write." -ForegroundColor Red
+                        $seedScrubOk = $false
+                    } else {
+                        Write-Host ("[seed-scrub] config.json provider apiKeys blanked: {0}, verified (re-enter on next login)." -f $n) -ForegroundColor Green
+                    }
+                } else {
+                    Write-Host '[seed-scrub] config.json holds no non-empty provider apiKeys - nothing to blank.' -ForegroundColor DarkGray
+                }
+            } catch {
+                Write-Host "[seed-scrub] FAILED: config.json ($($_.Exception.Message))" -ForegroundColor Red
+                $seedScrubOk = $false
+            }
         }
         $updPath = Join-Path $CloneUserData '.updaterId'
         if (Test-Path -LiteralPath $updPath) {
-            [System.IO.File]::WriteAllText($updPath, ([guid]::NewGuid().ToString()).ToLowerInvariant(), $noBom)
-            Write-Host '[seed-scrub] Clone .updaterId rotated.' -ForegroundColor Green
+            try {
+                $newUpd = ([guid]::NewGuid().ToString()).ToLowerInvariant()
+                [System.IO.File]::WriteAllText($updPath, $newUpd, $noBom)
+                $updBack = [System.IO.File]::ReadAllText($updPath)
+                if ($updBack -ne $newUpd) {
+                    Write-Host '[seed-scrub] FAILED: .updaterId did not survive the write.' -ForegroundColor Red
+                    $seedScrubOk = $false
+                } else {
+                    Write-Host '[seed-scrub] Clone .updaterId rotated (verified).' -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "[seed-scrub] FAILED: .updaterId ($($_.Exception.Message))" -ForegroundColor Red
+                $seedScrubOk = $false
+            }
         }
-    } catch { Write-Host "[seed-scrub] WARN: $($_.Exception.Message) (launch continues)" -ForegroundColor Yellow }
-} else {
-    Write-Host "[seed] $($cfg.DisplayName) profile already exists, skipping clone (independent)."
+    } catch {
+        Write-Host "[seed-scrub] FAILED: $($_.Exception.Message) (seed marker withheld; the clone will not launch)" -ForegroundColor Red
+        $seedScrubOk = $false
+    }
+    if (-not $seedScrubOk) {
+        # The seeding marker is deliberately left behind: the next launch
+        # re-clears and re-seeds. The clone can never run on Primary identity.
+        throw "[seed] Identity scrub FAILED - seed marker withheld so the clone never runs on Primary identity. Remove or fix '$CloneZCode' and re-run (the next launch auto-clears and re-seeds)."
+    }
+    [System.IO.File]::WriteAllText($SeedMarker, '', $noBom)
+    Remove-Item -LiteralPath $SeedingMarker -Force -ErrorAction SilentlyContinue
+    Write-Host '[seed] Clone complete (seed marker written).'
 }
 
 # 2c) Telegram routing (marker-guarded): one credential = one instance (EC-D03).
@@ -310,28 +462,45 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
     Write-Host '[telegram-route] Already reconciled, skipping.' -ForegroundColor DarkGray
 } else {
     $tgNoBom = New-Object System.Text.UTF8Encoding $false
-    $tgDisabled = 0
+    $tgDisabled = 0        # VERIFIED disables only (re-read after write)
     $tgPreserved = 0
-    $tgPrimarySha8 = ''
-    $tgPrimaryId = ''
+    $tgWriteFailed = $false
+    # Fingerprint ALL Primary telegram bots (multi-bot: bot-config.v3 mints
+    # bot-<guid> rows) into id + sha8 SETS - the old single-scalar probe kept
+    # only the first bot with a credential, so a clone copy of bot #2 matched
+    # nothing and was preserved as "unique" (duplicate poller on its token).
+    $tgPrimarySha8s = @()
+    $tgPrimaryIds = @()
     try {
-        $tgPrimaryCreds = Get-Content -LiteralPath (Join-Path $PrimaryZCode 'v2\credentials.json') -Raw | ConvertFrom-Json
         foreach ($cfgName in @('v2\bot-config.json', 'v2\bot-config.v3.json')) {
             $tgPrimaryCfg = Join-Path $PrimaryZCode $cfgName
             if (-not (Test-Path -LiteralPath $tgPrimaryCfg)) { continue }
             $pj = Get-Content -LiteralPath $tgPrimaryCfg -Raw | ConvertFrom-Json
             foreach ($b in @($pj.bots)) {
                 if ($b.provider -ne 'telegram') { continue }
-                $tgPrimaryId = [string]$b.id
-                $tgPrimarySha8 = Get-TgCredSha8 -CredentialsPath (Join-Path $PrimaryZCode 'v2\credentials.json') -CredentialRef ([string]$b.credentialRef)
-                if ($tgPrimarySha8 -ne '') { break }
+                $sha = Get-TgCredSha8 -CredentialsPath (Join-Path $PrimaryZCode 'v2\credentials.json') -CredentialRef ([string]$b.credentialRef)
+                if ($sha -ne '') { $tgPrimarySha8s += $sha }
+                $bid = [string]$b.id
+                if ($bid -ne '') { $tgPrimaryIds += $bid }
             }
-            if ($tgPrimarySha8 -ne '') { break }
         }
-    } catch { Write-Host '[telegram-route] Primary fingerprint SKIP, falling back to disable.' -ForegroundColor Yellow }
+    } catch {
+        # Swallowed by design: the failure is derived below from both sets
+        # being empty; the exception detail is logged for diagnosis.
+        Write-Host ("[telegram-route] Primary fingerprint read failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+    }
+    # Failure (the read threw, OR both sets end up empty) = fail CLOSED:
+    # disable EVERY enabled clone bot. The old code only printed "falling back
+    # to disable" and then PRESERVED the seed-copy duplicate - two pollers on
+    # one token (HTTP 409 + cross-account billing), locked in by the marker.
+    $tgPrimaryFailed = (($tgPrimarySha8s.Count -eq 0) -and ($tgPrimaryIds.Count -eq 0))
+    if ($tgPrimaryFailed) {
+        Write-Host '[telegram-route] Primary fingerprint unavailable - safe fallback: disabling every enabled clone Telegram bot.' -ForegroundColor Yellow
+    }
     foreach ($cfgName in @('v2\bot-config.json', 'v2\bot-config.v3.json')) {
         $tgCfg = Join-Path $CloneZCode $cfgName
         if (-not (Test-Path -LiteralPath $tgCfg)) { continue }
+        $disabledInFile = @()
         try {
             $bj = Get-Content -LiteralPath $tgCfg -Raw | ConvertFrom-Json
             $changed = $false
@@ -341,21 +510,42 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
                     if ($b.enabled -ne $true) { continue }
                     $cloneSha = Get-TgCredSha8 -CredentialsPath (Join-Path $CloneZCode 'v2\credentials.json') -CredentialRef ([string]$b.credentialRef)
                     $isDup = $false
-                    if ($tgPrimarySha8 -ne '' -and $cloneSha -eq $tgPrimarySha8) { $isDup = $true }
-                    if ($tgPrimaryId -ne '' -and ([string]$b.id) -eq $tgPrimaryId) { $isDup = $true }
-                    if ($isDup) { $b.enabled = $false; $changed = $true; $tgDisabled++ }
+                    if (($tgPrimarySha8s.Count -gt 0) -and ($cloneSha -ne '') -and ($tgPrimarySha8s -contains $cloneSha)) { $isDup = $true }
+                    if (($tgPrimaryIds.Count -gt 0) -and ($tgPrimaryIds -contains ([string]$b.id))) { $isDup = $true }
+                    if ($tgPrimaryFailed -or $isDup) {
+                        $b.enabled = $false; $changed = $true; $disabledInFile += ([string]$b.id)
+                    }
                     else {
                         if ($cloneSha -ne '') { $tgPreserved++ }
-                        else { $b.enabled = $false; $changed = $true; $tgDisabled++ }
+                        else { $b.enabled = $false; $changed = $true; $disabledInFile += ([string]$b.id) }
                     }
                 }
             }
-            if ($changed) { [System.IO.File]::WriteAllText($tgCfg, ($bj | ConvertTo-Json -Depth 20), $tgNoBom) }
-        } catch { Write-Host "[telegram-route] $cfgName SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
+            if ($changed) {
+                [System.IO.File]::WriteAllText($tgCfg, ($bj | ConvertTo-Json -Depth 20), $tgNoBom)
+                # never-silent-success: re-read and verify every disable landed
+                # before counting it; a write that did not stick withholds the
+                # marker so the next launch retries the reconcile.
+                $vbj = Get-Content -LiteralPath $tgCfg -Raw | ConvertFrom-Json
+                $verified = $true
+                foreach ($did in $disabledInFile) {
+                    $vb = @($vbj.bots | Where-Object { ([string]$_.id) -eq $did })
+                    if (($vb.Count -eq 0) -or ($null -eq $vb[0].enabled) -or ($vb[0].enabled -eq $true)) { $verified = $false }
+                }
+                if ($verified) { $tgDisabled += $disabledInFile.Count }
+                else {
+                    Write-Host "[telegram-route] FAILED: $cfgName disable(s) did not survive the write - marker withheld; next launch retries." -ForegroundColor Red
+                    $tgWriteFailed = $true
+                }
+            }
+        } catch {
+            Write-Host "[telegram-route] FAILED: $cfgName ($($_.Exception.Message))" -ForegroundColor Red
+            $tgWriteFailed = $true
+        }
     }
     if ($tgDisabled -gt 0) { Write-Host ("[telegram-route] Disabled {0} duplicate Telegram bot(s) in {1}; Telegram stays on Primary." -f $tgDisabled, $cfg.DisplayName) -ForegroundColor Green }
     if ($tgPreserved -gt 0) { Write-Host ("[telegram-route] Preserved {0} unique Telegram bot row(s) in {1} (distinct credential)." -f $tgPreserved, $cfg.DisplayName) -ForegroundColor Green }
-    if (($tgDisabled -eq 0) -and ($tgPreserved -eq 0)) { Write-Host "[telegram-route] No enabled Telegram bots in $($cfg.DisplayName); nothing to do." -ForegroundColor DarkGray }
+    if (($tgDisabled -eq 0) -and ($tgPreserved -eq 0) -and (-not $tgWriteFailed)) { Write-Host "[telegram-route] No enabled Telegram bots in $($cfg.DisplayName); nothing to do." -ForegroundColor DarkGray }
     # Drop stale polling locks, but ONLY when this clone is not running (a live
     # poller owns its lock dir). A running instance picks up the config change
     # on its next restart.
@@ -401,7 +591,11 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
             }
         }
     } catch { Write-Host "[telegram-route] lock check SKIP ($($_.Exception.Message))" -ForegroundColor Yellow }
-    if ($tgPreserved -gt 0) {
+    # Marker written ONLY when no write failed: a not-verified reconcile must
+    # retry on the next launch, never be locked in as "already routed".
+    if ($tgWriteFailed) {
+        Write-Host '[telegram-route] Marker withheld - the failed reconcile retries on the next launch.' -ForegroundColor Yellow
+    } elseif ($tgPreserved -gt 0) {
         $tgUniqueSha = ''
         $tgUniqueId = ''
         try {
@@ -423,11 +617,11 @@ if ($tgMarkerText -like 'v2 unique-bot*') {
             [System.IO.File]::WriteAllText($tgMarker, ('v2 unique-bot sha8=' + $tgUniqueSha + ' id=' + $tgUniqueId), $tgNoBom)
         }
         else {
-            New-Item -ItemType File -Path $tgMarker -Force | Out-Null
+            [System.IO.File]::WriteAllText($tgMarker, '', $tgNoBom)
         }
     }
     else {
-        New-Item -ItemType File -Path $tgMarker -Force | Out-Null
+        [System.IO.File]::WriteAllText($tgMarker, '', $tgNoBom)
     }
 }
 
@@ -561,9 +755,15 @@ $seedTray = Join-Path $BrandingSeed 'tray_icon.ico'
 if (((-not (Test-Path -LiteralPath $brandingIcon)) -or (-not (Test-Path -LiteralPath $brandingTray))) -and
     ((Test-Path -LiteralPath $seedIcon)) -and (Test-Path -LiteralPath $seedTray)) {
     New-Item -ItemType Directory -Path $BrandingDir -Force | Out-Null
-    Copy-Item -LiteralPath $seedIcon -Destination $BrandingDir -Force
-    Copy-Item -LiteralPath $seedTray -Destination $BrandingDir -Force
-    Write-Host "[branding] Seeded $($cfg.DisplayName) icons -> $($cfg.Home)\branding" -ForegroundColor Green
+    try {
+        Copy-Item -LiteralPath $seedIcon -Destination $BrandingDir -Force
+        Copy-Item -LiteralPath $seedTray -Destination $BrandingDir -Force
+        Write-Host "[branding] Seeded $($cfg.DisplayName) icons -> $($cfg.Home)\branding" -ForegroundColor Green
+    } catch {
+        # A failed icon seed must not abort the launch: the icon-gating block
+        # below already degrades gracefully and the AUMID stays applied.
+        Write-Host "[branding] Icon seed copy FAILED ($($_.Exception.Message)) - SEPARATE taskbar identity still applied." -ForegroundColor Yellow
+    }
 }
 # AUMID suffix is UNCONDITIONAL: it is the clone's taskbar identity, not a
 # cosmetic. Gating it on the branding files (as an earlier revision did) meant a
@@ -630,6 +830,9 @@ Write-Host '        close ZCode, run tools\patch_zcode_icon_override.ps1, then r
 # directly and verifies by read-back (never silent-success). The launcher must
 # run at the same or higher integrity level as the clone (UIPI).
 $wantAumid = "dev.zcode.app.$($cfg.AumidSuffix)"   # base in sync with install_zcode_second_shortcuts.ps1
+# Add-Type guard: an in-session re-run (e.g. after Start-Process) must not
+# throw "type already exists" - compile only when the type is not loaded.
+if (-not ('ZcodeWindowAumid' -as [type])) {
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -690,17 +893,19 @@ public class ZcodeWindowAumid {
     }
 }
 "@
+}
 # Resolve the instance's main window: the v6 title "ZCode <Name>" is the source
 # of truth - it survives splash->main window swaps and never matches the
 # transient relauncher process that the single-instance focus path spawns.
+# Title-resolve is the ONLY selector: the old fresh-PID fallback was removed
+# (2026-11-15) - $newPid comes from a bare PID diff that adopts ANY new main
+# (a sibling clone's, or the transient relauncher's), and AGENTS.md forbids
+# stamping by the fresh PID alone.
 $wantTitle = "ZCode $($cfg.DisplayName)"
 function Resolve-InstanceWindow {
     $p = Get-Process -Name 'ZCode*' -ErrorAction SilentlyContinue |
         Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -eq $wantTitle } |
         Select-Object -First 1
-    if (-not $p -and $newPid) {
-        $p = Get-Process -Id $newPid -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
-    }
     return $p
 }
 # Up to 60s: a slow cold start keeps the v6 title hidden during the splash
