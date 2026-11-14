@@ -128,16 +128,16 @@ if ($out -match 'Unknown task')            { $failures += 'C: Unknown task on to
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'C: ZCode submenu not shown' }
 
 # D) invalid main-menu id -> exactly one legit Unknown task "99"
-$out = Invoke-Scenario 'D_invalid_main' @('105', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "105"')).Count
+$out = Invoke-Scenario 'D_invalid_main' @('108', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "108"')).Count
 if ($hits -ne 1)                           { $failures += "D: expected 1 legit Unknown task, got $hits" }
 
-# E) main sub-path "2 105" -> chain reaches ZCodeOne, exactly one legit
+# E) main sub-path "2 108" -> chain reaches ZCodeOne, exactly one legit
 #    Unknown task, and the PENDING_CHAIN literal never appears
-#    (105 = the next unassigned gid; 99 became REAL when the OpenCode
-#    identity resets landed 2026-11-14)
-$out = Invoke-Scenario 'E_subpath_chain' @('2 105', '0', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "105"')).Count
+#    (108 = the next unassigned gid; 105-107 became REAL when the suite
+#    exe-identity rebuild rows landed 2026-11-14)
+$out = Invoke-Scenario 'E_subpath_chain' @('2 108', '0', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "108"')).Count
 if ($hits -ne 1)                           { $failures += "E: expected 1 Unknown task from chain, got $hits" }
 if ($out -match '%PENDING_CHAIN%')         { $failures += 'E: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'E: ZCode submenu not reached via sub-path' }
@@ -155,33 +155,41 @@ if ($hits -ne 1)                           { $failures += "G: expected 1 Unknown
 
 # H) open AutoClaw2 submenu (PENDING_CHAIN undefined), back, exit -> clean render
 #    (2026-11-14: the MCP sync watcher row [11] shifted Maintenance to
-#    [12]-[14] and Identity Resets to [15]-[21])
+#    [12]-[15] and Identity Resets to [16]-[22]; [15] = the opt-in Task
+#    Manager exe-identity rebuild)
 $out = Invoke-Scenario 'H_autoclaw_render' @('4', '0', '0')
 if ($out -match 'Unknown task')                  { $failures += 'H: Unknown task on AutoClaw2 submenu render' }
 if ($out -match '%PENDING_CHAIN%')               { $failures += 'H: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'AutoClaw2 Multi-Instance')   { $failures += 'H: AutoClaw2 submenu not shown' }
 if ($out -notmatch '\[11\].*MCP sync watcher')   { $failures += 'H: AutoClaw2 [11] MCP watcher not rendered' }
-if ($out -notmatch '\[15\].*Reset Blue clone')   { $failures += 'H: AutoClaw2 [15] Blue reset not rendered' }
-if ($out -notmatch '\[19\].*Reset Orange clone') { $failures += 'H: AutoClaw2 [19] Orange reset not rendered' }
-if ($out -notmatch '\[20\].*Reset Primary')      { $failures += 'H: AutoClaw2 [20] Primary reset not rendered' }
-if ($out -notmatch '\[21\].*Reset ALL profiles') { $failures += 'H: AutoClaw2 [21] all-profiles reset not rendered' }
-if ($out -notmatch '\[15\].*chats \+ work kept') { $failures += 'H: AutoClaw2 [15] reset tail not rendered' }
+if ($out -notmatch '\[15\].*Rebuild clone Task Manager icons') { $failures += 'H: AutoClaw2 [15] TM rebuild not rendered' }
+if ($out -notmatch '\[16\].*Reset Blue clone')   { $failures += 'H: AutoClaw2 [16] Blue reset not rendered' }
+if ($out -notmatch '\[20\].*Reset Orange clone') { $failures += 'H: AutoClaw2 [20] Orange reset not rendered' }
+if ($out -notmatch '\[21\].*Reset Primary')      { $failures += 'H: AutoClaw2 [21] Primary reset not rendered' }
+if ($out -notmatch '\[22\].*Reset ALL profiles') { $failures += 'H: AutoClaw2 [22] all-profiles reset not rendered' }
+if ($out -notmatch '\[16\].*chats \+ work kept') { $failures += 'H: AutoClaw2 [16] reset tail not rendered' }
 
 # H2) Cline submenu render incl. the new Identity Resets rows
+#    (2026-11-14: [10] = the opt-in Task Manager exe-identity rebuild,
+#    Identity Resets shifted to [11]-[17])
 $out = Invoke-Scenario 'H2_cline_render' @('5', '0', '0')
 if ($out -match 'Unknown task')                 { $failures += 'H2: Unknown task on Cline submenu render' }
-if ($out -notmatch '\[10\].*Reset Blue clone')  { $failures += 'H2: Cline [10] Blue reset not rendered' }
-if ($out -notmatch '\[14\].*Reset Orange clone') { $failures += 'H2: Cline [14] Orange reset not rendered' }
-if ($out -notmatch '\[15\].*Reset Primary')     { $failures += 'H2: Cline [15] Primary reset not rendered' }
-if ($out -notmatch '\[16\].*Reset ALL profiles') { $failures += 'H2: Cline [16] all-profiles reset not rendered' }
+if ($out -notmatch '\[10\].*Rebuild clone Task Manager icons') { $failures += 'H2: Cline [10] TM rebuild not rendered' }
+if ($out -notmatch '\[11\].*Reset Blue clone')  { $failures += 'H2: Cline [11] Blue reset not rendered' }
+if ($out -notmatch '\[15\].*Reset Orange clone') { $failures += 'H2: Cline [15] Orange reset not rendered' }
+if ($out -notmatch '\[16\].*Reset Primary')     { $failures += 'H2: Cline [16] Primary reset not rendered' }
+if ($out -notmatch '\[17\].*Reset ALL profiles') { $failures += 'H2: Cline [17] all-profiles reset not rendered' }
 
 # H3) OpenCode submenu render incl. the new Identity Resets rows
+#    (2026-11-14: [13] = the opt-in Task Manager exe-identity rebuild,
+#    Identity Resets shifted to [14]-[20])
 $out = Invoke-Scenario 'H3_opencode_render' @('6', '0', '0')
 if ($out -match 'Unknown task')                  { $failures += 'H3: Unknown task on OpenCode submenu render' }
-if ($out -notmatch '\[13\].*Reset Blue clone')   { $failures += 'H3: OpenCode [13] Blue reset not rendered' }
-if ($out -notmatch '\[17\].*Reset Orange clone') { $failures += 'H3: OpenCode [17] Orange reset not rendered' }
-if ($out -notmatch '\[18\].*Reset Primary')      { $failures += 'H3: OpenCode [18] Primary reset not rendered' }
-if ($out -notmatch '\[19\].*Reset ALL profiles') { $failures += 'H3: OpenCode [19] all-profiles reset not rendered' }
+if ($out -notmatch '\[13\].*Rebuild clone Task Manager icons') { $failures += 'H3: OpenCode [13] TM rebuild not rendered' }
+if ($out -notmatch '\[14\].*Reset Blue clone')   { $failures += 'H3: OpenCode [14] Blue reset not rendered' }
+if ($out -notmatch '\[18\].*Reset Orange clone') { $failures += 'H3: OpenCode [18] Orange reset not rendered' }
+if ($out -notmatch '\[19\].*Reset Primary')      { $failures += 'H3: OpenCode [19] Primary reset not rendered' }
+if ($out -notmatch '\[20\].*Reset ALL profiles') { $failures += 'H3: OpenCode [20] all-profiles reset not rendered' }
 
 # I) invalid AutoClaw chain id "4 42" -> exactly one legit Unknown task "42"
 $out = Invoke-Scenario 'I_invalid_autoclaw' @('4 42', '0', '0')
