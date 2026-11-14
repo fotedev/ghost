@@ -162,6 +162,14 @@ if ($out -notmatch '\[19\].*Reset Primary')      { $failures += 'H: AutoClaw2 [1
 if ($out -notmatch '\[20\].*Reset ALL profiles') { $failures += 'H: AutoClaw2 [20] all-profiles reset not rendered' }
 if ($out -notmatch '\[14\].*chats \+ work kept') { $failures += 'H: AutoClaw2 [14] reset tail not rendered' }
 
+# H2) Cline submenu render incl. the new Identity Resets rows
+$out = Invoke-Scenario 'H2_cline_render' @('5', '0', '0')
+if ($out -match 'Unknown task')                 { $failures += 'H2: Unknown task on Cline submenu render' }
+if ($out -notmatch '\[10\].*Reset Blue clone')  { $failures += 'H2: Cline [10] Blue reset not rendered' }
+if ($out -notmatch '\[14\].*Reset Orange clone') { $failures += 'H2: Cline [14] Orange reset not rendered' }
+if ($out -notmatch '\[15\].*Reset Primary')     { $failures += 'H2: Cline [15] Primary reset not rendered' }
+if ($out -notmatch '\[16\].*Reset ALL profiles') { $failures += 'H2: Cline [16] all-profiles reset not rendered' }
+
 # I) invalid AutoClaw chain id "4 42" -> exactly one legit Unknown task "42"
 $out = Invoke-Scenario 'I_invalid_autoclaw' @('4 42', '0', '0')
 $hits = ([regex]::Matches($out, 'Unknown task "42"')).Count

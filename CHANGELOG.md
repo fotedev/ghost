@@ -28,6 +28,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   are unit-tested through the script's dot-source guard
   (`tests/reset_autoclaw2.Tests.ps1`, 10 tests). Live acceptance stays
   user-supervised — nothing was executed against the live profiles.
+- **Cline identity reset** (2026-11-14): new `src/windows/reset_cline.ps1`
+  (`-Target Primary|c1..c5|All`, `-KeepLogin`, `-DryRun`) — OVERRIDES the
+  Cline spec's earlier "no reset script by design" decision. Deletes
+  `data\secrets.json` (clineAccountId + tokens) + `data\settings\providers.json`
+  (provider OAuth) — the only auth stores — and sweeps stale hub locks,
+  logs, cache and the web-login Chromium profile (`webview\EBWebView` per
+  clone; the Primary's lives at `%LOCALAPPDATA%\bot.cline.app`). `data\db\*.db`
+  (sessions/tasks/hub/teams/connectors), `data\sessions\` and the settings
+  files are preserved. HKLM MachineGuid is deliberately untouched
+  (system-level; `change_device_id.ps1` owns it). Menu: Cline [10]-[16]
+  (gids 91-97, appended in display order; the ALL row gated by
+  `:ConfirmClineReset`; `:RunClineReset` prints the relaunch-safety note);
+  hub rows + wrapper table + harness scenarios extended. Pure helpers
+  unit-tested via the dot-source guard (`tests/reset_cline.Tests.ps1`,
+  11 tests). Live acceptance stays user-supervised.
 - **AutoClaw2 chat sync: `-Account` source hint + source-account
   provenance** (2026-11-11): `tools/sync_autoclaw2_chats.ps1 -Account
   <sha-prefix>` pins the multi-account Primary's account dir for the

@@ -220,7 +220,28 @@
           { "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c4", "-Status"] },
           { "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c5", "-Status"] }
         ], "notes": [] },
-        { "gid": 52, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_cline_clone_shortcuts.ps1", "args": ["-Remove"], "notes": [] }
+        { "gid": 52, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_cline_clone_shortcuts.ps1", "args": ["-Remove"], "notes": [] },
+        { "gid": 91, "label": "Reset Blue clone", "tail": "- chats + tasks kept", "mode": "zcode-reset", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "c1"], "notes": [
+          "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
+        ] },
+        { "gid": 92, "label": "Reset Yellow clone", "tail": "- chats + tasks kept", "mode": "zcode-reset", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "c2"], "notes": [
+          "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
+        ] },
+        { "gid": 93, "label": "Reset Green clone", "tail": "- chats + tasks kept", "mode": "zcode-reset", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "c3"], "notes": [
+          "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
+        ] },
+        { "gid": 94, "label": "Reset Red clone", "tail": "- chats + tasks kept", "mode": "zcode-reset", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "c4"], "notes": [
+          "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
+        ] },
+        { "gid": 95, "label": "Reset Orange clone", "tail": "- chats + tasks kept", "mode": "zcode-reset", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "c5"], "notes": [
+          "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
+        ] },
+        { "gid": 96, "label": "Reset Primary", "tail": "- stock profile - chats + tasks kept", "mode": "zcode-reset", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "Primary"], "notes": [
+          "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
+        ] },
+        { "gid": 97, "label": "Reset ALL profiles", "tail": "- Blue..Orange + Primary - asks first", "mode": "confirm-reset", "confirmTitle": "Reset ALL profiles", "confirmText": "This tree-kills the affected profiles and rewrites their identity stores.", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "All"], "notes": [
+          "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
+        ] }
       ]
     },
     {
