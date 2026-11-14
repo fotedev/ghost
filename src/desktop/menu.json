@@ -154,6 +154,10 @@
         { "gid": 73, "label": "Import MCPs to clones", "tail": "- from the central master manifest", "mode": "inline", "script": "tools/sync_autoclaw2_mcp.ps1", "args": ["-Target", "All"], "notes": [] },
         { "gid": 75, "label": "Chat inventory", "tail": "- read-only cross-profile report", "mode": "inline", "script": "tools/sync_autoclaw2_chats.ps1", "args": ["-Mode", "Inventory", "-Target", "All"], "notes": [] },
         { "gid": 76, "label": "Import chats to clones", "tail": "- one-way Primary to clones - DB backed up first", "mode": "inline", "script": "tools/sync_autoclaw2_chats.ps1", "args": ["-Mode", "Import", "-Apply", "-AllMissing", "-Target", "All"], "notes": [] },
+        { "gid": 74, "label": "MCP sync watcher", "tail": "- resident - converges clones on every master-manifest change", "mode": "detached", "title": "AutoClaw2 MCP Sync Watcher", "psFlags": "-NoProfile", "script": "tools/watch_autoclaw2_mcp_sync.ps1", "args": [], "notes": [
+          "Watcher launched in a separate window - leave it open. It re-applies the master MCP manifest to the suite on every change - closed profiles converge at once, running ones on their next launch.",
+          "Log: %LOCALAPPDATA%\\watch-autoclaw2-mcp-sync\\ac2-mcp-sync.log"
+        ] },
         { "gid": 35, "label": "Clone status", "tail": "- all 5 - locks, device-id, sign-in state", "mode": "chain-pause", "steps": [
           { "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c1", "-Status"] },
           { "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c2", "-Status"] },

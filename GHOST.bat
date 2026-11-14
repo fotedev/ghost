@@ -215,20 +215,21 @@ call :Div "Sync + Chat Import"
 call :Opt 8 "Import MCPs to clones" "- from the central master manifest"
 call :Opt 9 "Chat inventory" "- read-only cross-profile report"
 call :Opt 10 "Import chats to clones" "- every missing Primary chat - one-way - clone windows must be closed"
+call :Opt 11 "MCP sync watcher" "- resident - converges clones on every master-manifest change"
 echo.
 call :Div "Maintenance"
-call :Opt 11 "Clone status" "- all 5 - locks, device-id, sign-in state"
-call :Opt 12 "Remove clone shortcuts" "- Desktop + Start menu"
-call :Opt 13 "Apply clone identity patch" "- colored taskbar buttons - waits for AutoClaw2 to close"
+call :Opt 12 "Clone status" "- all 5 - locks, device-id, sign-in state"
+call :Opt 13 "Remove clone shortcuts" "- Desktop + Start menu"
+call :Opt 14 "Apply clone identity patch" "- colored taskbar buttons - waits for AutoClaw2 to close"
 echo.
 call :Div "Identity Resets"
-call :Opt 14 "Reset Blue clone" "- chats + work kept"
-call :Opt 15 "Reset Yellow clone" "- chats + work kept"
-call :Opt 16 "Reset Green clone" "- chats + work kept"
-call :Opt 17 "Reset Red clone" "- chats + work kept"
-call :Opt 18 "Reset Orange clone" "- chats + work kept"
-call :Opt 19 "Reset Primary" "- default profile - chats + work kept"
-call :Opt 20 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
+call :Opt 15 "Reset Blue clone" "- chats + work kept"
+call :Opt 16 "Reset Yellow clone" "- chats + work kept"
+call :Opt 17 "Reset Green clone" "- chats + work kept"
+call :Opt 18 "Reset Red clone" "- chats + work kept"
+call :Opt 19 "Reset Orange clone" "- chats + work kept"
+call :Opt 20 "Reset Primary" "- default profile - chats + work kept"
+call :Opt 21 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -455,8 +456,10 @@ rem locals 8-10 are the new Sync + Chat Import section (gids 73/75/76; the
 rem MCP watcher row is deferred and keeps gid 74), Maintenance moved to 11-12.
 rem 2026-11-06: local 13 = the window identity patch (gid 78) - colored
 rem taskbar buttons for the running clone windows.
-rem 2026-11-14: locals 14-20 = the Identity Resets section (gids 84-90;
-rem reset_autoclaw2.ps1 -Target c1..c5|Primary|All; the ALL row is gated).
+rem 2026-11-14: local 11 = the MCP sync watcher (gid 74 - reserved since
+rem 2026-11-04, now LIVE); locals 12-14 = Maintenance, 15-21 = Identity
+rem Resets (gids 84-90; reset_autoclaw2.ps1 -Target c1..c5|Primary|All; the
+rem ALL row is gated). Locals shifted +1 for the watcher row - gids unchanged.
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=28"
 if "%~1"=="2" set "RESOLVED=29"
@@ -468,16 +471,17 @@ if "%~1"=="7" set "RESOLVED=34"
 if "%~1"=="8" set "RESOLVED=73"
 if "%~1"=="9" set "RESOLVED=75"
 if "%~1"=="10" set "RESOLVED=76"
-if "%~1"=="11" set "RESOLVED=35"
-if "%~1"=="12" set "RESOLVED=36"
-if "%~1"=="13" set "RESOLVED=78"
-if "%~1"=="14" set "RESOLVED=84"
-if "%~1"=="15" set "RESOLVED=85"
-if "%~1"=="16" set "RESOLVED=86"
-if "%~1"=="17" set "RESOLVED=87"
-if "%~1"=="18" set "RESOLVED=88"
-if "%~1"=="19" set "RESOLVED=89"
-if "%~1"=="20" set "RESOLVED=90"
+if "%~1"=="11" set "RESOLVED=74"
+if "%~1"=="12" set "RESOLVED=35"
+if "%~1"=="13" set "RESOLVED=36"
+if "%~1"=="14" set "RESOLVED=78"
+if "%~1"=="15" set "RESOLVED=84"
+if "%~1"=="16" set "RESOLVED=85"
+if "%~1"=="17" set "RESOLVED=86"
+if "%~1"=="18" set "RESOLVED=87"
+if "%~1"=="19" set "RESOLVED=88"
+if "%~1"=="20" set "RESOLVED=89"
+if "%~1"=="21" set "RESOLVED=90"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -542,12 +546,12 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-104; 63 unused; 74 reserved for the deferred
-rem AutoClaw2 MCP watcher; 78 = the AutoClaw2 identity patch; 79/80 = the
-rem OpenCode light worker + clone login; 81 = the desktop-app builder;
-rem 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe identity;
-rem 84-90 = the AutoClaw2 identity resets; 91-97 = the Cline identity resets;
-rem 98-104 = the OpenCode identity resets, appended 2026-11-14).
+rem Runs one task by global id (1-104; 63 unused; 74 = the AutoClaw2 MCP sync
+rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
+rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
+rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
+rem identity; 84-90 = the AutoClaw2 identity resets; 91-97 = the Cline
+rem identity resets; 98-104 = the OpenCode identity resets).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -625,6 +629,7 @@ if "%~1"=="70" (call :Detached "ZCode Light Worker" "-NoProfile" "src\windows\la
 if "%~1"=="71" (call :Detached "ZCode Clone Login" "-NoProfile" "src\windows\launch_zcode_cli_light.ps1" "-Login" "Login window opened - a browser will ask you to sign in with THIS clone's account." "One-time per clone home: it routes light workers and the T3 bridge to the Start Plan instead of the free model." & exit /b)
 if "%~1"=="72" (call :Run "tools\install_zcode_second_shortcuts.ps1" -Remove & exit /b)
 if "%~1"=="73" (call :Run "tools\sync_autoclaw2_mcp.ps1" -Target All & exit /b)
+if "%~1"=="74" (call :Detached "AutoClaw2 MCP Sync Watcher" "-NoProfile" "tools\watch_autoclaw2_mcp_sync.ps1" "" "Watcher launched in a separate window - leave it open. It re-applies the master MCP manifest to the suite on every change - closed profiles converge at once, running ones on their next launch." "Log: %LOCALAPPDATA%\watch-autoclaw2-mcp-sync\ac2-mcp-sync.log" & exit /b)
 if "%~1"=="75" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Inventory -Target All & exit /b)
 if "%~1"=="76" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Import -Apply -AllMissing -Target All & exit /b)
 if "%~1"=="77" (call :Run "tools\sync_mcp_registry.ps1" & exit /b)

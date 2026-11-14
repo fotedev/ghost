@@ -456,12 +456,15 @@ Telegram routing are PRESERVED. Backups to `ID_Backups\<ts>\` + audit JSON +
 a restore script per target. Menu equivalents: Blue..Orange = [14]-[18];
 Primary = [19]; ALL = [20] (confirmation gate).
 
-### AutoClaw2 MCP + chat sync (AutoClaw2 [8]-[10])
+### AutoClaw2 MCP + chat sync (AutoClaw2 [8]-[11])
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_mcp.ps1"                   # [8] — apply tools\autoclaw2-mcp.master.json to closed clones (LIVE)
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_mcp.ps1" -Target c1 -DryRun # plan only
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_mcp.ps1" -RestoreBackup -Target c1  # restore the newest pre-run backup
+powershell -ExecutionPolicy Bypass -File "tools\watch_autoclaw2_mcp_sync.ps1"             # [11] — resident watcher (stat-guards the master manifest)
+powershell -ExecutionPolicy Bypass -File "tools\watch_autoclaw2_mcp_sync.ps1" -RunOnce    # one-shot convergence pass
+powershell -ExecutionPolicy Bypass -File "tools\watch_autoclaw2_mcp_sync.ps1" -InstallAutostart  # Startup .lnk (hidden)
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Inventory  # [9] — read-only cross-profile chat report
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Import -SessionId <uuid> -Target c1          # [10] dry-run plan
 powershell -ExecutionPolicy Bypass -File "tools\sync_autoclaw2_chats.ps1" -Mode Import -SessionId <uuid> -Target c1 -Apply   # guarded one-way copy
@@ -474,6 +477,10 @@ Definitions only (no credentials travel): the master manifest
 clone-local `enabled` toggles and never deletes clone-only sources, written
 rows stay `pending` for the app to test (D5), and every write happens on a
 CLOSED profile (D7 — the launcher's pre-launch step [2b] is the primary path).
+The [11] watcher stat-guards the master manifest and re-applies it on every
+change (console-less child + 600s cap; no live apply — closed profiles
+converge at once, running ones on their next launch); log at
+`%LOCALAPPDATA%\watch-autoclaw2-mcp-sync\ac2-mcp-sync.log`.
 Chat import copies a session as a NEW local session with an `[import]` title
 prefix (D11), refuses IM-bound sessions (D12), and is revertible by import id.
 Spec: `docs\AUTOCLAW2_SYNC_SPEC.md`. The live acceptance runs (A1-A7, C2-C7)
