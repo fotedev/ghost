@@ -25,7 +25,7 @@ import base64
 import json
 import sys
 
-from ghost import audit, autoclaw2, backup, filesweep, identity, json_patch, restore, sqlite_keys, winstore
+from ghost import audit, autoclaw2, backup, filesweep, identity, json_patch, platform, restore, sqlite_keys, winstore
 
 
 def _decode_updates(b64):
@@ -100,6 +100,23 @@ def _cmd_chat_check(args):
     lines = sqlite_keys.chat_check(args.mode, args.db, args.tasks_index)
     for line in lines:
         print(line)
+    return 0
+
+
+def _cmd_paths(args):
+    # Exit 2 on an unknown slug (distinct from the generic 1) so a shell
+    # caller can tell "bad slug" from "resolver failed". Unverified rows are
+    # echoed on stderr too - never a silent guess (ground truth #5).
+    try:
+        report = platform.get_store_paths(args.slug)
+    except ValueError as exc:
+        print("unknown slug: {0}".format(exc), file=sys.stderr)
+        return 2
+    if report["unverified"]:
+        print("unverified paths (derived from the Windows layout + documented "
+              "Linux conventions - live verification pending): "
+              + ", ".join(report["unverified"]), file=sys.stderr)
+    print(json.dumps(report))
     return 0
 
 
@@ -429,6 +446,15 @@ def build_parser():
     p.add_argument("payload_b64",
                    help='base64 of {"target": "c1", "import_id": "..."}')
     p.set_defaults(func=_cmd_ac2_chat_revert)
+
+    p = sub.add_parser(
+        "paths",
+        help="resolve an app's identity-store paths for THIS platform as JSON "
+             "(single source of truth: ghost.platform; unverified rows listed)")
+    p.add_argument("slug",
+                   help="app slug (cursor|devin|windsurf|trae|qoder|qoderwork|"
+                        "zcode|minimax|opencode-cli)")
+    p.set_defaults(func=_cmd_paths)
 
     return parser
 

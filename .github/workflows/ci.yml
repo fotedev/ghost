@@ -90,8 +90,15 @@ jobs:
           done
 
   python-core:
-    name: Python core tests
-    runs-on: windows-latest
+    name: Python core tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # 2026-11-14: ubuntu added with the cross-platform path layer
+    # (ghost.platform) - the core must stay importable and path-correct on
+    # Linux now that the .sh resets resolve paths through the `paths` verb.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
 

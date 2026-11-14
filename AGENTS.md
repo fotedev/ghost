@@ -27,7 +27,13 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,
                                #   refresh_zcode_second_chats chat-check) invoke it by absolute
-                               #   path; tested by tests/python/test_ghost_core.py (unittest)
+                               #   path; tested by tests/python/test_ghost_core.py (unittest);
+                               #   2026-11-14: platform.py = the cross-platform store-path
+                               #   maps + `ghost_cli.py paths <slug>` verb (JSON out, unverified
+                               #   rows surfaced loudly, exit 2 on unknown slug) — the single
+                               #   source of truth the Linux .sh resets resolve paths through
+                               #   (provenance-flagged per ground truth #5); CI python-core
+                               #   job now runs a windows+ubuntu matrix
 src/desktop/                   # GHOST.exe desktop launcher sources: GhostHub.cs (single-file
                                #   WinForms hub, C# 5 ONLY for the in-box csc.exe), menu.json
                                #   (runtime-loaded GUI menu data — parity-tested against
