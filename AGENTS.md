@@ -81,6 +81,38 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     server-side Start Plan admission control, NOT a device/IP ban
                                    #     (auth + billing unaffected; started that day, bursty, different
                                    #     accounts failed in the same minute);
+                                   #   watch_zcode_deeplink_forward.ps1 — deep-link callback
+                                   #     forwarder for clone OAuth logins (off-menu, run
+                                   #     manually while signing a clone in via browser;
+                                   #     2026-11-11): the machine-wide URL scheme always boots
+                                   #     the PRIMARY profile (every launch re-registers
+                                   #     HKCU\...\zcode\shell\open\command to its own exe and
+                                   #     the OS spawn carries no clone env), so a clone's
+                                   #     browser callback opened Primary and died with
+                                   #     "OAuth state mismatch" while the clone's poll hit the
+                                   #     business-token exchange. The watcher polls the ZCode
+                                   #     process family for fresh env-less callback spawns,
+                                   #     re-delivers the callback URL into every RUNNING
+                                   #     instance WITH its own env (the OAuth state match
+                                   #     decides which receiver completes; mismatched ones
+                                   #     reject harmlessly) and kills the stray Primary-profile
+                                   #     spawn (-NoKillSpawn keeps it); read-only on the
+                                   #     registry, writes nothing to disk;
+                                   #   patch_zcode_business_exchange.ps1 (+ .mjs engine, shared
+                                   #     asar_surgery.mjs layer) — business-token exchange
+                                   #     hardening patch for out/host/index.js (2026-11-11,
+                                   #     live-verified): exchangeBusinessToken posted the OAuth
+                                   #     token with a HARD 10s timeout (minified zLe=1e4) and
+                                   #     NO retry — clones died at zai_oauth_required with the
+                                   #     callback already delivered (10.14s "fetch failed" =
+                                   #     the timeout; a separate ~800ms server-envelope failure
+                                   #     later succeeded = transient). Two byte-anchors:
+                                   #     zLe=1e4 -> zLe=6e4 (length-neutral) + a one-shot
+                                   #     retry after a 3s backoff spliced into the resolve()
+                                   #     tail; marker resources\zcode-business-exchange.marker.json
+                                   #     + ID_Backups\<ts> (full app.asar + pristine entry);
+                                   #     re-run after app updates; never live-applied on the
+                                   #     dev host (built repo-only, opt-in);
                                    #   patch_zcode_icon_override.ps1 (+ .mjs engine v9, shared
                                    #     tools/asar_surgery.mjs IO layer) — one-time
                                    #     app.asar patch enabling ZCODE_ICON_DIR / ZCODE_AUMID_SUFFIX /
