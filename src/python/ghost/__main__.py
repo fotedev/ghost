@@ -103,6 +103,15 @@ def _cmd_scrub_rows(args):
     return 0
 
 
+def _cmd_purge_tables(args):
+    cfg = _decode_updates(args.config_b64)
+    result = sqlite_keys.purge_table_rows(
+        args.db, cfg.get("tables", []),
+        key_table=cfg.get("key_table"), keys=cfg.get("keys"))
+    print(json.dumps(result))
+    return 0
+
+
 def _cmd_clear_cli_telemetry(args):
     result = sqlite_keys.clear_cli_telemetry(args.db)
     print(json.dumps(result))
@@ -270,6 +279,17 @@ def build_parser():
         help="DELETE telemetry-like keys from ZCode CLI db.sqlite")
     p.add_argument("db")
     p.set_defaults(func=_cmd_clear_cli_telemetry)
+
+    p = sub.add_parser(
+        "purge-tables",
+        help="DELETE every row from whitelisted tables + exact-key rows "
+             "from one keyed table, read-only-reopen verified (QoderWork "
+             "agents.db scrub twin)")
+    p.add_argument("db")
+    p.add_argument("config_b64",
+                   help='base64 of {"tables": [...], "key_table": '
+                        '"app_settings", "keys": [...]}')
+    p.set_defaults(func=_cmd_purge_tables)
 
     p = sub.add_parser(
         "scrub-rows",

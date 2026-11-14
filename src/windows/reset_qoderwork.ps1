@@ -37,10 +37,10 @@ if (-not $qoderWorkIsAdmin) {
     # child writes the marker only at the very end, so an early exit (e.g. the
     # tree-kill give-up) would otherwise leave the PREVIOUS run's summary here
     # to be printed as this run's result.
-    Remove-Item "$env:TEMP\qoderwork_v0.1_done.txt" -ErrorAction SilentlyContinue
+    Remove-Item "$env:TEMP\qoderwork_v0.2_done.txt" -ErrorAction SilentlyContinue
     Start-Process powershell -Verb RunAs -ArgumentList $qoderWorkArgs -WindowStyle Normal -Wait
-    if (Test-Path "$env:TEMP\qoderwork_v0.1_done.txt") {
-        Get-Content "$env:TEMP\qoderwork_v0.1_done.txt"
+    if (Test-Path "$env:TEMP\qoderwork_v0.2_done.txt") {
+        Get-Content "$env:TEMP\qoderwork_v0.2_done.txt"
     }
     else {
         Write-Host "no result marker produced this run -- the elevated reset window may have exited early" -ForegroundColor Yellow
@@ -48,11 +48,52 @@ if (-not $qoderWorkIsAdmin) {
     exit
 }
 
-Write-GhostBanner -Target "QoderWork Identity Reset" -Version "0.1"
+Write-GhostBanner -Target "QoderWork Identity Reset" -Version "0.2"
 
-# QoderWork v0.1 -- identity reset + system-level defenses.
+# QoderWork v0.2 -- identity reset + system-level defenses. THIN MANIFEST
+# over the Python core (Phase 3 migration #4 per docs/PYTHON_HYBRID_ROADMAP.md:
+# cursor v0.3 pilot, devin v0.4, trae v0.3). The 26 steps, their order, audit
+# keys, restore actions and summary are IDENTICAL to v0.1 (archived at
+# archive/reset_qoderwork_windows-v0.1.ps1, local-only); every file-level
+# store mutation now runs through src\python\ghost_cli.py (base64 payload in,
+# JSON report out) via ONE invocation helper. What was deleted from v0.1: the
+# inline temp-.py heredoc (step 19 now uses the shared purge-tables
+# subcommand) and the local mutation helpers, replaced by the tested
+# ghost.filesweep / ghost.winstore / ghost.backup / ghost.sqlite_keys modules.
 #
-# Targets a much smaller surface than Qoder. QoderWork's local stores are:
+#   v0.1 helper                          -> v0.2 core verb
+#   Set-VerifiedFlatUuidFile             -> machineid-file
+#   Reset-QoderWorkStatusJson            -> json-patch (logged_in/snapshot_at/
+#                                           writer; version/schema_version/
+#                                           product preserved from the file)
+#   Reset-QoderWorkExternalCommandsRegistry -> json-patch (commands emptied;
+#                                           v0.1 rewrote the whole file, v0.2
+#                                           keeps unknown top-level keys --
+#                                           strictly safer for schema evolution)
+#   Update-QoderWorkPreferences          -> salt-rotate (salt now generated in
+#                                           the core: 32 lowercase hex; v0.1
+#                                           used an uppercase GUID-N -- same
+#                                           length/format class, case is not
+#                                           significant to the app)
+#   Clear-QoderWorkAgentsDb heredoc      -> purge-tables (exact tables + keyed
+#                                           app_settings deletions, schema-
+#                                           missing tolerated, read-only reopen
+#                                           verify: after[] IS the verification)
+#   Invoke-ClearBinaryIdentityStore      -> store-delete --action delete
+#
+# FIXED over v0.1: the agents.db heredoc crashed when the app_settings table
+# was absent (no existing-check) while the PS side already carried a
+# schema-missing branch for it -- the core tolerates a missing keyed table
+# per key, so that branch is finally reachable.
+#
+# The system-level steps [22]-[26] (auth binaries, HKLM MachineGuid, HKCU
+# deviceid, HKLM SQM, NIC MAC, hostname) stay PowerShell -- they are registry/
+# network/OS operations, not application-store mutations (same split as
+# reset_cursor v0.3's step table). New-SystemRestoreScript stays a PS
+# generator for the same reason (it is the system-level twin of the PS
+# New-RestoreScript, not a store mutation).
+#
+# QoderWork's local stores are:
 #   %USERPROFILE%\.qoderwork\           machine-id, installation_id, .status.json, .cache, cache, logs
 #   %APPDATA%\QoderWork\                rum-electron-store (ARMS RUM = cross-product ID)
 #                                       Partitions\main\   (Chromium profile: Network/Local Storage/Preferences/Local State)
@@ -61,12 +102,6 @@ Write-GhostBanner -Target "QoderWork Identity Reset" -Version "0.1"
 #                                       data\dns-cache\   (Qoder endpoint IP cache)
 #                                       SharedStorage\    (Electron SharedStorage 4096 bytes)
 #                                       Local State        (Chromium os_crypt encrypted key)
-#
-# v0.1.1: added auth.dat/auth-v2.dat deletion + HKLM MachineGuid rotation + OTel
-#          host.id fix. Renumbered to 26 steps.
-# v0.1.2: agents.db no longer DELETEs chats/sub_chats/messages/projects
-#          (chat preservation, same policy as all other IDE scripts).
-#          Fixed step numbering (all [n/26]) + hostname audit variable.
 #
 # The script covers 21 file-level steps + 5 system-level steps, mirroring the
 # AGENTS.md "Cursor pattern":
@@ -88,11 +123,9 @@ Write-GhostBanner -Target "QoderWork Identity Reset" -Version "0.1"
 # Local helpers (specific to QoderWork; identity_utils.ps1 is shared, unchanged)
 # ----------------------------------------------------------------------------
 
-# Action manifest entry. Used by all the file-level helpers (Set-VerifiedFlatUuidFile,
-# Reset-QoderWorkStatusJson, etc.) to record each backup / rename / delete so the
-# generated restore_QoderWork_<ts>.ps1 can rehydrate them. Mirrors the Cursor
-# canonical definition (reset_cursor_windows-v0.1.ps1) -- intentionally local rather
-# than moved into identity_utils.ps1 to keep the shared lib small.
+# Action manifest entry. Used by the file-level steps to record each backup /
+# rename / delete so the generated restore_QoderWork_<ts>.ps1 can rehydrate
+# them. Mirrors the reset_cursor v0.3 definition.
 function Add-ActionEntry {
     param(
         [Parameter(Mandatory = $true)][ref]$Actions,
@@ -141,8 +174,75 @@ function Get-AppRelativeBackupLabel {
     return Get-PathBackupLabel -Path $TargetPath
 }
 
+function _B64Payload {
+    # Compact JSON -> base64: the core bridge's payload contract (sidesteps
+    # PS 5.1 native-argument quoting entirely).
+    param([Parameter(Mandatory = $true)][hashtable]$Payload)
+    $json = $Payload | ConvertTo-Json -Depth 6 -Compress
+    return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
+}
+
+function Invoke-GhostCore {
+    # The one PS -> Python invocation point for every file-level store
+    # mutation. Returns the parsed JSON report, or $null when the core is
+    # missing or the subcommand failed (exit code non-zero). Same recipe
+    # Set-SqliteKeys uses: functional python probe + UTF-8 console + exit-
+    # code check.
+    param([Parameter(Mandatory = $true)][string[]]$CliArgs)
+
+    $cli = Get-GhostPythonCli
+    if (-not $cli) {
+        Write-Host "[FAILED] GHOST Python core not found (src\python\ghost_cli.py)." -ForegroundColor Red
+        return $null
+    }
+    $pythonCommand = Get-PythonCommandInfo
+    if (-not $pythonCommand) {
+        Write-Host "[FAILED] no functional Python 3 found - every QoderWork file-level reset step needs it." -ForegroundColor Red
+        return $null
+    }
+    Set-GhostConsoleUtf8
+    $output = & $pythonCommand $cli @CliArgs
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
+    try {
+        return ($output -join "`n") | ConvertFrom-Json
+    }
+    catch {
+        Write-Host "[FAILED] unparseable core output: $($output -join ' ')" -ForegroundColor Red
+        return $null
+    }
+}
+
+function Backup-ViaCore {
+    # Backup-FileToTimestampDir via the core, plus the restore-manifest
+    # action. A locked/failed backup is reported but NOT fatal - the v0.1
+    # contract verbatim (a file whose copy could not be read may still be
+    # deletable, and the caller proceeds).
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    $report = Invoke-GhostCore @("backup", $Source, $BackupRoot, $Label)
+    if ($null -eq $report) {
+        Write-Host "    [WARN] backup FAILED - proceeding WITHOUT backup: $Source" -ForegroundColor Yellow
+        return $false
+    }
+    if ($report.skipped) { return $false }
+    if ($report.ok -and $report.destination) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Source -BackupPath $report.destination
+        return $true
+    }
+    Write-Host "    [WARN] backup did not complete ($($report.error)) - proceeding" -ForegroundColor Yellow
+    return $false
+}
+
 # A QoderWork flat UUID file: machine-id, installation_id. These are plain text
-# UUIDs with no surrounding JSON. Read, set, re-read, verify.
+# UUIDs with no surrounding JSON. Set + re-read verify via the core's
+# machineid-file verb (backup if present, BOM-less UTF-8 write, re-read).
 function Set-VerifiedFlatUuidFile {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -155,12 +255,11 @@ function Set-VerifiedFlatUuidFile {
 
     $beforeValue = $null
     if (Test-Path -LiteralPath $Path) {
-        $beforeValue = (Get-Content -LiteralPath $Path -Raw).Trim()
-        if (-not $DryRun) {
-            $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-            if ($backupPath) {
-                Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-            }
+        try {
+            $beforeValue = (Get-Content -LiteralPath $Path -Raw).Trim()
+        }
+        catch {
+            $beforeValue = $null
         }
     }
 
@@ -170,24 +269,26 @@ function Set-VerifiedFlatUuidFile {
         return $true
     }
 
-    $parent = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($parent)) {
-        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    $report = Invoke-GhostCore @("machineid-file", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ value = $Value }))
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "uuid" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+        }
+        return $true
     }
 
-    # No-BOM UTF-8 write (mirrors reset_zcode_windows-v1.0.ps1:63). Set-Content
-    # with -Encoding UTF8 emits a BOM under PowerShell 5.1, which corrupts the
-    # JSON parsers in QoderWork and falls back to the old UUID.
-    [System.IO.File]::WriteAllText($Path, $Value, (New-Object System.Text.UTF8Encoding $false))
-    $afterValue = (Get-Content -LiteralPath $Path -Raw).Trim()
-    $ok = $afterValue -eq $Value
-    Add-AuditEntry -Audit $Audit -File $Path -Key "uuid" -Before $beforeValue -After $afterValue -Ok $ok
-    return $ok
+    Add-AuditEntry -Audit $Audit -File $Path -Key "uuid" -Before $beforeValue -After "verify-failed" -Ok $false
+    return $false
 }
 
 # QoderWork stores %USERPROFILE%\.qoderwork\.status.json with a tiny schema:
 # { logged_in, version, schema_version, product, snapshot_at, writer }
-# Reset to a fresh, never-logged-in state without changing version/product.
+# Reset to a fresh, never-logged-in state without changing version/product
+# (core: json-patch -- it only overwrites the keys listed, so any key a newer
+# QoderWork version adds survives the reset, same contract as v0.1's
+# field-targeted rewrite).
 function Reset-QoderWorkStatusJson {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -202,65 +303,60 @@ function Reset-QoderWorkStatusJson {
         return $true
     }
 
-    if (-not $DryRun) {
-        $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-        if ($backupPath) {
-            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-        }
-    }
-
-    $before = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-
-    # Field-targeted rewrite (same pattern as Update-QoderWorkPreferences):
-    # clone the parsed object and overwrite only the known keys, so any key a
-    # newer QoderWork version adds to .status.json survives the reset instead
-    # of being silently dropped by a fixed-shape rebuild.
-    $newObj = $before | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-
-    $statusPatch = [ordered]@{
-        logged_in      = $false
-        version        = if ($before.PSObject.Properties['version']) { $before.version } else { "" }
-        schema_version = if ($before.PSObject.Properties['schema_version']) { $before.schema_version } else { 1 }
-        product        = if ($before.PSObject.Properties['product']) { $before.product } else { "qoderwork" }
-        snapshot_at    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        writer         = "main"
-    }
-    foreach ($statusKey in @($statusPatch.Keys)) {
-        if ($null -ne $newObj.PSObject.Properties[$statusKey]) {
-            $newObj.$statusKey = $statusPatch[$statusKey]
-        }
-        else {
-            Add-Member -InputObject $newObj -NotePropertyName $statusKey -NotePropertyValue $statusPatch[$statusKey]
-        }
-    }
-
     if ($DryRun) {
+        $beforeLoggedIn = $null
+        try {
+            $beforeLoggedIn = (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json).logged_in
+        }
+        catch {
+            $beforeLoggedIn = $null
+        }
         Write-Host "    [DRY-RUN] would reset $Path to logged_in=false, fresh snapshot_at" -ForegroundColor DarkGray
-        Add-AuditEntry -Audit $Audit -File $Path -Key "logged_in" -Before ($before.logged_in) -After "false" -Ok $true
+        Add-AuditEntry -Audit $Audit -File $Path -Key "logged_in" -Before $beforeLoggedIn -After "false" -Ok $true
         return $true
     }
 
-    # No-BOM UTF-8 write (mirrors reset_zcode_windows-v1.0.ps1:384). Set-Content
-    # with -Encoding UTF8 emits a BOM under PS 5.1, which Chromium's JSON parser
-    # rejects and falls back to the old value.
-    [System.IO.File]::WriteAllText($Path, ($newObj | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+    $null = Backup-ViaCore -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel -Actions $Actions
 
+    $version = ""
+    $schemaVersion = 1
+    $product = "qoderwork"
     try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $currentStatus = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        if ($null -ne $currentStatus.PSObject.Properties['version']) { $version = $currentStatus.version }
+        if ($null -ne $currentStatus.PSObject.Properties['schema_version']) { $schemaVersion = $currentStatus.schema_version }
+        if ($null -ne $currentStatus.PSObject.Properties['product']) { $product = $currentStatus.product }
     }
     catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "status" -Before $null -After "parse-failed-after-write" -Ok $false
+        Add-AuditEntry -Audit $Audit -File $Path -Key "logged_in" -Before $null -After "parse-failed" -Ok $false
         return $false
     }
 
-    $ok = ($verified.logged_in -eq $false)
-    Add-AuditEntry -Audit $Audit -File $Path -Key "logged_in" -Before ($before.logged_in) -After $verified.logged_in -Ok $ok
-    return $ok
+    $patch = @{
+        logged_in      = $false
+        version        = $version
+        schema_version = $schemaVersion
+        product        = $product
+        snapshot_at    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        writer         = "main"
+    }
+    $report = Invoke-GhostCore @("json-patch", $Path, (_B64Payload $patch))
+    if ($null -ne $report -and $report.ok) {
+        $ok = ($report.after.logged_in -eq $false)
+        Add-AuditEntry -Audit $Audit -File $Path -Key "logged_in" -Before $report.before.logged_in -After $report.after.logged_in -Ok $ok
+        return $ok
+    }
+
+    Add-AuditEntry -Audit $Audit -File $Path -Key "status" -Before $null -After "core-invoke-failed" -Ok $false
+    Write-Host "    [FAILED] .status.json core invocation failed" -ForegroundColor Red
+    return $false
 }
 
 # QoderWork's external-commands\registry.json records installed external commands
-# keyed by id. Reset by overwriting with an empty registry -- next launch will
-# re-register what's actually installed.
+# keyed by id. Reset by emptying the commands list -- next launch will
+# re-register what's actually installed. v0.1 rewrote the whole file with
+# {commands: []}; v0.2 empties just the commands key via json-patch, so any
+# unknown top-level key a newer version adds survives (strictly safer).
 function Reset-QoderWorkExternalCommandsRegistry {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -275,44 +371,34 @@ function Reset-QoderWorkExternalCommandsRegistry {
         return $true
     }
 
-    if (-not $DryRun) {
-        $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-        if ($backupPath) {
-            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-        }
-    }
-
     if ($DryRun) {
         Write-Host "    [DRY-RUN] would reset $Path to {commands: []}" -ForegroundColor DarkGray
         Add-AuditEntry -Audit $Audit -File $Path -Key "external-commands-registry" -Before "present" -After "empty" -Ok $true
         return $true
     }
 
-    # No-BOM UTF-8 write (mirrors reset_zcode_windows-v1.0.ps1:384). Set-Content
-    # with -Encoding UTF8 emits a BOM under PS 5.1, which Chromium's JSON parser
-    # rejects and falls back to the old commands list.
-    [System.IO.File]::WriteAllText($Path, (@{ commands = @() } | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+    $null = Backup-ViaCore -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel -Actions $Actions
 
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-        $ok = ($null -eq $verified.commands) -or ($verified.commands.Count -eq 0)
+    $report = Invoke-GhostCore @("json-patch", $Path, (_B64Payload @{ commands = @() }))
+    if ($null -ne $report -and $report.ok) {
+        $commandsAfter = $report.after.commands
+        $ok = ($null -eq $commandsAfter) -or (@($commandsAfter).Count -eq 0)
         Add-AuditEntry -Audit $Audit -File $Path -Key "external-commands-registry" -Before "present" -After "empty" -Ok $ok
         return $ok
     }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "external-commands-registry" -Before "present" -After "parse-failed" -Ok $false
-        return $false
-    }
+
+    Add-AuditEntry -Audit $Audit -File $Path -Key "external-commands-registry" -Before "present" -After "core-invoke-failed" -Ok $false
+    Write-Host "    [FAILED] external-commands registry core invocation failed" -ForegroundColor Red
+    return $false
 }
 
-# QoderWork's Preferences is a Chromium-style JSON. The telemetry-sensitive key is
-# electron.media.device_id_salt (matches what the Qoder v0.3 script does).
-# QoderWork may also use top-level keys like profile.last_active_time or
-# telemetry.* -- we set device_id_salt unconditionally and leave the rest.
+# QoderWork's Partitions\main\Preferences device_id_salt (matches what the
+# Qoder v0.3 script does). The salt is generated in the core (32 lowercase
+# hex; v0.1 used an uppercase GUID-N -- same length/format class, case is
+# not significant to the app).
 function Update-QoderWorkPreferences {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$NewDeviceIdSalt,
         [Parameter(Mandatory = $true)][string]$BackupRoot,
         [Parameter(Mandatory = $true)][string]$BackupLabel,
         [Parameter(Mandatory = $true)][ref]$Audit,
@@ -324,73 +410,36 @@ function Update-QoderWorkPreferences {
         return $true
     }
 
-    if (-not $DryRun) {
-        $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-        if ($backupPath) {
-            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-        }
-    }
-
-    try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $null -After "parse-failed" -Ok $false
-        return $false
-    }
-
-    $beforeValue = $null
-    if ($null -ne $content.PSObject.Properties['electron'] -and
-        $null -ne $content.electron.PSObject.Properties['media'] -and
-        $null -ne $content.electron.media.PSObject.Properties['device_id_salt']) {
-        $beforeValue = $content.electron.media.device_id_salt
-    }
-
-    if ($null -eq $content.PSObject.Properties['electron']) {
-        $mediaObj = [ordered]@{ device_id_salt = $NewDeviceIdSalt }
-        $electronObj = [ordered]@{ media = $mediaObj }
-        Add-Member -InputObject $content -NotePropertyName 'electron' -NotePropertyValue $electronObj
-    }
-    elseif ($null -eq $content.electron.PSObject.Properties['media']) {
-        $mediaObj = [ordered]@{ device_id_salt = $NewDeviceIdSalt }
-        Add-Member -InputObject $content.electron -NotePropertyName 'media' -NotePropertyValue $mediaObj
-    }
-    elseif ($null -eq $content.electron.media.PSObject.Properties['device_id_salt']) {
-        Add-Member -InputObject $content.electron.media -NotePropertyName 'device_id_salt' -NotePropertyValue $NewDeviceIdSalt
-    }
-    else {
-        $content.electron.media.device_id_salt = $NewDeviceIdSalt
-    }
-
     if ($DryRun) {
-        Write-Host "    [DRY-RUN] would write electron.media.device_id_salt='$NewDeviceIdSalt' to $Path (was '$beforeValue')" -ForegroundColor DarkGray
-        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $beforeValue -After $NewDeviceIdSalt -Ok $true
+        $beforeValue = $null
+        try {
+            $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+            if ($null -ne $content.PSObject.Properties['electron'] -and
+                $null -ne $content.electron.PSObject.Properties['media'] -and
+                $null -ne $content.electron.media.PSObject.Properties['device_id_salt']) {
+                $beforeValue = $content.electron.media.device_id_salt
+            }
+        }
+        catch {
+            $beforeValue = $null
+        }
+        Write-Host "    [DRY-RUN] would rotate electron.media.device_id_salt on $Path (was '$beforeValue')" -ForegroundColor DarkGray
+        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $beforeValue -After "rotated" -Ok $true
         return $true
     }
 
-    # No-BOM UTF-8 write (mirrors reset_zcode_windows-v1.0.ps1:384). Set-Content
-    # with -Encoding UTF8 emits a BOM under PS 5.1, which Chromium's Preferences
-    # parser rejects and falls back to the old device_id_salt.
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $beforeValue -After "parse-failed-after-write" -Ok $false
-        return $false
+    $report = Invoke-GhostCore @("salt-rotate", $Path, $BackupRoot, $BackupLabel)
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+        }
+        return $true
     }
 
-    $afterValue = $null
-    if ($null -ne $verified.PSObject.Properties['electron'] -and
-        $null -ne $verified.electron.PSObject.Properties['media'] -and
-        $null -ne $verified.electron.media.PSObject.Properties['device_id_salt']) {
-        $afterValue = $verified.electron.media.device_id_salt
-    }
-
-    $ok = $afterValue -eq $NewDeviceIdSalt
-    Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $beforeValue -After $afterValue -Ok $ok
-    return $ok
+    Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before "present" -After "verify-failed" -Ok $false
+    Write-Host "    [FAILED] Preferences device_id_salt verification failed" -ForegroundColor Red
+    return $false
 }
 
 # QoderWork's data\agents.db is a Drizzle ORM SQLite. Key tables to scrub:
@@ -404,9 +453,11 @@ function Update-QoderWorkPreferences {
 #   - rc_session_mappings:  remote control session mappings
 #   - channel_pairings*     (Slack, Teams, etc.)
 #
-# Strategy: DELETE rows from all of these. Verify by SELECT COUNT(*) = 0 read-only.
-# This is a subset of what `Clear-QoderSecrets` does for state.vscdb in the Qoder
-# v0.3 script -- ported for QoderWork's different schema.
+# Strategy: DELETE rows from all of these via the core's purge-tables verb
+# (exact tables + keyed app_settings deletions; schema evolution tolerated
+# per table; verify-after = read-only reopen recount, so after[] IS the
+# verification). This is a subset of what `Clear-QoderSecrets` does for
+# state.vscdb in the Qoder v0.3 script -- ported for QoderWork's schema.
 function Clear-QoderWorkAgentsDb {
     param(
         [Parameter(Mandatory = $true)][string]$DbPath,
@@ -458,142 +509,72 @@ function Clear-QoderWorkAgentsDb {
         return $true
     }
 
-    $pythonCommand = Get-PythonCommandInfo
-    if (-not $pythonCommand) {
-        foreach ($key in ($exactTables + $appSettingsResetKeys)) {
-            Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "python-missing" -Ok $false
-        }
-        Write-Host "    [FAILED] Python not found - cannot scrub agents.db" -ForegroundColor Red
-        return $false
-    }
-
-    $exactTablesPy = "[" + (($exactTables | ForEach-Object { "'$_'" }) -join ", ") + "]"
-    $appSettingsResetKeysPy = "[" + (($appSettingsResetKeys | ForEach-Object { "'$_'" }) -join ", ") + "]"
-
-    $tempScriptPath = Join-Path $env:TEMP ("qoderwork_scrub_agents_{0}.py" -f ([guid]::NewGuid().ToString("N")))
-    $pythonScript = @"
-import json
-import sqlite3
-import sys
-
-db_path = sys.argv[1]
-exact_tables = $exactTablesPy
-app_settings_reset_keys = $appSettingsResetKeysPy
-
-result = {"before": {}, "after": {}}
-conn = sqlite3.connect(db_path)
-try:
-    cursor = conn.cursor()
-    # Discover which exact_tables actually exist (schema may evolve).
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    existing = {row[0] for row in cursor.fetchall()}
-
-    for table in exact_tables:
-        if table not in existing:
-            result["before"][table] = "schema-missing"
-            result["after"][table] = "schema-missing"
-            continue
-        cursor.execute("SELECT COUNT(*) FROM " + table)
-        result["before"][table] = cursor.fetchone()[0]
-        cursor.execute("DELETE FROM " + table)
-        cursor.execute("SELECT COUNT(*) FROM " + table)
-        result["after"][table] = cursor.fetchone()[0]
-
-    for key in app_settings_reset_keys:
-        cursor.execute("SELECT COUNT(*) FROM app_settings WHERE key = ?", (key,))
-        result["before"][key] = cursor.fetchone()[0]
-        cursor.execute("DELETE FROM app_settings WHERE key = ?", (key,))
-        cursor.execute("SELECT COUNT(*) FROM app_settings WHERE key = ?", (key,))
-        result["after"][key] = cursor.fetchone()[0]
-
-    conn.commit()
-finally:
-    conn.close()
-
-print(json.dumps(result))
-"@
-
-    try {
-        if ($DryRun) {
-            Write-Host "    [DRY-RUN] would scrub agents.db tables ($($exactTables.Count)) + app_settings keys ($($appSettingsResetKeys.Count))" -ForegroundColor DarkGray
-            foreach ($table in $exactTables) {
-                Add-AuditEntry -Audit $Audit -File $DbPath -Key $table -Before "dry-run" -After "would-delete-all" -Ok $true
-            }
-            foreach ($key in $appSettingsResetKeys) {
-                Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before "dry-run" -After "would-delete" -Ok $true
-            }
-            return $true
-        }
-
-        # No-BOM UTF-8 write for the temp .py (mirrors reset_zcode_windows-v1.0.ps1:176).
-        # A BOM at the start of the temp file trips CPython's parser before the
-        # shebang line is read. Written only on a real run -- a dry run must not
-        # create files, not even in TEMP.
-        [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
-
-        $commandOutput = & $pythonCommand $tempScriptPath $DbPath
-        if ($LASTEXITCODE -ne 0) {
-            foreach ($key in ($exactTables + $appSettingsResetKeys)) {
-                Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "command-failed" -Ok $false
-            }
-            Write-Host "    [FAILED] agents.db scrub command failed: $DbPath" -ForegroundColor Red
-            return $false
-        }
-
-        $result = ($commandOutput -join "`n") | ConvertFrom-Json
-        $allOk = $true
-
+    if ($DryRun) {
+        Write-Host "    [DRY-RUN] would scrub agents.db tables ($($exactTables.Count)) + app_settings keys ($($appSettingsResetKeys.Count))" -ForegroundColor DarkGray
         foreach ($table in $exactTables) {
-            $before = $result.before.$table
-            $after = $result.after.$table
-            if ($after -eq "schema-missing") {
-                # Schema evolution: the table no longer exists in agents.db, so
-                # there is nothing to scrub. Benign -- must not fail the run.
-                # Audit with a WARN flavor so the JSON shows why it was skipped.
-                Write-Host "    [WARN] table absent from current schema, nothing to scrub: $table" -ForegroundColor Yellow
-                Add-AuditEntry -Audit $Audit -File $DbPath -Key $table -Before "schema-missing" -After "schema-missing (warn: absent from current schema)" -Ok $true
-                continue
-            }
-            $ok = ($before -is [int]) -and ($after -eq 0)
-            Add-AuditEntry -Audit $Audit -File $DbPath -Key $table -Before ("count=" + $before) -After ("count=" + $after) -Ok $ok
-            if (-not $ok) { $allOk = $false }
+            Add-AuditEntry -Audit $Audit -File $DbPath -Key $table -Before "dry-run" -After "would-delete-all" -Ok $true
         }
-
         foreach ($key in $appSettingsResetKeys) {
-            $before = $result.before.$key
-            $after = $result.after.$key
-            if ($after -eq "schema-missing") {
-                # Same schema-evolution contract as the tables loop above.
-                Write-Host "    [WARN] app_settings absent from current schema, nothing to scrub: $key" -ForegroundColor Yellow
-                Add-AuditEntry -Audit $Audit -File $DbPath -Key ("app_settings:" + $key) -Before "schema-missing" -After "schema-missing (warn: absent from current schema)" -Ok $true
-                continue
-            }
-            $ok = ($before -is [int]) -and ($after -eq 0)
-            Add-AuditEntry -Audit $Audit -File $DbPath -Key ("app_settings:" + $key) -Before ("count=" + $before) -After ("count=" + $after) -Ok $ok
-            if (-not $ok) { $allOk = $false }
+            Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before "dry-run" -After "would-delete" -Ok $true
         }
-
-        return $allOk
+        return $true
     }
-    catch {
+
+    $purgeConfig = @{
+        tables    = $exactTables
+        key_table = "app_settings"
+        keys      = $appSettingsResetKeys
+    }
+    $result = Invoke-GhostCore @("purge-tables", $DbPath, (_B64Payload $purgeConfig))
+    if ($null -eq $result -or $null -eq $result.after) {
         foreach ($key in ($exactTables + $appSettingsResetKeys)) {
-            Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "exception" -Ok $false
+            Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "core-invoke-failed" -Ok $false
         }
-        Write-Host "    [FAILED] agents.db scrub threw: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "    [FAILED] agents.db scrub core invocation failed: $DbPath" -ForegroundColor Red
         return $false
     }
-    finally {
-        if (Test-Path -LiteralPath $tempScriptPath) {
-            Remove-Item -LiteralPath $tempScriptPath -Force -ErrorAction SilentlyContinue
+
+    $allOk = $true
+
+    foreach ($table in $exactTables) {
+        $before = $result.before.$table
+        $after = $result.after.$table
+        if ($after -eq "schema-missing") {
+            # Schema evolution: the table no longer exists in agents.db, so
+            # there is nothing to scrub. Benign -- must not fail the run.
+            # Audit with a WARN flavor so the JSON shows why it was skipped.
+            Write-Host "    [WARN] table absent from current schema, nothing to scrub: $table" -ForegroundColor Yellow
+            Add-AuditEntry -Audit $Audit -File $DbPath -Key $table -Before "schema-missing" -After "schema-missing (warn: absent from current schema)" -Ok $true
+            continue
         }
+        $ok = ($before -is [int]) -and ($after -eq 0)
+        Add-AuditEntry -Audit $Audit -File $DbPath -Key $table -Before ("count=" + $before) -After ("count=" + $after) -Ok $ok
+        if (-not $ok) { $allOk = $false }
     }
+
+    foreach ($key in $appSettingsResetKeys) {
+        $before = $result.before.$key
+        $after = $result.after.$key
+        if ($after -eq "schema-missing") {
+            # Same schema-evolution contract as the tables loop above. The
+            # core tolerates a missing app_settings table per key (v0.1's
+            # heredoc crashed on it while this branch already existed).
+            Write-Host "    [WARN] app_settings absent from current schema, nothing to scrub: $key" -ForegroundColor Yellow
+            Add-AuditEntry -Audit $Audit -File $DbPath -Key ("app_settings:" + $key) -Before "schema-missing" -After "schema-missing (warn: absent from current schema)" -Ok $true
+            continue
+        }
+        $ok = ($before -is [int]) -and ($after -eq 0)
+        Add-AuditEntry -Audit $Audit -File $DbPath -Key ("app_settings:" + $key) -Before ("count=" + $before) -After ("count=" + $after) -Ok $ok
+        if (-not $ok) { $allOk = $false }
+    }
+
+    return $allOk
 }
 
-# Wrap Clear-BinaryIdentityStore with DryRun handling. The shared helper in
-# identity_utils.ps1 always deletes; it doesn't know about this script's
-# DryRun switch. Audit + restore actions get the same values either way so
-# -DryRun and a real run produce identical audit JSON, but -DryRun never
-# touches the filesystem.
+# Wrap the core's store-delete with DryRun handling. The core always deletes;
+# it doesn't know about this script's DryRun switch. Audit + restore actions
+# get the same values either way so -DryRun and a real run produce identical
+# audit JSON, but -DryRun never touches the filesystem.
 function Invoke-ClearBinaryIdentityStore {
     param(
         [Parameter(Mandatory = $true)][string[]]$Paths,
@@ -617,15 +598,31 @@ function Invoke-ClearBinaryIdentityStore {
             }
         }
         else {
-            $stepResults = Clear-BinaryIdentityStore -Paths @($path) -Action $Action -BackupRoot $BackupRoot -Audit $Audit -RootPath $RootPath
-            if ($null -ne $stepResults) { $results += @($stepResults) }
+            # Empty label -> the core derives the relative label from
+            # --root-path (same contract as v0.1's -RootPath).
+            $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot, "",
+                "--action", $Action, "--root-path", $RootPath)
+            if ($null -ne $storeReport) {
+                Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before $storeReport.before -After $storeReport.after -Ok $storeReport.ok
+                if ($storeReport.ok -and $storeReport.backed_up_to) {
+                    $results += [ordered]@{
+                        action       = $Action
+                        originalPath = $path
+                        backupPath   = $storeReport.backed_up_to
+                        renamedPath  = $storeReport.renamed_to
+                    }
+                }
+            }
+            else {
+                Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before "present" -After "core-invoke-failed" -Ok $false
+            }
         }
     }
     return $results
 }
 
 # Derive a step's pass/fail from the audit entries it appended (from index
-# $BeforeCount to the end). Clear-BinaryIdentityStore records failed deletes
+# $BeforeCount to the end). The core's store-delete records failed deletes
 # ONLY as ok=$false audit entries -- its returned action rows carry no ok flag
 # and are emitted for successful paths only -- so the caller must inspect the
 # audit delta to know whether a binary-store step actually succeeded.
@@ -1001,7 +998,9 @@ function Set-SystemHostname {
 }
 
 # Generate restore_system_QoderWork_<ts>.ps1 to roll back registry source IDs +
-# NIC MAC + hostname. Same logic as v0.3 Qoder.
+# NIC MAC + hostname. Same logic as v0.3 Qoder. Stays PowerShell: this is the
+# system-level twin of the PS New-RestoreScript, not an application-store
+# mutation.
 function New-SystemRestoreScript {
     param(
         [Parameter(Mandatory = $true)][string]$BackupRoot,
@@ -1013,7 +1012,7 @@ function New-SystemRestoreScript {
     $manifestJson = $Manifest | ConvertTo-Json -Depth 10
     $restorePath = Join-Path $BackupRoot ("restore_system_{0}_{1}.ps1" -f $App, $Timestamp)
     $scriptContent = @"
-# Restore script for system-level changes made by reset_qoderwork_windows-v0.1.ps1
+# Restore script for system-level changes made by reset_qoderwork_windows-v0.2.ps1
 # Generated: $Timestamp
 #
 # Run from an elevated PowerShell prompt. Idempotent. Does NOT touch QoderWork
@@ -1125,11 +1124,22 @@ if (-not (Test-Path -LiteralPath $root)) {
     exit 1
 }
 
+# The core must be present and a functional Python 3 with it - fail fast
+# BEFORE touching anything (v0.1 needed Python only for the agents.db scrub;
+# v0.2 routes every file-level store mutation through it). A -DryRun never
+# writes, so it still runs without Python.
+if (-not $DryRun) {
+    if ((-not (Get-GhostPythonCli)) -or (-not (Get-PythonCommandInfo))) {
+        Write-Host "[FAILED] GHOST Python core (src\python\ghost_cli.py) missing or no functional Python 3 found - every QoderWork file-level reset step needs it (winget install Python.Python.3.12)." -ForegroundColor Red
+        exit 1
+    }
+}
+
 if ($DryRun) {
-    Write-Host "=== QoderWork Identity Reset (v0.1) -- DRY RUN ===" -ForegroundColor Magenta
+    Write-Host "=== QoderWork Identity Reset (v0.2) -- DRY RUN ===" -ForegroundColor Magenta
 } else {
     New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
-    Write-Host "=== QoderWork Identity Reset (v0.1) ===" -ForegroundColor Cyan
+    Write-Host "=== QoderWork Identity Reset (v0.2) ===" -ForegroundColor Cyan
 }
 
 Write-Host "Root: $root" -ForegroundColor Gray
@@ -1170,11 +1180,11 @@ $actions = @()
 $ids = New-IdentitySet
 
 # QoderWork-specific identity values, distinct from VS Code telemetry IDs.
-$deviceIdSalt = ([guid]::NewGuid().ToString("N")).ToUpperInvariant()
+# (The Preferences salt is now generated in the core's salt-rotate verb.)
 $newMachineId = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 $newInstallationId = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 
-# --- [1/26] machine-id (user-level) ---
+# --- [1/26] machine-id (user-level; core: machineid-file) ---
 Write-Host "`n[1/26] Updating ~\.qoderwork\machine-id..." -ForegroundColor Cyan
 $machineIdPath = Join-Path $userQoderWorkRoot "machine-id"
 $machineIdLabel = Get-UserProfileBackupLabel -TargetPath $machineIdPath
@@ -1186,7 +1196,7 @@ if (Set-VerifiedFlatUuidFile -Path $machineIdPath -Value $newMachineId -BackupRo
     $failCount++
 }
 
-# --- [2/26] installation_id (user-level) ---
+# --- [2/26] installation_id (user-level; core: machineid-file) ---
 Write-Host "`n[2/26] Updating ~\.qoderwork\installation_id..." -ForegroundColor Cyan
 $installIdPath = Join-Path $userQoderWorkRoot "installation_id"
 $installIdLabel = Get-UserProfileBackupLabel -TargetPath $installIdPath
@@ -1198,7 +1208,7 @@ if (Set-VerifiedFlatUuidFile -Path $installIdPath -Value $newInstallationId -Bac
     $failCount++
 }
 
-# --- [3/26] .status.json reset ---
+# --- [3/26] .status.json reset (core: json-patch) ---
 Write-Host "`n[3/26] Resetting ~\.qoderwork\.status.json (logged_in=false, fresh snapshot)..." -ForegroundColor Cyan
 $statusPath = Join-Path $userQoderWorkRoot ".status.json"
 $statusLabel = Get-UserProfileBackupLabel -TargetPath $statusPath
@@ -1210,7 +1220,7 @@ if (Reset-QoderWorkStatusJson -Path $statusPath -BackupRoot $backupRoot -BackupL
     $failCount++
 }
 
-# --- [4/26] external-commands\registry.json reset ---
+# --- [4/26] external-commands\registry.json reset (core: json-patch) ---
 Write-Host "`n[4/26] Resetting ~\.qoderwork\external-commands\registry.json..." -ForegroundColor Cyan
 $extRegPath = Join-Path $userQoderWorkRoot "external-commands\registry.json"
 $extRegLabel = Get-UserProfileBackupLabel -TargetPath $extRegPath
@@ -1222,7 +1232,7 @@ if (Reset-QoderWorkExternalCommandsRegistry -Path $extRegPath -BackupRoot $backu
     $failCount++
 }
 
-# --- [5/26] ~\.qoderwork\.cache\ deletion ---
+# --- [5/26] ~\.qoderwork\.cache\ deletion (core: store-delete) ---
 Write-Host "`n[5/26] Deleting ~\.qoderwork\.cache\..." -ForegroundColor Cyan
 $dotCachePath = Join-Path $userQoderWorkRoot ".cache"
 $stepAuditCount = $audit.Count
@@ -1236,7 +1246,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [6/26] ~\.qoderwork\cache\ deletion (MCP market cache) ---
+# --- [6/26] ~\.qoderwork\cache\ deletion (MCP market cache; core: store-delete) ---
 Write-Host "`n[6/26] Deleting ~\.qoderwork\cache\..." -ForegroundColor Cyan
 $cachePath = Join-Path $userQoderWorkRoot "cache"
 $stepAuditCount = $audit.Count
@@ -1250,7 +1260,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [7/26] ~\.qoderwork\logs\ deletion ---
+# --- [7/26] ~\.qoderwork\logs\ deletion (core: store-delete) ---
 Write-Host "`n[7/26] Deleting ~\.qoderwork\logs\..." -ForegroundColor Cyan
 $logsPath = Join-Path $userQoderWorkRoot "logs"
 $stepAuditCount = $audit.Count
@@ -1264,7 +1274,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [8/26] rum-electron-store\ deletion (CROSS-PRODUCT RUM ID) ---
+# --- [8/26] rum-electron-store\ deletion (CROSS-PRODUCT RUM ID; core: store-delete) ---
 # This is the single most important file in the script. The Alibaba ARMS
 # _arms_uid persisted here is what the ARMS backend uses to correlate this
 # QoderWork install with the previously-banned Qoder install.
@@ -1281,7 +1291,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [9/26] Local State (Chromium os_crypt encrypted key) ---
+# --- [9/26] Local State (Chromium os_crypt encrypted key; core: store-delete) ---
 Write-Host "`n[9/26] Deleting Roaming\QoderWork\Local State (Chromium os_crypt key)..." -ForegroundColor Cyan
 $localStatePath = Join-Path $root "Local State"
 $stepAuditCount = $audit.Count
@@ -1295,11 +1305,11 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [10/26] Partitions\main\Preferences device_id_salt ---
+# --- [10/26] Partitions\main\Preferences device_id_salt (core: salt-rotate) ---
 Write-Host "`n[10/26] Updating Partitions\main\Preferences electron.media.device_id_salt..." -ForegroundColor Cyan
 $prefsPath = Join-Path $profileRoot "Preferences"
 $prefsLabel = Get-AppRelativeBackupLabel -RootPath $profileRoot -TargetPath $prefsPath
-if (Update-QoderWorkPreferences -Path $prefsPath -NewDeviceIdSalt $deviceIdSalt -BackupRoot $backupRoot -BackupLabel $prefsLabel -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+if (Update-QoderWorkPreferences -Path $prefsPath -BackupRoot $backupRoot -BackupLabel $prefsLabel -Audit ([ref]$audit) -Actions ([ref]$actions)) {
     Write-Host "    [OK] Preferences device_id_salt verified" -ForegroundColor Green
     $passCount++
 } else {
@@ -1307,7 +1317,7 @@ if (Update-QoderWorkPreferences -Path $prefsPath -NewDeviceIdSalt $deviceIdSalt 
     $failCount++
 }
 
-# --- [11/26] Partitions\main\Network\Cookies + Network Persistent State ---
+# --- [11/26] Partitions\main\Network\Cookies + Network Persistent State (core: store-delete) ---
 Write-Host "`n[11/26] Deleting Partitions\main\Network\Cookies + Network Persistent State..." -ForegroundColor Cyan
 $netPaths = @(
     (Join-Path $profileRoot "Network\Cookies"),
@@ -1329,7 +1339,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [12/26] Partitions\main\Local Storage\ (LevelDB) ---
+# --- [12/26] Partitions\main\Local Storage\ (LevelDB; core: store-delete) ---
 Write-Host "`n[12/26] Deleting Partitions\main\Local Storage\ (LevelDB identity keys)..." -ForegroundColor Cyan
 $localStoragePath = Join-Path $profileRoot "Local Storage"
 $stepAuditCount = $audit.Count
@@ -1343,7 +1353,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [13/26] Partitions\main\Session Storage\ ---
+# --- [13/26] Partitions\main\Session Storage\ (core: store-delete) ---
 Write-Host "`n[13/26] Deleting Partitions\main\Session Storage\..." -ForegroundColor Cyan
 $sessionStoragePath = Join-Path $profileRoot "Session Storage"
 $stepAuditCount = $audit.Count
@@ -1357,7 +1367,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [14/26] Partitions\main\Shared Dictionary\ ---
+# --- [14/26] Partitions\main\Shared Dictionary\ (core: store-delete) ---
 Write-Host "`n[14/26] Deleting Partitions\main\Shared Dictionary\..." -ForegroundColor Cyan
 $sharedDictPath = Join-Path $profileRoot "Shared Dictionary"
 $stepAuditCount = $audit.Count
@@ -1371,7 +1381,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [15/26] Partitions\main\Cache\ + Code Cache\ + GPUCache\ + Dawn*Cache\ ---
+# --- [15/26] Partitions\main\Cache\ + Code Cache\ + GPUCache\ + Dawn*Cache\ (core: store-delete) ---
 Write-Host "`n[15/26] Deleting Partitions\main\Cache\ + Code Cache\ + GPUCache\ + Dawn*Cache\..." -ForegroundColor Cyan
 $cachePaths = @(
     (Join-Path $profileRoot "Cache"),
@@ -1392,7 +1402,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [16/26] Roaming\QoderWork\SharedStorage\ (Electron SharedStorage 4KB file) ---
+# --- [16/26] Roaming\QoderWork\SharedStorage\ (Electron SharedStorage 4KB file; core: store-delete) ---
 Write-Host "`n[16/26] Deleting Roaming\QoderWork\SharedStorage\..." -ForegroundColor Cyan
 $sharedStoragePath = Join-Path $root "SharedStorage"
 $stepAuditCount = $audit.Count
@@ -1406,7 +1416,7 @@ if (Test-StepAuditOk -Audit ([ref]$audit) -BeforeCount $stepAuditCount) {
     $failCount++
 }
 
-# --- [17/26] data\dns-cache\ deletion (Qoder endpoint IP cache) ---
+# --- [17/26] data\dns-cache\ deletion (Qoder endpoint IP cache; core: store-delete) ---
 Write-Host "`n[17/26] Deleting data\dns-cache\ (Qoder endpoint IP cache)..." -ForegroundColor Cyan
 $dnsCachePath = Join-Path $root "data\dns-cache"
 $stepAuditCount = $audit.Count
@@ -1429,14 +1439,11 @@ Add-AuditEntry -Audit ([ref]$audit) -File (Join-Path $root "data\dynamic-text\qo
 Write-Host "    [SKIP] dynamic-text is non-identity resource bundle" -ForegroundColor DarkGray
 $passCount++
 
-# --- [19/26] data\agents.db scrub (oauth tokens + app_settings; chats preserved) ---
+# --- [19/26] data\agents.db scrub (oauth tokens + app_settings; chats preserved; core: purge-tables) ---
 Write-Host "`n[19/26] Scrubbing data\agents.db (oauth/app_settings tables; chats preserved)..." -ForegroundColor Cyan
 $agentsDbPath = Join-Path $root "data\agents.db"
 if (-not $DryRun) {
-    $backupAgentsDb = Backup-FileToTimestampDir -Source $agentsDbPath -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $agentsDbPath)
-    if ($backupAgentsDb) {
-        Add-ActionEntry -Actions ([ref]$actions) -OriginalPath $agentsDbPath -BackupPath $backupAgentsDb
-    }
+    $null = Backup-ViaCore -Source $agentsDbPath -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $agentsDbPath) -Actions ([ref]$actions)
     # SQLite sidecars: the pre-step force-kill can leave a hot -journal or a
     # committed-but-uncheckpointed -wal/-shm next to agents.db. A .db-only
     # backup restores stale or torn chat data, so back each sidecar up
@@ -1446,10 +1453,7 @@ if (-not $DryRun) {
     foreach ($agentsDbSidecarSuffix in @("-wal", "-shm", "-journal")) {
         $agentsDbSidecarPath = $agentsDbPath + $agentsDbSidecarSuffix
         if (Test-Path -LiteralPath $agentsDbSidecarPath) {
-            $backupAgentsDbSidecar = Backup-FileToTimestampDir -Source $agentsDbSidecarPath -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $agentsDbSidecarPath)
-            if ($backupAgentsDbSidecar) {
-                Add-ActionEntry -Actions ([ref]$actions) -OriginalPath $agentsDbSidecarPath -BackupPath $backupAgentsDbSidecar
-            }
+            $null = Backup-ViaCore -Source $agentsDbSidecarPath -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $root -TargetPath $agentsDbSidecarPath) -Actions ([ref]$actions)
         }
     }
 }
@@ -1461,7 +1465,7 @@ if (Clear-QoderWorkAgentsDb -DbPath $agentsDbPath -Audit ([ref]$audit)) {
     $failCount++
 }
 
-# --- [20/26] Old ID_Backups purge (keep newest only) ---
+# --- [20/26] Old ID_Backups purge (keep newest only; PS: pure file ops) ---
 Write-Host "`n[20/26] Purging old ID_Backups directories (keep current run only)..." -ForegroundColor Cyan
 if (Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit)) {
     $passCount++
@@ -1470,7 +1474,7 @@ if (Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRo
     $failCount++
 }
 
-# --- [21/26] Post-write watchdog re-verify ---
+# --- [21/26] Post-write watchdog re-verify (PS: pure file ops) ---
 Write-Host "`n[21/26] Post-write watchdog re-verify..." -ForegroundColor Cyan
 $watchdogCorePaths = @($rumStorePath, $localStatePath)
 $watchdogOk = $true
@@ -1491,7 +1495,7 @@ $systemManifest = @{
     registry = @()
 }
 
-# --- [22/26] auth.dat + auth-v2.dat deletion (encrypted auth tokens) ---
+# --- [22/26] auth.dat + auth-v2.dat deletion (encrypted auth tokens; core: store-delete) ---
 $authBinaries = @((Join-Path $root "auth.dat"), (Join-Path $root "auth-v2.dat"))
 $existingAuthFiles = @($authBinaries | Where-Object { Test-Path -LiteralPath $_ })
 if ($existingAuthFiles.Count -eq 0) {
@@ -1513,7 +1517,7 @@ if ($existingAuthFiles.Count -eq 0) {
     }
 }
 
-# --- [23/26] HKLM MachineGuid source rotation (QoderWork OTel reads this via REG.exe) ---
+# --- [23/26] HKLM MachineGuid source rotation (QoderWork OTel reads this via REG.exe; PS: registry op) ---
 Write-Host "`n[23/26] Rotating HKLM\\SOFTWARE\\Microsoft\\Cryptography\\MachineGuid..." -ForegroundColor Cyan
 $machineGuidPath = "HKLM:\SOFTWARE\Microsoft\Cryptography"
 $newMachineGuid = [guid]::NewGuid().ToString().ToLower()
@@ -1528,7 +1532,7 @@ $systemManifest.registry += @{
 }
 if ($machineGuidResult.Success) { $passCount++ } else { $failCount++ }
 
-# --- [24/26] HKCU DeveloperTools deviceid source ---
+# --- [24/26] HKCU DeveloperTools deviceid source (PS: registry op) ---
 Write-Host "`n[24/26] Updating HKCU DeveloperTools deviceid source..." -ForegroundColor Cyan
 $developerToolsPath = "HKCU:\SOFTWARE\Microsoft\DeveloperTools"
 $developerToolsResult = Set-VerifiedRegistryStringValue -Path $developerToolsPath -Name "deviceid" -Value $ids.devDeviceId -Audit ([ref]$audit)
@@ -1542,7 +1546,7 @@ $systemManifest.registry += @{
 }
 if ($developerToolsResult.Success) { $passCount++ } else { $failCount++ }
 
-# --- [25/26] HKLM SQMClient MachineId source ---
+# --- [25/26] HKLM SQMClient MachineId source (PS: registry op) ---
 Write-Host "`n[25/26] Updating HKLM SQMClient MachineId source..." -ForegroundColor Cyan
 $sqmClientPath = "HKLM:\SOFTWARE\Microsoft\SQMClient"
 $sqmClientResult = Set-VerifiedRegistryStringValue -Path $sqmClientPath -Name "MachineId" -Value $ids.sqmId -Audit ([ref]$audit)
@@ -1556,7 +1560,7 @@ $systemManifest.registry += @{
 }
 if ($sqmClientResult.Success) { $passCount++ } else { $failCount++ }
 
-# --- [26/26] NIC MAC + Hostname (system-level defenses) ---
+# --- [26/26] NIC MAC + Hostname (system-level defenses; PS: network/OS ops) ---
 if ($SkipMac) {
     Write-Host "`n[26/26] SKIPPED (-SkipMac) -- NIC MAC addresses left unchanged" -ForegroundColor Yellow
     Add-AuditEntry -Audit ([ref]$audit) -File "NetAdapter::all" -Key "NetworkAddress" -Before "skipped" -After "skipped-by-user" -Ok $true
@@ -1661,7 +1665,7 @@ if (-not $SkipHostname) {
     Write-Host ">>> RESTART WINDOWS for the new hostname to take effect for live processes <<<" -ForegroundColor Magenta
 }
 
-$qoderWorkDoneMarker = "$env:TEMP\qoderwork_v0.1_done.txt"
+$qoderWorkDoneMarker = "$env:TEMP\qoderwork_v0.2_done.txt"
 $summaryLines = @(
     "PASS=$passCount",
     "FAIL=$failCount",

@@ -824,9 +824,19 @@ launch_zcode_cli_light.ps1         # ZCode LIGHT headless worker -Instance Secon
                                    #          hand-written defaultModelSelection in provider_config.json is
                                    #          normalized away) — the launcher detects it and prints the
                                    #          one-time login recipe
-reset_qoderwork.ps1   # QoderWork: 26 steps (agents.db oauth/app_settings scrub,
-                                   #          chats preserved; auth.dat, MachineGuid, MAC, hostname;
-                                   #          -SkipMac/-SkipHostname/-DryRun)
+reset_qoderwork.ps1   # QoderWork v0.2 THIN MANIFEST (2026-11-14): 26 steps
+                                   #          (agents.db oauth/app_settings scrub via the core
+                                   #          purge-tables verb — chats preserved; auth.dat,
+                                   #          MachineGuid, MAC, hostname; -SkipMac/-SkipHostname/
+                                   #          -DryRun); every FILE-LEVEL mutation via Invoke-GhostCore,
+                                   #          same contract as cursor v0.3 / devin v0.4 / trae v0.3
+                                   #          (step order/audit keys/restore/summary identical to v0.1,
+                                   #          archived at archive/reset_qoderwork_windows-v0.1.ps1,
+                                   #          local-only); -DryRun writes nothing and runs without
+                                   #          Python (the registry/MAC/hostname system steps [22]-[26]
+                                   #          stay PS by contract); FIXED v0.1's heredoc crash on a
+                                   #          missing app_settings table (schema-missing is now
+                                   #          per-key tolerated + audited)
 reset_minimax_opencode.ps1  # MiniMax/OpenCode: 22 steps (OpenCode auth.json wipe -> {} unless
                                    #          -KeepLogin, version preflight ≥1.17.0, distinct
                                    #          updater IDs, Chromium state per profile; v1.2 adds
