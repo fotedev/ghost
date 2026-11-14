@@ -59,13 +59,25 @@ BeforeAll {
     $dispatchMatch = [regex]::Match($BatText, '(?ms)^:DispatchOne\r?\n(.*?)^:RunChain')
     if (-not $dispatchMatch.Success) { throw 'could not locate the :DispatchOne block in GHOST.bat' }
     $dispatch = $dispatchMatch.Groups[1].Value
-    $script:SingleLine = @{}   # gid -> @{ wrapper; script; tokens }
+    # tokenize a wrapper argument region: "quoted (may contain spaces)" or
+    # bare words - the shape every :DispatchOne case uses
+    function Split-BatTokens {
+        param([string]$S)
+        $out = @()
+        foreach ($m in [regex]::Matches($S, '"([^"]*)"|(\S+)')) {
+            if ($m.Groups[1].Success) { $out += $m.Groups[1].Value }
+            else { $out += $m.Groups[2].Value }
+        }
+        return ,$out
+    }
+    $script:SingleLine = @{}   # gid -> @{ wrapper; script; tokens; full }
     $script:BlockGids = @()
     foreach ($line in ($dispatch -split "`r?`n")) {
         if ($line -match 'if "%~1"=="(\d+)"\s+\(call :(\w+)\s+(.+?) & exit /b\)') {
             $gid = [int]$Matches[1]
             $tokens = @([regex]::Matches($Matches[3], '"([^"]*)"') | ForEach-Object { $_.Groups[1].Value })
-            $SingleLine[$gid] = @{ wrapper = $Matches[2]; tokens = $tokens }
+            $SingleLine[$gid] = @{ wrapper = $Matches[2]; tokens = $tokens
+                                   full = (Split-BatTokens $Matches[3]) }
         } elseif ($line -match '^if "%~1"=="(\d+)" \($') {
             $BlockGids += [int]$Matches[1]
         }
@@ -79,6 +91,36 @@ BeforeAll {
     function Test-ScriptExists {
         param([string]$P)
         return (Test-Path -LiteralPath (Join-Path $Repo (Convert-RepoPath $P)))
+    }
+
+    # wrapper -> which full tokens carry the script's arguments (after the
+    # wrapper's own slots: Run/RunZcodeReset = [script, args...];
+    # RunWith = [script, note, args...]; ConfirmRun = [label, script, text,
+    # args...]; Detached = [title, psFlags, script, argsString, notes...];
+    # ConfirmReset = [label, script, argsString])
+    function Get-BatArgs {
+        param([string]$Wrapper, [string[]]$Full)
+        switch ($Wrapper) {
+            'Detached' {
+                if ($Full.Count -gt 3 -and $Full[3]) {
+                    return @($Full[3] -split '\s+' | Where-Object { $_ })
+                }
+                return @()
+            }
+            'ConfirmReset' {
+                if ($Full.Count -gt 2 -and $Full[2]) {
+                    return @($Full[2] -split '\s+' | Where-Object { $_ })
+                }
+                return @()
+            }
+            'Run'           { $rest = 1 }
+            'RunZcodeReset' { $rest = 1 }
+            'RunWith'       { $rest = 2 }
+            'ConfirmRun'    { $rest = 3 }
+            default         { throw "unexpected wrapper '$Wrapper'" }
+        }
+        if ($Full.Count -gt $rest) { return @($Full[$rest..($Full.Count - 1)]) }
+        return @()
     }
 }
 
@@ -190,6 +232,28 @@ Describe 'menu.json matches GHOST.bat :DispatchOne parity' {
             $idx = $ScriptArgIndex[$case.wrapper]
             $batScript = $case.tokens[$idx]
             (Convert-RepoPath $row.script) | Should -Be (Convert-RepoPath $batScript) -Because "gid $gid"
+        }
+    }
+
+    It 'each action gid passes the same arguments as its .bat dispatch case' {
+        foreach ($gid in $SingleLine.Keys) {
+            $case = $SingleLine[$gid]
+            $row = @($AllRows | Where-Object { $_.gid -eq [int]$gid })[0]
+            $row | Should -Not -BeNullOrEmpty -Because "gid $gid"
+            $batArgs = @(Get-BatArgs -Wrapper $case.wrapper -Full $case.full)
+            if ($case.wrapper -eq 'RunWith') {
+                # -WaitForClose is the .bat spelling of menu.json's waitForClose flag
+                $batHasWait = ($batArgs -contains '-WaitForClose')
+                $batArgs = @($batArgs | Where-Object { $_ -ne '-WaitForClose' })
+                ([bool]$row.waitForClose) | Should -Be $batHasWait -Because "gid $gid waitForClose parity"
+            }
+            if ($case.wrapper -eq 'Detached') {
+                $row.title | Should -Be $case.full[0] -Because "gid $gid detached title"
+                $row.psFlags | Should -Be $case.full[1] -Because "gid $gid detached psFlags"
+            }
+            $because = "gid $gid args drift - the .bat passes '{0}' but menu.json says '{1}' (the 2026-11-11 gid 76 class: a missing flag makes the hub row fail on its own script)" -f
+                ($batArgs -join ' '), (@($row.args) -join ' ')
+            @($row.args) | Should -Be $batArgs -Because $because
         }
     }
 

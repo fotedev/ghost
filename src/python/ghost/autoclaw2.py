@@ -262,6 +262,13 @@ def check_schema(conn):
     EXCEPTED: a FRESH account (bootstrap-created, e.g. the Primary's live
     68f7331f) carries a single re-stamped baseline row at the current
     sequence - accepted only at the exact FRESH_STAMP_BASELINE tuple."""
+    # a zero-byte / half-created runtime DB has no schema_migrations table at
+    # all - plain SQL would crash with OperationalError instead of refusing
+    have_migrations = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
+        " AND name = 'schema_migrations'").fetchone()[0]
+    if not have_migrations:
+        return {"ok": False, "missing_columns": {"schema_migrations": ["*"]}}
     rows = conn.execute(
         "SELECT migration_id, sequence, checksum FROM schema_migrations").fetchall()
     baseline = (MIGRATION_ID, MIGRATION_SEQUENCE, MIGRATION_CHECKSUM)
@@ -680,9 +687,12 @@ def _kill_process_tree(proc):
         pass
     if os.name == "nt":
         try:
+            # CREATE_NO_WINDOW: this runs inside the console-less MCP stdio
+            # server - a bare taskkill would flash a visible cmd window.
             subprocess.run(["taskkill", "/pid", str(proc.pid), "/T", "/F"],
                            stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=10, check=False)
+                           stderr=subprocess.DEVNULL, timeout=10, check=False,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
         except (OSError, subprocess.SubprocessError):
             pass
 
@@ -1538,11 +1548,14 @@ def profile_inventory(payload):
 
 def chat_inventory_for_profile(payload):
     """Bridge wrapper: resolve one profile, then inventory its chats.
-    Read-only; safe against a running instance (WAL readers coexist)."""
+    Read-only; safe against a running instance (WAL readers coexist).
+    payload.account_hint (optional) pins the account dir of a multi-account
+    profile - the Primary's dormant 27e33829 + live case, where the
+    newest-mtime default silently switches sources after a re-login."""
     name = payload.get("profile") or payload.get("target")
     if not name:
         raise Refusal("bad-payload", 'payload needs {"profile": "c1"}')
-    info = resolve_profile(name)
+    info = resolve_profile(name, account_hint=payload.get("account_hint"))
     if info["account_status"] != "ok":
         return {"profile": name, "status": "skipped",
                 "reason": info["account_status"], "session_count": 0,
@@ -1551,6 +1564,10 @@ def chat_inventory_for_profile(payload):
     result["profile"] = name
     result["status"] = "ok"
     result["running"] = info["running"]
+    # provenance: WHICH account dir was read (sha basename) and how it was
+    # picked - the inventory report must surface a silent source switch
+    result["account_dir"] = os.path.basename(info["account_dir"])
+    result["account_selected_by"] = info["account_selected_by"]
     return result
 
 
@@ -1682,8 +1699,11 @@ def chat_import(payload):
     """Copy one source session into one target profile as a NEW local
     session (D8/D10/D11/D12). Refuses IM-bound sessions; nuls the copied
     runs' credential_version; drops (and counts) entries whose artifact
-    revision is missing in the target."""
-    src = resolve_profile(payload["source"], require_account=True)
+    revision is missing in the target. payload.source_account_hint (optional)
+    pins the source's account dir - the Primary's re-login case, where the
+    newest-mtime default silently switches to the fresh (empty) account."""
+    src = resolve_profile(payload["source"], require_account=True,
+                          account_hint=payload.get("source_account_hint"))
     tgt = resolve_profile(payload["target"], require_account=True)
     if tgt["running"]:
         raise Refusal("target-running",
@@ -2044,12 +2064,17 @@ def chat_import(payload):
             "expected": expected, "dropped": dropped,
             "events_dropped": events_dropped,
             "artifacts_skipped": artifacts_skipped, "backup": backup_path,
-            "title": new_title}
+            "title": new_title,
+            "source_account": os.path.basename(src["account_dir"])}
 
 
 def chat_revert(payload):
-    """Tombstone + delete exactly the rows one import created (plan §7)."""
-    tgt = resolve_profile(payload["target"], require_account=True)
+    """Tombstone + delete exactly the rows one import created (plan §7).
+    payload.account_hint (optional) pins the target's account dir (symmetry
+    with the inventory/import hints; revert targets are single-account
+    clones today)."""
+    tgt = resolve_profile(payload["target"], require_account=True,
+                          account_hint=payload.get("account_hint"))
     if tgt["running"]:
         raise Refusal("target-running",
                       "{0} is running - close it first".format(payload["target"]))

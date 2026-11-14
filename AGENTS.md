@@ -339,16 +339,37 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     carries the index + a per-profile
                                    #     accept_order counter + regression test
                                    #     (tests/python/test_ghost_autoclaw2.py,
-                                   #     discover -s tests/python: 155 green);
-                                   #     spec §5.5 updated. Known gaps: the chat
-                                   #     tools resolve ONLY the newest Primary
-                                   #     account dir (dormant 27e33829 holds 10
-                                   #     older chats — no -Account hint here, the
-                                   #     MCP script has one), and targets must be
-                                   #     closed + signed-in (c2/c4 not signed in);
-                                   #     re-importing an actively-growing source
-                                   #     session duplicates it (changed content
-                                   #     hash falls through by design);
+                                   #     discover -s tests/python: 158 green);
+                                   #     spec §5.5 updated. 2026-11-11: -Account
+                                   #     <sha-prefix> hint ADDED (plumbs
+                                   #     account_hint / source_account_hint
+                                   #     through ac2-chat-inventory/-import/
+                                   #     -revert — the newest-runtime.sqlite
+                                   #     default silently switched the sync
+                                   #     source when the Primary re-logged into
+                                   #     the fresh 830c6348 account and the old
+                                   #     68f7331f chats went invisible; inventory
+                                   #     ok-lines + audit now carry the resolved
+                                   #     account sha + how it was picked); a
+                                   #     blind-shell preflight prints the
+                                   #     APPDATA/USERPROFILE used when a profile
+                                   #     dir does not resolve (sandboxed shells
+                                   #     reported profile-missing/not-signed-in
+                                   #     on healthy profiles); menu.json gid 76
+                                   #     gained the missing -AllMissing and the
+                                   #     hub parity test now compares ARGS
+                                   #     against the .bat dispatch (was
+                                   #     script+mode only); check_schema refuses
+                                   #     schema-less runtime DBs instead of
+                                   #     crashing. Remaining known gaps: targets
+                                   #     must be closed + signed-in (c4 never
+                                   #     signed in; running instances currently
+                                   #     leave NO lockfile, so the target-running
+                                   #     gate cannot see them — close clones
+                                   #     before -Apply); re-importing an
+                                   #     actively-growing source session
+                                   #     duplicates it (changed content hash
+                                   #     falls through by design);
                                    #   patch_autoclaw2_identity.ps1 — AutoClaw2
                                    #     window + notification-tray identity patch
                                    #     (AutoClaw2 [13] /

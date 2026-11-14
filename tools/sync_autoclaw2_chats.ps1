@@ -47,6 +47,15 @@
 .PARAMETER Source
   Source profile for Import and for the Inventory diff. Default: Primary.
 
+.PARAMETER Account
+  Optional account-dir hint (exact 64-hex sha or unique prefix) for the
+  SOURCE profile - same idea as sync_autoclaw2_mcp.ps1 -Account. Without it
+  a multi-account Primary resolves to the account whose runtime.sqlite was
+  written most recently, so a re-login into a fresh account silently moves
+  the source (the 2026-11-11 case: old live 68f7331f became invisible the
+  moment the new 830c6348 account took over). Pass the older account's sha
+  to reach its chats.
+
 .PARAMETER SessionId
   Source session id to copy (Import mode; required unless -AllMissing).
 
@@ -78,6 +87,7 @@
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Mode Import -SessionId <uuid> -Target c1
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Mode Import -SessionId <uuid> -Target c1 -Apply
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Mode Import -AllMissing -Apply -Target All
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Mode Inventory -Account 68f7331f
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_autoclaw2_chats.ps1 -Revert -ImportId <uuid> -Target c1
 #>
 [CmdletBinding()]
@@ -86,6 +96,7 @@ param(
     [ValidateSet('Inventory', 'Import')]
     [string]$Mode = 'Inventory',
     [string]$Source = 'Primary',
+    [string]$Account = '',
     [string]$SessionId,
     [switch]$AllMissing,
     [string]$ImportId,
@@ -170,6 +181,23 @@ foreach ($raw in ($Target -split '\s*,\s*') | Where-Object { $_ }) {
 }
 $targets = @($targets | Select-Object -Unique)
 
+# --- Blind-shell preflight (G12) -----------------------------------------------
+# A sandboxed/agent shell can run with %APPDATA% or %USERPROFILE% redirected;
+# every profile then resolves missing and the run "succeeds" with empty
+# results (seen 2026-11-11: Primary reported profile-missing + c1
+# not-signed-in from a shell whose APPDATA pointed elsewhere). Say so loudly
+# up front instead of letting the [SKIP] lines read as "nothing to sync".
+if (-not $Quiet) {
+    foreach ($pname in (@($Source) + $targets)) {
+        $pdir = Get-ProfileDir $pname
+        if (-not (Test-Path -LiteralPath $pdir)) {
+            Write-Host ("[WARN] {0}: profile dir NOT FOUND at {1}" -f $pname, $pdir) -ForegroundColor Yellow
+            Write-Host ("       (APPDATA={0} - USERPROFILE={1}) - this run will [SKIP] it." -f $env:APPDATA, $env:USERPROFILE) -ForegroundColor Yellow
+            Write-Host ('       If that path exists on this machine, this shell is sandboxed or its env vars are redirected - run from GHOST.bat / a normal console instead.') -ForegroundColor Yellow
+        }
+    }
+}
+
 # --- Revert path ---------------------------------------------------------------
 if ($Revert) {
     if (-not $ImportId) {
@@ -177,7 +205,9 @@ if ($Revert) {
         exit 1
     }
     $tname = if ($targets.Count -eq 1) { $targets[0] } else { $targets[0] }
-    $call = Invoke-Ac2 'ac2-chat-revert' @{ target = $tname; import_id = $ImportId }
+    $revertPayload = @{ target = $tname; import_id = $ImportId }
+    if ($Account) { $revertPayload.account_hint = $Account }
+    $call = Invoke-Ac2 'ac2-chat-revert' $revertPayload
     if ($call.exit -eq 2) {
         Write-Host ("[REFUSED] {0}: {1}" -f $call.verdict.refused, $call.verdict.message) -ForegroundColor Red
         exit 2
@@ -203,7 +233,11 @@ if ($Mode -eq 'Inventory') {
 
     $names = @($Source) + @($targets | Where-Object { $_ -ne $Source })
     foreach ($name in $names) {
-        $call = Invoke-Ac2 'ac2-chat-inventory' @{ profile = $name }
+        # the -Account hint applies to the SOURCE only - clone targets are
+        # single-account and would refuse a Primary sha as no-match
+        $invPayload = @{ profile = $name }
+        if ($Account -and $name -eq $Source) { $invPayload.account_hint = $Account }
+        $call = Invoke-Ac2 'ac2-chat-inventory' $invPayload
         if ($call.exit -eq 2) {
             Write-Tag 'REFUSED' ("{0}: {1}" -f $name, $call.verdict.message) 'Red'
             $inv[$name] = $null
@@ -214,10 +248,21 @@ if ($Mode -eq 'Inventory') {
             Write-Tag 'SKIP' ("{0} - {1}" -f $name, $call.verdict.reason) 'Yellow'
         }
         else {
-            Write-Tag 'ok' ("{0} - {1} session(s), {2} imported" -f
-                $name, $call.verdict.session_count, $call.verdict.imported_count) 'Green'
+            # account provenance in every ok line - a silent source switch
+            # (re-login into a fresh account) must be visible, not buried
+            $acct = $call.verdict.account_dir
+            $acctNote = ''
+            if ($acct) {
+                $how = $call.verdict.account_selected_by
+                $acctNote = " - account {0}" -f $acct.Substring(0, [Math]::Min(12, $acct.Length))
+                if ($how) { $acctNote += " ({0})" -f $how }
+            }
+            Write-Tag 'ok' ("{0}{1} - {2} session(s), {3} imported" -f
+                $name, $acctNote, $call.verdict.session_count, $call.verdict.imported_count) 'Green'
             Write-AuditLine $name @{ status = 'inventory'
-                                     session_count = $call.verdict.session_count }
+                                     session_count = $call.verdict.session_count
+                                     account_dir = $acct
+                                     account_selected_by = $call.verdict.account_selected_by }
         }
         $report.profiles += $call.verdict
     }
@@ -279,7 +324,9 @@ if ($AllMissing) {
         Write-Host '[FAILED] -SessionId and -AllMissing are mutually exclusive.' -ForegroundColor Red
         exit 1
     }
-    $srcCall = Invoke-Ac2 'ac2-chat-inventory' @{ profile = $Source }
+    $srcInvPayload = @{ profile = $Source }
+    if ($Account) { $srcInvPayload.account_hint = $Account }
+    $srcCall = Invoke-Ac2 'ac2-chat-inventory' $srcInvPayload
     if ($srcCall.exit -eq 2) {
         Write-Host ("[REFUSED] source {0}: {1}" -f $Source, $srcCall.verdict.message) -ForegroundColor Red
         exit 2
@@ -346,6 +393,7 @@ foreach ($tname in $targets) {
             dry_run   = (-not $Apply)
             max_unresolved_pct = $MaxUnresolvedPct
         }
+        if ($Account) { $payload.source_account_hint = $Account }
         if ($TitleTag -ne '') { $payload.title_tag = $TitleTag }
         $attempted++
         $call = Invoke-Ac2 'ac2-chat-import' $payload
@@ -380,6 +428,7 @@ foreach ($tname in $targets) {
             Write-AuditLine $tname @{ status = 'ok'; import_id = $v.import_id
                                       new_session_id = $v.new_session_id
                                       session_id = $sid
+                                      source_account = $v.source_account
                                       backup = $v.backup }
             continue
         }

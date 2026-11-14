@@ -1262,6 +1262,37 @@ class ChatImportTests(_PatchedHome):
         finally:
             self.fixture.release_lock(handle)
 
+    def test_source_account_hint_reaches_old_account(self):
+        # 2026-11-11 live case: the Primary re-logged-in into a NEW account
+        # dir and the newest-mtime default silently switched the sync source
+        # to the fresh schema-less DB - the previous account's chats became
+        # unreachable. source_account_hint / account_hint pin the account the
+        # caller means.
+        sid, _ = self.fixture.session("Primary")
+        acc_root = os.path.join(autoclaw2.profile_path("Primary"), "accounts")
+        old_hash = os.listdir(acc_root)[0]
+        # a fresh account dir, newer mtime, no schema - what a re-login leaves
+        new_runtime = os.path.join(acc_root, "f" * 64, "runtime")
+        os.makedirs(new_runtime)
+        open(os.path.join(new_runtime, "runtime.sqlite"), "w").close()
+        past = time.time() - 3600
+        os.utime(self.fixture.db_paths["Primary"], (past, past))
+        # without the hint the newest pick reads the fresh account and the
+        # schema gate refuses it - the silent source switch, made loud
+        with self.assertRaises(autoclaw2.Refusal) as ctx:
+            autoclaw2.chat_inventory_for_profile({"profile": "Primary"})
+        self.assertEqual(ctx.exception.code, "schema-mismatch")
+        # with the hint both the inventory and the import reach the old DB
+        inv = autoclaw2.chat_inventory_for_profile(
+            {"profile": "Primary", "account_hint": old_hash})
+        self.assertEqual(inv["account_dir"], old_hash)
+        self.assertEqual(inv["account_selected_by"], "hint")
+        self.assertEqual(inv["session_count"], 1)
+        result = autoclaw2.chat_import(
+            self._import_payload(sid, source_account_hint=old_hash))
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["source_account"], old_hash)
+
     def test_apply_copies_with_remap_and_nulls_credentials(self):
         sid, run_id = self.fixture.session("Primary")
         result = autoclaw2.chat_import(self._import_payload(sid))

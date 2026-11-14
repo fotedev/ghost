@@ -7,7 +7,42 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **AutoClaw2 chat sync: `-Account` source hint + source-account
+  provenance** (2026-11-11): `tools/sync_autoclaw2_chats.ps1 -Account
+  <sha-prefix>` pins the multi-account Primary's account dir for the
+  inventory diff, `-AllMissing` planning and every import (new
+  `account_hint` / `source_account_hint` payload keys through
+  `ac2-chat-inventory` / `-import` / `-revert`; `resolve_profile` always had
+  the plumbing — the MCP commands used it, the chat commands never did).
+  Reason: the newest-runtime.sqlite default silently SWITCHES the sync
+  source when the Primary re-logs into a fresh account (live 2026-11-11:
+  `68f7331f…` stopped being written at 09:14 and the new `830c6348…` took
+  over — the old account's chats became invisible to the chat sync the same
+  minute). Every inventory `[ok]` line and audit record now carries the
+  resolved account sha + how it was picked (hint / newest-mtime), so a
+  source switch is visible instead of buried. Blind-shell preflight: when a
+  profile dir does not resolve, the run prints the APPDATA/USERPROFILE it
+  used before the [SKIP] lines — the 2026-11-11 16:24Z inventory ran from a
+  shell whose APPDATA pointed elsewhere and reported Primary
+  profile-missing + c1 not-signed-in, an empty diff that reads as "nothing
+  to sync".
+
 ### Fixed
+- **GHOST.exe "Import chats to clones" row failed on its own script**
+  (2026-11-11): menu.json gid 76 was missing `-AllMissing` (the GHOST.bat
+  row has carried it since the 2026-11-09 `:Run` arg fix), so importing
+  from the desktop hub hit `[FAILED] -Mode Import needs -SessionId …` and
+  copied nothing. The parity test now compares every action gid's ARGS
+  against its .bat dispatch line (plus Detached title/psFlags and the
+  RunWith `-WaitForClose` ↔ `waitForClose` mapping) — script+mode parity
+  alone let this drift through CI; negative-check proven.
+- **AutoClaw2 schema gate crashed on a schema-less runtime DB**
+  (2026-11-11): `check_schema` ran its migration-history SELECT unguarded,
+  so a zero-byte / half-created `runtime.sqlite` (fresh re-login account
+  shell) died with `sqlite3.OperationalError` instead of the clean
+  `schema-mismatch` refusal. The gate probes `sqlite_master` first and
+  reports the missing table as drift.
 - **Primary `ZCode.lnk` hijack repair now also restores the drifted TARGET**
   (2026-11-11): a Windows pin rewrite can retarget the Primary's Start-menu
   shortcut onto a per-color exe copy — live-verified: the lnk carried target
