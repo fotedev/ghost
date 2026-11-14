@@ -8,6 +8,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **MiniMax/OpenCode reset v1.4 — thin manifest over the Python core**
+  (2026-11-14): Phase 3 migration #5 — the script that previously required
+  NO Python now routes every store mutation through `Invoke-GhostCore`
+  (machineid-file / json-remove / json-patch / salt-rotate / sweep-file /
+  sweep-tree / store-delete / backup). The 22 steps, their order, audit
+  keys, restore actions and summary are identical to v1.3 (archived
+  `archive/reset_minimax_opencode_windows-v1.3.ps1`, local-only). Guard
+  KEPT: the tree sweeps still refuse to delete when the pre-backup failed
+  (v1.3's no-backup-no-delete never-silent-success rule). Improvements
+  over v1.3: the Preferences salt is now generated PER PROFILE by the core
+  (v1.3 shared ONE salt across MiniMax and OpenCode Preferences — a
+  cross-profile correlation signal), and the restore manifest only lists
+  os_crypt backups when the key was actually removed. Documented delta: an
+  UNPARSEABLE auth file now FAILS the wipe step loudly instead of being
+  force-overwritten to `{}` (the core never clobbers unparseable JSON —
+  delete the file manually or restore from the backup to recover). Python
+  now required (fail-fast preflight). Pester 238/238, harness PASS,
+  unittest 177 OK. Live comparison run pending user supervision.
 - **QoderWork reset v0.2 — thin manifest over the Python core** (2026-11-14):
   Phase 3 migration #4. The 26 steps, their order, audit keys, restore
   actions and summary are identical to v0.1 (archived
