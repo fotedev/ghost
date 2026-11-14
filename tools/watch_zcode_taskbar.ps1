@@ -339,28 +339,42 @@ function Invoke-IdentityPass {
 
 $script:HijackCheckPass = 0
 
-# Read-only check for the recurring Primary-shortcut hijack: every per-user
-# ZCode.lnk whose AUMID ends in ".<N>" hands the clone's icon resolution to a
-# foreign shortcut (verified 2026-09-28: green-alone showed the Primary icon
-# while its window identity was already correct).
+# Shared primary-lnk hijack decision core (pure lib, unit-tested): the path
+# list, the stock-exe candidates and the drift predicate live in ONE copy for
+# the resident guard and the installer repair this guard invokes.
+$LnkRepairLib = Join-Path $PSScriptRoot 'zcode_primary_lnk_lib.ps1'
+if (-not (Test-Path -LiteralPath $LnkRepairLib)) { throw "Primary-lnk repair lib not found: $LnkRepairLib" }
+. $LnkRepairLib
+
+# Read-only check for the recurring Primary-shortcut hijack, three verified
+# shapes: AUMID ending in ".<N>" (2026-09-24), the icon field wiped or
+# retargeted (2026-09-28), and - since the 2026-11-11 per-color exe copies -
+# the TARGET drifted onto a ZCode-<Color>.exe copy (the pin rewrite carried
+# the orange exe; the old AUMID-only guard called the result healthy).
+# Target/icon checks stay silent when no stock ZCode.exe resolves (nothing to
+# restore to), so the guard never demands a repair it cannot complete.
 function Get-PrimaryLnkHijack {
-    $paths = @(
-        (Join-Path ([Environment]::GetFolderPath('Desktop')) 'ZCode.lnk'),
-        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\ZCode.lnk'),
-        (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ZCode.lnk')
-    )
+    $paths = Get-ZCodePrimaryLnkPaths
     $shell = $null
     try { $shell = New-Object -ComObject Shell.Application } catch { return @() }
+    $ws = $null
+    try { $ws = New-Object -ComObject WScript.Shell } catch { return @() }
+    $stock = Resolve-StockZCodeExe -Candidates (Get-ZCodeExeCandidates)
     $hijacked = @()
     foreach ($p in $paths) {
         if (-not (Test-Path -LiteralPath $p)) { continue }
-        $ns = $shell.Namespace((Split-Path -Parent $p))
-        if (-not $ns) { continue }
-        $item = $ns.ParseName((Split-Path -Leaf $p))
-        if (-not $item) { continue }
-        $id = [string]$item.ExtendedProperty('System.AppUserModel.ID')
-        if ($id -match '\.\d+$') {
-            $hijacked += [pscustomobject]@{ Path = $p; Aumid = $id }
+        $id = $null
+        if ($shell) {
+            $ns = $shell.Namespace((Split-Path -Parent $p))
+            if (-not $ns) { continue }
+            $item = $ns.ParseName((Split-Path -Leaf $p))
+            if (-not $item) { continue }
+            $id = [string]$item.ExtendedProperty('System.AppUserModel.ID')
+        }
+        $sc = $ws.CreateShortcut($p)
+        $reason = Test-PrimaryLnkHijackState -Aumid $id -TargetPath $sc.TargetPath -IconLocation $sc.IconLocation -StockExe $stock
+        if ($reason) {
+            $hijacked += [pscustomobject]@{ Path = $p; Aumid = $id; Reason = $reason }
         }
     }
     return $hijacked
@@ -368,7 +382,7 @@ function Get-PrimaryLnkHijack {
 
 # Repair check throttled by pass count (60 passes ~5 minutes at the default
 # 5s interval). Writes happen only after a read finds a hijack; the canonical
-# shortcut tool performs and verify-afters the repair (AUMID plus icon).
+# shortcut tool performs and verify-afters the repair (AUMID, target, icon).
 function Invoke-PrimaryHijackGuard {
     param([int]$EveryPasses = 60, [switch]$Repair)
     $script:HijackCheckPass++
@@ -376,7 +390,7 @@ function Invoke-PrimaryHijackGuard {
     $hits = @(Get-PrimaryLnkHijack)
     if ($hits.Count -eq 0) { return }
     foreach ($hit in $hits) {
-        Write-WatchLog ('Primary shortcut hijack detected: {0} carries "{1}"' -f $hit.Path, $hit.Aumid) 'WARN'
+        Write-WatchLog ('Primary shortcut hijack detected: {0} - {1}' -f $hit.Path, $hit.Reason) 'WARN'
     }
     if (-not $Repair) {
         Write-WatchLog 'hijack check only (no -Repair): run -RunOnce -CheckPrimaryHijack or keep the resident watcher running to self-heal it' 'WARN'
@@ -389,7 +403,25 @@ function Invoke-PrimaryHijackGuard {
         # since 2026-09-28 (228 logged failures before the 2026-10-25 fix).
         $repairScript = Join-Path $PSScriptRoot 'install_zcode_second_shortcuts.ps1'
         $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File $repairScript -RepairPrimaryAumid 2>&1 | Out-String
+        # Console-less child spawn (CreateNoWindow): a watcher started without
+        # any console (e.g. by an agent runtime) would otherwise give this
+        # child a brand-new VISIBLE cmd window on every hijack repair. The
+        # 120s cap also stops a wedged child from blocking the watch loop.
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $psExe
+        $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $repairScript + '" -RepairPrimaryAumid'
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $soTask = $proc.StandardOutput.ReadToEndAsync()
+        $seTask = $proc.StandardError.ReadToEndAsync()
+        if (-not $proc.WaitForExit(120000)) {
+            try { $proc.Kill() } catch { }
+            Write-WatchLog 'hijack repair child timed out after 120s - killed' 'FAIL'
+        }
+        $out = ($soTask.Result + $seTask.Result)
         if (-not [string]::IsNullOrWhiteSpace($out)) {
             $repairDir = Split-Path -Parent $LogFile
             if (-not (Test-Path -LiteralPath $repairDir)) { New-Item -ItemType Directory -Path $repairDir -Force | Out-Null }
@@ -401,10 +433,10 @@ function Invoke-PrimaryHijackGuard {
     }
     $still = @(Get-PrimaryLnkHijack)
     if ($still.Count -eq 0) {
-        Write-WatchLog 'Primary shortcut hijack repaired (AUMID plus icon). Re-check the taskbar buttons; an Explorer/icon refresh may still be required once.' 'REPAIR'
+        Write-WatchLog 'Primary shortcut hijack repaired (AUMID, target and icon). Re-check the taskbar buttons; an Explorer/icon refresh may still be required once.' 'REPAIR'
     } else {
         foreach ($hit in $still) {
-            Write-WatchLog ('hijack repair FAILED - {0} still carries "{1}"' -f $hit.Path, $hit.Aumid) 'FAIL'
+            Write-WatchLog ('hijack repair FAILED - {0} still: {1}' -f $hit.Path, $hit.Reason) 'FAIL'
         }
     }
 }
