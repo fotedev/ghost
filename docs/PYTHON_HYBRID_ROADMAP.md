@@ -65,8 +65,8 @@ not batched.
 1-15 byte-identical to the archived v0.2 manifest; audit
 `audit_20261018_043515.json` + restore script written and parse-checked.
 Criterion 4 already in place (`archive/reset_cursor_windows-v0.2.ps1`).
-Generalization order: devin v0.4, trae v0.3 and qoderwork v0.2 landed
-(2026-11-14); next minimax -> qoder -> zcode last.
+Generalization order: devin v0.4, trae v0.3, qoderwork v0.2 and
+minimax v1.4 landed (2026-11-14); next qoder -> zcode last.
 
 ### Phase 4 — unchanged
 

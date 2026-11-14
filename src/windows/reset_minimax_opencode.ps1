@@ -1,5 +1,46 @@
 #Requires -Version 5.1
-# MiniMax Agent / OpenCode Identity Reset v1.3
+# MiniMax Agent / OpenCode Identity Reset v1.4
+#
+# v1.4 changes vs v1.3 -- THIN MANIFEST over the Python core (Phase 3
+# migration #5 per docs/PYTHON_HYBRID_ROADMAP.md: cursor v0.3 pilot, devin
+# v0.4, trae v0.3, qoderwork v0.2). The 22 steps, their order, audit keys,
+# restore actions and summary are IDENTICAL to v1.3 (archived at
+# archive/reset_minimax_opencode_windows-v1.3.ps1, local-only); every store
+# mutation now runs through src\python\ghost_cli.py (base64 payload in, JSON
+# report out) via ONE invocation helper. What was deleted from v1.3: the
+# local mutation helpers, replaced by the tested ghost.filesweep /
+# ghost.winstore / ghost.backup modules.
+#
+#   v1.3 helper                    -> v1.4 core verb
+#   Set-VerifiedMachineIdFile      -> machineid-file
+#   Clear-AllJsonNodes             -> json-remove (empty prefix = every
+#                                     top-level node; file becomes {})
+#   Remove-JsonNodesVerified       -> json-remove (explicit keys) + PS keep-
+#                                     nodes re-read check
+#   Clear-TreeFilesIndividually    -> backup + sweep-tree (the v1.3 "no backup
+#                                     -> no delete" guard is KEPT: the pre-
+#                                     backup runs first and a failed backup
+#                                     skips the whole tree honestly)
+#   Remove-VerifiedFileNoBackup    -> sweep-file
+#   Remove-OsCryptEncryptedKey     -> json-remove (restore-manifest action
+#                                     recorded only when actually removed --
+#                                     the v1.3 accurate-manifest contract)
+#   Set-DeviceIdSalt               -> salt-rotate (salt now generated in the
+#                                     core: 32 lowercase hex per profile --
+#                                     v1.3 shared ONE salt across both apps'
+#                                     Preferences, a cross-profile correlation
+#                                     signal; per-profile salts are strictly
+#                                     better isolation)
+#   Reset-OpenCodeWindowIds        -> backup + json-patch (fresh GUID array;
+#                                     value generation stays PS)
+#   Clear-BinaryIdentityStore      -> store-delete --action delete
+#   Set-JsonIdentity               -> backup + json-patch
+#
+# DELTAS (both documented, both safer): (1) an UNPARSEABLE auth file now
+# FAILS the wipe step loudly instead of being force-overwritten to {} (the
+# core never clobbers unparseable JSON -- delete the file manually or restore
+# from the backup to recover); (2) the Preferences salt is per-profile now
+# (see the salt-rotate row above).
 #
 # v1.3 changes vs v1.2 (fixes post-reset MiniMax Code toast
 # "Account information is temporarily unavailable. Check your connection or
@@ -104,7 +145,8 @@
 # no ternary, no $Input variable, RandomNumberGenerator via .GetBytes() only.
 #
 # NOTE: no SQLite writes are performed by this script (both apps' SQLite
-# databases are preserved), so Python is NOT required.
+# databases are preserved), but v1.4 routes every JSON/file store mutation
+# through the Python core, so Python IS required (fail-fast preflight).
 #
 # Usage (Windows 10, PowerShell 5.1 or 7 -- run from OUTSIDE OpenCode/MiniMax):
 #   powershell -ExecutionPolicy Bypass -File reset_minimax_opencode.ps1 [-KeepLogin] [-SkipVersionCheck]
@@ -147,10 +189,10 @@ if (-not $mmoIsAdmin) {
     # writes it at the very end, never on the version/kill preflight aborts).
     # Delete it BEFORE launching the child, and propagate the child's exit code
     # via -PassThru instead of always exiting 0.
-    Remove-Item -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt" -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath "$env:TEMP\minimax_opencode_v1.4_done.txt" -Force -ErrorAction SilentlyContinue
     $mmoChild = Start-Process powershell -Verb RunAs -ArgumentList $mmoArgs -WindowStyle Normal -Wait -PassThru
-    if (Test-Path -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt") {
-        Get-Content -LiteralPath "$env:TEMP\minimax_opencode_v1.3_done.txt"
+    if (Test-Path -LiteralPath "$env:TEMP\minimax_opencode_v1.4_done.txt") {
+        Get-Content -LiteralPath "$env:TEMP\minimax_opencode_v1.4_done.txt"
     }
     # ExitCode can be unreadable for an elevated child on some hosts - degrade
     # to a plain exit 0 rather than throwing after a successful run.
@@ -160,7 +202,7 @@ if (-not $mmoIsAdmin) {
     exit
 }
 
-Write-GhostBanner -Target "MiniMax/OpenCode Identity Reset" -Version "1.3"
+Write-GhostBanner -Target "MiniMax/OpenCode Identity Reset" -Version "1.4"
 
 # === Local helpers (mirroring the zcode v1.1 reference pattern) ================
 
@@ -213,6 +255,107 @@ function Get-UserProfileBackupLabel {
     return Get-PathBackupLabel -Path $TargetPath
 }
 
+function _B64Payload {
+    # Compact JSON -> base64: the core bridge's payload contract (sidesteps
+    # PS 5.1 native-argument quoting entirely).
+    param([Parameter(Mandatory = $true)][hashtable]$Payload)
+    $json = $Payload | ConvertTo-Json -Depth 6 -Compress
+    return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
+}
+
+function Invoke-GhostCore {
+    # The one PS -> Python invocation point for every store mutation.
+    # Returns the parsed JSON report, or $null when the core is missing or
+    # the subcommand failed (exit code non-zero). Same recipe Set-SqliteKeys
+    # uses: functional python probe + UTF-8 console + exit-code check.
+    param([Parameter(Mandatory = $true)][string[]]$CliArgs)
+
+    $cli = Get-GhostPythonCli
+    if (-not $cli) {
+        Write-Host "[FAILED] GHOST Python core not found (src\python\ghost_cli.py)." -ForegroundColor Red
+        return $null
+    }
+    $pythonCommand = Get-PythonCommandInfo
+    if (-not $pythonCommand) {
+        Write-Host "[FAILED] no functional Python 3 found - every MiniMax/OpenCode reset step needs it." -ForegroundColor Red
+        return $null
+    }
+    Set-GhostConsoleUtf8
+    $output = & $pythonCommand $cli @CliArgs
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
+    try {
+        return ($output -join "`n") | ConvertFrom-Json
+    }
+    catch {
+        Write-Host "[FAILED] unparseable core output: $($output -join ' ')" -ForegroundColor Red
+        return $null
+    }
+}
+
+function Backup-ViaCore {
+    # Backup-FileToTimestampDir via the core, plus the restore-manifest
+    # action. A locked/failed backup is reported but NOT fatal - the v1.3
+    # contract verbatim (a file whose copy could not be read may still be
+    # deletable, and the caller proceeds).
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    $report = Invoke-GhostCore @("backup", $Source, $BackupRoot, $Label)
+    if ($null -eq $report) {
+        Write-Host "    [WARN] backup FAILED - proceeding WITHOUT backup: $Source" -ForegroundColor Yellow
+        return $false
+    }
+    if ($report.skipped) { return $false }
+    if ($report.ok -and $report.destination) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Source -BackupPath $report.destination
+        return $true
+    }
+    Write-Host "    [WARN] backup did not complete ($($report.error)) - proceeding" -ForegroundColor Yellow
+    return $false
+}
+
+# Clear-BinaryIdentityStore twin over the core's store-delete verb (one path
+# per core invocation; the PS side loops). Same interface as the shared
+# identity_utils helper so the call sites only swap the function name.
+function Invoke-StoreDelete {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Paths,
+        [ValidateSet("rename", "delete")][string]$Action = "delete",
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [string]$RootPath
+    )
+
+    $results = @()
+    foreach ($path in $Paths) {
+        # Empty label -> the core derives the relative label from --root-path
+        # (same contract as the shared helper's -RootPath).
+        $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot, "",
+            "--action", $Action, "--root-path", $RootPath)
+        if ($null -ne $storeReport) {
+            Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before $storeReport.before -After $storeReport.after -Ok $storeReport.ok
+            if ($storeReport.ok -and $storeReport.backed_up_to) {
+                $results += [ordered]@{
+                    action       = $Action
+                    originalPath = $path
+                    backupPath   = $storeReport.backed_up_to
+                    renamedPath  = $storeReport.renamed_to
+                }
+            }
+        }
+        else {
+            Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before "present" -After "core-invoke-failed" -Ok $false
+        }
+    }
+    return $results
+}
+
 function Set-VerifiedMachineIdFile {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -226,24 +369,29 @@ function Set-VerifiedMachineIdFile {
 
     $beforeValue = $null
     if (Test-Path -LiteralPath $Path) {
-        $beforeValue = (Get-Content -LiteralPath $Path -Raw -Encoding UTF8).Trim()
-        $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-        if ($backupPath) {
-            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+        try {
+            $beforeValue = (Get-Content -LiteralPath $Path -Raw -Encoding UTF8).Trim()
+        }
+        catch {
+            $beforeValue = $null
         }
     }
 
-    $parent = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($parent)) {
-        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    # Core: machineid-file (backup if present, BOM-less UTF-8 write, re-read
+    # verify -- the v1.3 contract verbatim; the core also creates the parent
+    # directory when missing).
+    $report = Invoke-GhostCore @("machineid-file", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ value = $Value }))
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+        }
+        return $true
     }
 
-    # No-BOM UTF-8. Set-Content -Encoding UTF8 emits a BOM on PS 5.1.
-    [System.IO.File]::WriteAllText($Path, $Value, (New-Object System.Text.UTF8Encoding $false))
-    $afterValue = (Get-Content -LiteralPath $Path -Raw -Encoding UTF8).Trim()
-    $ok = $afterValue -eq $Value
-    Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $beforeValue -After $afterValue -Ok $ok
-    return $ok
+    Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $beforeValue -After "verify-failed" -Ok $false
+    return $false
 }
 
 function Confirm-JsonValues {
@@ -269,8 +417,11 @@ function Confirm-JsonValues {
 
 # Wipe EVERY top-level node from an auth JSON file (forces re-login). The audit
 # records node NAMES and a count only -- never token values. Verify-after
-# re-read must show zero properties. PS 5.1 note: ConvertFrom-Json on "{}" can
-# yield $null, which counts as zero nodes.
+# re-read must show zero properties. Core: json-remove with the EMPTY prefix
+# (every top-level key matches, the file becomes {}). DELTA vs v1.3: an
+# UNPARSEABLE file now FAILS the step loudly instead of being force-overwritten
+# (the core never clobbers unparseable JSON; delete the file manually or
+# restore from the backup to recover).
 function Clear-AllJsonNodes {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -297,45 +448,32 @@ function Clear-AllJsonNodes {
         $nodeNames = @("<unparseable>")
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-    }
-
     $namesSummary = "empty"
     if ($nodeNames.Count -gt 0) {
         $shown = @($nodeNames | Select-Object -First 12)
         $namesSummary = ("{0} nodes: {1}" -f $nodeNames.Count, ($shown -join ","))
     }
 
-    [System.IO.File]::WriteAllText($Path, "{}", (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-        $afterCount = 0
-        if ($null -ne $verified) {
-            $afterCount = @($verified.PSObject.Properties).Count
-        }
-        $ok = ($afterCount -eq 0)
-        Add-AuditEntry -Audit $Audit -File $Path -Key "auth-wipe" -Before $namesSummary -After "0 nodes" -Ok $ok
-        if ($ok) {
-            Write-Host "    [OK] auth nodes wiped (names-only audit): $Path" -ForegroundColor Green
-        }
-        else {
-            Write-Host "    [FAILED] auth file still has $afterCount nodes: $Path" -ForegroundColor Red
-        }
-        return $ok
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "auth-wipe" -Before $namesSummary -After "verify-failed" -Ok $false
-        Write-Host "    [FAILED] could not re-read auth file after write: $Path" -ForegroundColor Red
+    $report = Invoke-GhostCore @("json-remove", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ keys = @(); prefixes = @("") }))
+    if ($null -eq $report -or (-not $report.ok)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "auth-wipe" -Before $namesSummary -After "core-invoke-failed" -Ok $false
+        Write-Host "    [FAILED] auth wipe core invocation failed: $Path" -ForegroundColor Red
         return $false
     }
+
+    Add-AuditEntry -Audit $Audit -File $Path -Key "auth-wipe" -Before $namesSummary -After "0 nodes" -Ok $true
+    if ($report.backed_up_to) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+    }
+    Write-Host "    [OK] auth nodes wiped (names-only audit): $Path" -ForegroundColor Green
+    return $true
 }
 
 # Remove ONLY the named nodes from a JSON file, keep everything else (used for
 # minimax-agent-config.json: remove user/sharedUser, keep config + the rest).
-# Verify-after: removed nodes absent AND keep-nodes still present.
+# Core: json-remove with the explicit top-level key names; the keep-nodes
+# check stays PS-side (a re-read after the core call).
 function Remove-JsonNodesVerified {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -375,17 +513,16 @@ function Remove-JsonNodesVerified {
         return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    $report = Invoke-GhostCore @("json-remove", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ keys = $presentTargets }))
+    if ($null -eq $report -or (-not $report.ok)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "node-removal" -Before ($presentTargets -join ",") -After "core-invoke-failed" -Ok $false
+        Write-Host "    [FAILED] node removal core invocation failed: $Path" -ForegroundColor Red
+        return $false
     }
-
-    foreach ($name in $presentTargets) {
-        $null = $content.PSObject.Properties.Remove($name)
+    if ($report.backed_up_to) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
     }
-
-    # No-BOM UTF-8 write.
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
 
     try {
         $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -448,10 +585,10 @@ function New-DeviceIdPreservingFormat {
     return ([guid]::NewGuid().ToString()).ToLowerInvariant()
 }
 
-# Delete every file under $Path individually with retry, then prune empty dirs.
-# A whole-tree Remove-Item fails FAST on the first locked file and leaves the
-# rest intact; per-file delete means one stuck file cannot block the others.
-# Appends a single restorable delete action (whole-tree backup) to $Actions.
+# Delete every file under $Path individually with retry, then prune empty dirs
+# (core: sweep-tree). The v1.3 "no backup -> no delete" guard is KEPT: the
+# pre-backup runs FIRST via the core and a failed backup skips the whole tree
+# honestly (never-silent-success: an unbacked deletion has no restore path).
 function Clear-TreeFilesIndividually {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -466,65 +603,38 @@ function Clear-TreeFilesIndividually {
         return @{ Deleted = 0; Failed = 0; FailedPaths = @() }
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
+    $fileCount = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue).Count
 
-    $files = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)
-
-    # No backup -> no delete (never-silent-success: an unbacked deletion has no
-    # restore path). The backup is whole-tree, so skip the WHOLE tree honestly.
-    if (-not $backupPath) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After ("backup-failed: " + $files.Count + " file(s) skipped") -Ok $false
+    $preBackup = Invoke-GhostCore @("backup", $Path, $BackupRoot, $BackupLabel)
+    if ($null -eq $preBackup -or (-not $preBackup.ok)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After ("backup-failed: " + $fileCount + " file(s) skipped") -Ok $false
         Write-Host "    [FAILED] backup failed - tree NOT deleted (no restore path): $Path" -ForegroundColor Red
-        return @{ Deleted = 0; Failed = $files.Count; FailedPaths = @($files | ForEach-Object { $_.FullName }) }
+        return @{ Deleted = 0; Failed = $fileCount; FailedPaths = @() }
     }
 
-    $deleted = 0
-    $failed = 0
-    $failedPaths = @()
-
-    foreach ($file in $files) {
-        $fileDeleted = $false
-        $lastError = $null
-        for ($i = 0; $i -lt 4; $i++) {
-            try {
-                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
-                $fileDeleted = $true
-                break
-            }
-            catch {
-                $lastError = $_.Exception.Message
-                Start-Sleep -Milliseconds (500 * ($i + 1))
-            }
-        }
-        if ($fileDeleted) {
-            $deleted++
-        }
-        else {
-            $failed++
-            $failedPaths += $file.FullName
-            Add-AuditEntry -Audit $Audit -File $file.FullName -Key "binary-store" -Before "present" -After ("delete-failed: " + $lastError) -Ok $false
-        }
+    $sweepReport = Invoke-GhostCore @("sweep-tree", $Path, $BackupRoot, $BackupLabel)
+    if ($null -eq $sweepReport) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After "core-invoke-failed" -Ok $false
+        Write-Host "    [FAILED] sweep core invocation failed: $Path" -ForegroundColor Red
+        return @{ Deleted = 0; Failed = $fileCount; FailedPaths = @() }
     }
 
-    $dirs = @(Get-ChildItem -LiteralPath $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue |
-        Sort-Object { $_.FullName.Length } -Descending)
-    foreach ($dir in $dirs) {
-        $null = Remove-Item -LiteralPath $dir.FullName -Force -ErrorAction SilentlyContinue
+    foreach ($failedPath in @($sweepReport.failed_paths)) {
+        Add-AuditEntry -Audit $Audit -File $failedPath -Key "binary-store" -Before "present" -After "delete-failed" -Ok $false
     }
-    $null = Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 
-    $summary = "deleted=$deleted failed=$failed"
-    $ok = ($failed -eq 0)
+    $summary = "deleted=" + $sweepReport.deleted + " failed=" + $sweepReport.failed
+    $ok = ($sweepReport.failed -eq 0)
     Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After $summary -Ok $ok
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath -Action "delete"
+    if ($sweepReport.backed_up_to) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $sweepReport.backed_up_to -Action "delete"
     }
 
-    return @{ Deleted = $deleted; Failed = $failed; FailedPaths = $failedPaths }
+    return @{ Deleted = $sweepReport.deleted; Failed = $sweepReport.failed; FailedPaths = @($sweepReport.failed_paths) }
 }
 
 # Delete a stale file WITHOUT backing it up (regenerable files only). Verifies
-# the path is gone afterwards.
+# the path is gone afterwards. Core: sweep-file.
 function Remove-VerifiedFileNoBackup {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -537,9 +647,9 @@ function Remove-VerifiedFileNoBackup {
         return $true
     }
 
-    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
-    if (-not (Test-Path -LiteralPath $Path)) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before "present" -After "deleted" -Ok $true
+    $report = Invoke-GhostCore @("sweep-file", $Path)
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $report.before -After $report.after -Ok $true
         return $true
     }
 
@@ -621,14 +731,15 @@ function Remove-AppPathSafely {
         return "link-removed"
     }
 
-    $binaryActions = Clear-BinaryIdentityStore -Paths @($Path) -Action "delete" -BackupRoot $BackupRoot -Audit $Audit -RootPath $env:USERPROFILE
+    $binaryActions = Invoke-StoreDelete -Paths @($Path) -Action "delete" -BackupRoot $BackupRoot -Audit $Audit -RootPath $env:USERPROFILE
     $Actions.Value += @($binaryActions)
     return "deleted"
 }
 
-# Scrub os_crypt.encrypted_key from a Chromium Local State file. Backup happens
-# ONLY when the key is actually present (keeps the restore manifest accurate --
-# a run that changed nothing must not list copy actions). No-BOM write.
+# Scrub os_crypt.encrypted_key from a Chromium Local State file (core:
+# json-remove). The restore-manifest action is recorded ONLY when the key was
+# actually removed (the v1.3 accurate-manifest contract -- a run that changed
+# nothing must not list copy actions).
 function Remove-OsCryptEncryptedKey {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -644,62 +755,39 @@ function Remove-OsCryptEncryptedKey {
         return $true
     }
 
-    try {
-        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After "parse-failed" -Ok $false
-        Write-Host "    [FAILED] could not parse Local State: $Path" -ForegroundColor Red
+    $report = Invoke-GhostCore @("json-remove", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ keys = @("os_crypt.encrypted_key") }))
+    if ($null -eq $report -or (-not $report.ok)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After "core-invoke-failed" -Ok $false
+        Write-Host "    [FAILED] os_crypt removal core invocation failed: $Path" -ForegroundColor Red
         return $false
     }
 
-    if ($null -eq $content.PSObject.Properties['os_crypt']) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "missing" -After "skipped" -Ok $true
-        Write-Host "    [SKIP] os_crypt not found in: $Path" -ForegroundColor Yellow
-        return $true
-    }
-    if ($null -eq $content.os_crypt.PSObject.Properties['encrypted_key']) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "missing" -After "skipped" -Ok $true
+    $removedCount = @($report.removed).Count
+    if ($removedCount -eq 0) {
+        # Key absent (or the whole os_crypt node absent): the v1.3 honest SKIP.
+        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before $report.before."os_crypt.encrypted_key" -After "skipped" -Ok $true
         Write-Host "    [SKIP] os_crypt.encrypted_key not present: $Path" -ForegroundColor Yellow
         return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before $report.before."os_crypt.encrypted_key" -After "removed" -Ok $true
+    if ($report.backed_up_to) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
     }
-
-    $content.os_crypt.PSObject.Properties.Remove('encrypted_key')
-
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-        $afterValue = if ($null -eq $verified.os_crypt.PSObject.Properties['encrypted_key']) { "removed" } else { "still-present" }
-        $ok = $afterValue -eq "removed"
-        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After $afterValue -Ok $ok
-        if ($ok) {
-            Write-Host "    [OK] os_crypt.encrypted_key removed: $Path" -ForegroundColor Green
-        }
-        else {
-            Write-Host "    [FAILED] os_crypt.encrypted_key still present: $Path" -ForegroundColor Red
-        }
-        return $ok
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After "verify-failed" -Ok $false
-        Write-Host "    [FAILED] could not re-read Local State after write: $Path" -ForegroundColor Red
-        return $false
-    }
+    Write-Host "    [OK] os_crypt.encrypted_key removed: $Path" -ForegroundColor Green
+    return $true
 }
 
-# Rotate electron.media.device_id_salt in a Chromium Preferences file.
-# With -OnlyIfPresent the salt is rotated only when it already exists; a file
-# without the node is honestly skipped (never creates new identity state).
+# Rotate electron.media.device_id_salt in a Chromium Preferences file (core:
+# salt-rotate -- the fresh salt is generated there, 32 lowercase hex; v1.3
+# shared ONE PS-generated salt across both apps' Preferences, a cross-profile
+# correlation signal). With -OnlyIfPresent the salt is rotated only when it
+# already exists; a file without the node is honestly skipped (never creates
+# new identity state).
 function Set-DeviceIdSalt {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$NewSalt,
         [Parameter(Mandatory = $true)][string]$BackupRoot,
         [Parameter(Mandatory = $true)][string]$BackupLabel,
         [Parameter(Mandatory = $true)][ref]$Audit,
@@ -713,25 +801,23 @@ function Set-DeviceIdSalt {
         return $true
     }
 
+    $beforeValue = $null
+    $saltPresent = $false
     try {
         $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        $electronProp = if ($null -ne $content.PSObject.Properties['electron']) { $content.electron } else { $null }
+        if ($electronProp -and ($null -ne $electronProp.PSObject.Properties['media'])) {
+            $mediaProp = $electronProp.media
+            if ($null -ne $mediaProp.PSObject.Properties['device_id_salt']) {
+                $beforeValue = $mediaProp.device_id_salt
+                $saltPresent = $true
+            }
+        }
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before "present" -After "parse-failed" -Ok $false
         Write-Host "    [FAILED] could not parse Preferences: $Path" -ForegroundColor Red
         return $false
-    }
-
-    $beforeValue = $null
-    $saltPresent = $false
-
-    $electronProp = if ($null -ne $content.PSObject.Properties['electron']) { $content.electron } else { $null }
-    if ($electronProp -and ($null -ne $electronProp.PSObject.Properties['media'])) {
-        $mediaProp = $electronProp.media
-        if ($null -ne $mediaProp.PSObject.Properties['device_id_salt']) {
-            $beforeValue = $mediaProp.device_id_salt
-            $saltPresent = $true
-        }
     }
 
     if ($OnlyIfPresent -and (-not $saltPresent)) {
@@ -740,50 +826,29 @@ function Set-DeviceIdSalt {
         return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-    }
-
-    if ($null -eq $electronProp) {
-        Add-Member -InputObject $content -NotePropertyName 'electron' -NotePropertyValue @{ media = @{ device_id_salt = $NewSalt } }
-    }
-    elseif ($null -eq $electronProp.PSObject.Properties['media']) {
-        Add-Member -InputObject $content.electron -NotePropertyName 'media' -NotePropertyValue @{ device_id_salt = $NewSalt }
-    }
-    else {
-        $content.electron.media.device_id_salt = $NewSalt
-    }
-
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-        $actualValue = $verified.electron.media.device_id_salt
-        $ok = $actualValue -eq $NewSalt
-        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before $beforeValue -After $actualValue -Ok $ok
-        if ($ok) {
-            Write-Host "    [OK] device_id_salt updated: $Path" -ForegroundColor Green
+    $report = Invoke-GhostCore @("salt-rotate", $Path, $BackupRoot, $BackupLabel)
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
         }
-        else {
-            Write-Host "    [FAILED] device_id_salt verification failed: $Path" -ForegroundColor Red
-        }
-        return $ok
+        Write-Host "    [OK] device_id_salt updated: $Path" -ForegroundColor Green
+        return $true
     }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before $beforeValue -After "verify-failed" -Ok $false
-        Write-Host "    [FAILED] could not re-read Preferences after write: $Path" -ForegroundColor Red
-        return $false
-    }
+
+    Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before $beforeValue -After "verify-failed" -Ok $false
+    Write-Host "    [FAILED] device_id_salt verification failed: $Path" -ForegroundColor Red
+    return $false
 }
 
 # Rotate the windowIds array in opencode.settings to fresh GUIDs. windowIds is
 # a stable cross-reset window fingerprint (it also names
-# window-state-<uuid>.json and opencode.window.<uuid>.dat). Backup-first,
-# verify-after: every entry must be a fresh lowercase GUID and none may equal
-# an old value; the entry count is preserved. Missing file or a missing/empty
-# windowIds node is an honest skip. Returns @{ Ok; OldIds; NewIds }.
-# PS 5.1 safe: no ternary, no [CmdletBinding()].
+# window-state-<uuid>.json and opencode.window.<uuid>.dat). Core: json-patch
+# writes the fresh GUID array (value generation stays PS) after an explicit
+# pre-backup. Verify-after: every entry must be a fresh lowercase GUID and
+# none may equal an old value; the entry count is preserved. Missing file or a
+# missing/empty windowIds node is an honest skip. Returns @{ Ok; OldIds;
+# NewIds }. PS 5.1 safe: no ternary, no [CmdletBinding()].
 function Reset-OpenCodeWindowIds {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -829,29 +894,15 @@ function Reset-OpenCodeWindowIds {
         $newIds += $fresh
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-    }
-
-    $content.windowIds = $newIds
-
-    # No-BOM UTF-8 write.
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before ($oldIds -join ",") -After "verify-parse-failed" -Ok $false
-        Write-Host "    [FAILED] could not re-read opencode.settings after write: $Path" -ForegroundColor Red
+    $null = Backup-ViaCore -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel -Actions $Actions
+    $patchReport = Invoke-GhostCore @("json-patch", $Path, (_B64Payload @{ windowIds = $newIds }))
+    if ($null -eq $patchReport -or (-not $patchReport.ok)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "windowIds" -Before ($oldIds -join ",") -After "core-invoke-failed" -Ok $false
+        Write-Host "    [FAILED] windowIds rotation core invocation failed: $Path" -ForegroundColor Red
         return @{ Ok = $false; OldIds = $oldIds; NewIds = $newIds }
     }
 
-    $actualIds = @()
-    if (($null -ne $verified.PSObject.Properties['windowIds']) -and ($null -ne $verified.windowIds)) {
-        $actualIds = @($verified.windowIds)
-    }
+    $actualIds = @($patchReport.after.windowIds)
 
     $ok = ($actualIds.Count -eq $oldIds.Count)
     if ($ok) {
@@ -1162,9 +1213,17 @@ if (-not ($mmRoamingPresent -or $ocRoamingPresent -or $mmHomePresent -or $ocHome
     exit 1
 }
 
+# v1.4: the core must be present and a functional Python 3 with it - fail fast
+# BEFORE touching anything (v1.3 needed no Python at all; v1.4 routes every
+# store mutation through the core).
+if ((-not (Get-GhostPythonCli)) -or (-not (Get-PythonCommandInfo))) {
+    Write-Host "[FAILED] GHOST Python core (src\python\ghost_cli.py) missing or no functional Python 3 found - every MiniMax/OpenCode reset step needs it (winget install Python.Python.3.12)." -ForegroundColor Red
+    exit 1
+}
+
 New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
 
-Write-Host "=== MiniMax Agent / OpenCode Identity Reset v1.3 ===" -ForegroundColor Cyan
+Write-Host "=== MiniMax Agent / OpenCode Identity Reset v1.4 ===" -ForegroundColor Cyan
 Write-Host "MiniMax Agent (Electron): $mmRoaming" -ForegroundColor Gray
 Write-Host "MiniMax CLI home        : $mmHome" -ForegroundColor Gray
 Write-Host "OpenCode (Electron)     : $ocRoaming" -ForegroundColor Gray
@@ -1232,13 +1291,9 @@ $failCount = 0
 $newUpdaterIdOC = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 $newGhDeviceIdOC = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 $newUpdaterIdMM = ([guid]::NewGuid().ToString()).ToLowerInvariant()
-# Crypto RNG instead of Get-Random (time-seeded PRNG is unsuitable for
-# identity material): 16 bytes -> 32 lowercase hex chars (cursor canon).
-$newSaltRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-$newSaltBytes = New-Object byte[] 16
-$newSaltRng.GetBytes($newSaltBytes)
-$newSaltRng.Dispose()
-$newSalt = -join ($newSaltBytes | ForEach-Object { $_.ToString("x2") })
+# (The Preferences salt is no longer PS-generated: the core's salt-rotate
+# generates a fresh 32-lowercase-hex salt PER PROFILE -- v1.3 shared one salt
+# across both apps, a cross-profile correlation signal.)
 $newDesktopDeviceId = $null
 
 # --- [1/22] OpenCode CLI auth.json wipe (forces re-login) ---
@@ -1333,7 +1388,7 @@ Write-Host "`n[4/22] Clearing OpenCode opencode.global.dat + stale tmp siblings.
 $auditStart = $audit.Count
 if ($ocRoamingPresent) {
     $ocGlobalDat = Join-Path $ocRoaming "opencode.global.dat"
-    $datActions = Clear-BinaryIdentityStore -Paths @($ocGlobalDat) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+    $datActions = Invoke-StoreDelete -Paths @($ocGlobalDat) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
     $actions += @($datActions)
     # v1.2: live installs carry opencode.updater.tmp-* (updater download
     # residue); v1.1 only swept opencode.global.dat.tmp-*. Sweep both.
@@ -1342,7 +1397,7 @@ if ($ocRoamingPresent) {
         $staleTmps += @(Get-ChildItem -LiteralPath $ocRoaming -Filter $filter -File -Force -ErrorAction SilentlyContinue)
     }
     foreach ($tmpFile in $staleTmps) {
-        $tmpActions = Clear-BinaryIdentityStore -Paths @($tmpFile.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+        $tmpActions = Invoke-StoreDelete -Paths @($tmpFile.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
         $actions += @($tmpActions)
     }
     if ($staleTmps.Count -gt 0) {
@@ -1381,7 +1436,7 @@ $ocNetworkFileRelPaths = @(
 )
 if ($ocRoamingPresent) {
     $ocNetworkFiles = @($ocNetworkFileRelPaths | ForEach-Object { Join-Path $ocRoaming $_ })
-    $ocNetworkActions = Clear-BinaryIdentityStore -Paths $ocNetworkFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+    $ocNetworkActions = Invoke-StoreDelete -Paths $ocNetworkFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
     $actions += @($ocNetworkActions)
     # v1.2 prefix sweep: catch any other DIPS*/SharedStorage* sibling Chromium
     # may create at the profile root (future suffixes, -shm on this machine).
@@ -1390,7 +1445,7 @@ if ($ocRoamingPresent) {
     foreach ($prefix in @("DIPS*", "SharedStorage*")) {
         $leftovers = @(Get-ChildItem -LiteralPath $ocRoaming -Filter $prefix -File -Force -ErrorAction SilentlyContinue)
         foreach ($leftover in $leftovers) {
-            $sweepActions = Clear-BinaryIdentityStore -Paths @($leftover.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+            $sweepActions = Invoke-StoreDelete -Paths @($leftover.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
             $actions += @($sweepActions)
         }
     }
@@ -1436,7 +1491,7 @@ if ($ocRoamingPresent) {
     # v1.2: runtime locks (regenerable; the pre-step tree-kill released them).
     # lockfile pins the running instance; opencode\locks\ holds sidecar locks.
     $ocLockfilePath = Join-Path $ocRoaming "lockfile"
-    $lockActions = Clear-BinaryIdentityStore -Paths @($ocLockfilePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+    $lockActions = Invoke-StoreDelete -Paths @($ocLockfilePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
     $actions += @($lockActions)
     $ocLocksDir = Join-Path $ocRoaming "opencode\locks"
     if (Test-Path -LiteralPath $ocLocksDir) {
@@ -1470,7 +1525,7 @@ if (-not (Remove-JsonNodesVerified -Path $ocUninstallMetricsPath -NodeNames @("u
     $stepFailed = $true
 }
 $ocPreferencesPath = Join-Path $ocRoaming "Preferences"
-if (-not (Set-DeviceIdSalt -Path $ocPreferencesPath -NewSalt $newSalt -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocPreferencesPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -OnlyIfPresent)) {
+if (-not (Set-DeviceIdSalt -Path $ocPreferencesPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $ocRoaming -TargetPath $ocPreferencesPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -OnlyIfPresent)) {
     $stepFailed = $true
 }
 # v1.2: windowIds[] is a stable cross-reset window fingerprint (it also names
@@ -1488,7 +1543,7 @@ if ($ocRoamingPresent) {
     $ocPerWindowFiles += @(Get-ChildItem -LiteralPath $ocRoaming -Filter "window-state-*.json" -File -Force -ErrorAction SilentlyContinue)
     $ocPerWindowFiles += @(Get-ChildItem -LiteralPath $ocRoaming -Filter "opencode.window.*.dat" -File -Force -ErrorAction SilentlyContinue)
     foreach ($winFile in $ocPerWindowFiles) {
-        $winActions = Clear-BinaryIdentityStore -Paths @($winFile.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
+        $winActions = Invoke-StoreDelete -Paths @($winFile.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $ocRoaming
         $actions += @($winActions)
     }
     if ($ocPerWindowFiles.Count -gt 0) {
@@ -1566,7 +1621,7 @@ else {
 $mmPublicAuthPath = Join-Path $mmMcodePublic "auth.json"
 Write-Host "`n[9/22] Deleting MiniMax mcode-public auth.json (fresh-install parity)..." -ForegroundColor Cyan
 $auditStart = $audit.Count
-$mmPublicAuthActions = Clear-BinaryIdentityStore -Paths @($mmPublicAuthPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
+$mmPublicAuthActions = Invoke-StoreDelete -Paths @($mmPublicAuthPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 $actions += @($mmPublicAuthActions)
 $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmMcodePublic
 if ($status.Success) {
@@ -1590,7 +1645,7 @@ $mmAuthStatePath = Join-Path $mmMcodePublic "auth-state.json"
 $mmLegacyAuthStatePath = Join-Path $mmHome "auth\auth-state.json"
 Write-Host "`n[10/22] Deleting MiniMax auth-state.json (namespace + legacy root)..." -ForegroundColor Cyan
 $auditStart = $audit.Count
-$mmAuthStateActions = Clear-BinaryIdentityStore -Paths @($mmAuthStatePath, $mmLegacyAuthStatePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
+$mmAuthStateActions = Invoke-StoreDelete -Paths @($mmAuthStatePath, $mmLegacyAuthStatePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 $actions += @($mmAuthStateActions)
 # Both deletion targets sit under $mmHome (namespace: auth\prod\en\mcode-public,
 # legacy: auth\); gate on the audit over BOTH roots AND the direct absence of
@@ -1645,11 +1700,17 @@ if (Test-Path -LiteralPath $mmRemoteControlStatePath) {
         $oldDesktopDeviceId = $null
     }
     $newDesktopDeviceId = New-DeviceIdPreservingFormat -CurrentValue $oldDesktopDeviceId
-    if (Set-JsonIdentity -Path $mmRemoteControlStatePath -Updates @{ "desktop_device_id" = $newDesktopDeviceId } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmRemoteControlStatePath) -Actions ([ref]$actions)) {
+    # Core: backup + json-patch (Set-JsonIdentity's backup+patch+verify
+    # contract split across the core verbs).
+    $null = Backup-ViaCore -Source $mmRemoteControlStatePath -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmRemoteControlStatePath) -Actions ([ref]$actions)
+    $rcReport = Invoke-GhostCore @("json-patch", $mmRemoteControlStatePath, (_B64Payload @{ desktop_device_id = $newDesktopDeviceId }))
+    if ($null -ne $rcReport -and $rcReport.ok) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $mmRemoteControlStatePath -Key "desktop_device_id" -Before $rcReport.before.desktop_device_id -After $rcReport.after.desktop_device_id -Ok $true
         Write-Host "[OK] desktop_device_id rotated + verified" -ForegroundColor Green
         $passCount++
     }
     else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $mmRemoteControlStatePath -Key "desktop_device_id" -Before $oldDesktopDeviceId -After "verify-failed" -Ok $false
         Write-Host "[FAILED] desktop_device_id verification failed" -ForegroundColor Red
         $failCount++
     }
@@ -1745,7 +1806,7 @@ $mmStoreDirRelPaths = @(
 )
 if ($mmRoamingPresent) {
     $mmStoreFiles = @($mmStoreFileRelPaths | ForEach-Object { Join-Path $mmRoaming $_ })
-    $mmStoreActions = Clear-BinaryIdentityStore -Paths $mmStoreFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $mmRoaming
+    $mmStoreActions = Invoke-StoreDelete -Paths $mmStoreFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $mmRoaming
     $actions += @($mmStoreActions)
     # v1.3 prefix sweep (parity with OpenCode [5/22]): catch any other
     # DIPS*/SharedStorage* sibling Chromium may create at the profile root
@@ -1754,7 +1815,7 @@ if ($mmRoamingPresent) {
     foreach ($prefix in @("DIPS*", "SharedStorage*")) {
         $mmLeftovers = @(Get-ChildItem -LiteralPath $mmRoaming -Filter $prefix -File -Force -ErrorAction SilentlyContinue)
         foreach ($leftover in $mmLeftovers) {
-            $mmSweepActions = Clear-BinaryIdentityStore -Paths @($leftover.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $mmRoaming
+            $mmSweepActions = Invoke-StoreDelete -Paths @($leftover.FullName) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $mmRoaming
             $actions += @($mmSweepActions)
         }
     }
@@ -1812,7 +1873,7 @@ if (-not (Remove-JsonNodesVerified -Path $mmLocalStatePath -NodeNames @("uninsta
     $stepFailed = $true
 }
 $mmPreferencesPath = Join-Path $mmRoaming "Preferences"
-if (-not (Set-DeviceIdSalt -Path $mmPreferencesPath -NewSalt $newSalt -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmPreferencesPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -OnlyIfPresent)) {
+if (-not (Set-DeviceIdSalt -Path $mmPreferencesPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $mmRoaming -TargetPath $mmPreferencesPath) -Audit ([ref]$audit) -Actions ([ref]$actions) -OnlyIfPresent)) {
     $stepFailed = $true
 }
 $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $mmRoaming
@@ -1879,7 +1940,7 @@ $mmMiscFiles = @(
     (Join-Path $mmMcodePublic "auth.lock")
 )
 if ($mmRoamingPresent -or $mmHomePresent) {
-    $mmMiscActions = Clear-BinaryIdentityStore -Paths $mmMiscFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
+    $mmMiscActions = Invoke-StoreDelete -Paths $mmMiscFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
     $actions += @($mmMiscActions)
 }
 # logs/ embeds request URLs with account/session signals -- identity-bearing.
@@ -2247,7 +2308,7 @@ if ($anyChange) {
 else {
     Write-Host "[INFO] No changes were made (all steps skipped) -- removing empty backup dir." -ForegroundColor Yellow
     Remove-Item -LiteralPath $backupRoot -Recurse -Force -ErrorAction SilentlyContinue
-    $auditPath = Join-Path $env:TEMP ("minimax_opencode_v1.3_audit_{0}.json" -f $timestamp)
+    $auditPath = Join-Path $env:TEMP ("minimax_opencode_v1.4_audit_{0}.json" -f $timestamp)
     Write-AuditLog -Audit $audit -Path $auditPath
     $restoreScriptPath = "<none - no changes>"
 }
@@ -2272,11 +2333,11 @@ Write-Host "NOTE: opencode.settings windowIds[] was rotated and the UUID-suffixe
 Write-Host "NOTE: Local State uninstall_metrics (install timestamp) was removed and regenerates on next launch; lockfile/opencode/locks and updater tmp residue were deleted." -ForegroundColor Yellow
 Write-Host "NOTE: .mavis junction audited only (never touched). change_device_id.ps1 remains the separate, optional system-level step." -ForegroundColor Yellow
 
-[System.IO.File]::WriteAllText("$env:TEMP\minimax_opencode_v1.3_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText("$env:TEMP\minimax_opencode_v1.4_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
 
 if ($failCount -gt 0) {
-    Write-Host "MiniMax/OpenCode reset v1.3 completed with failures. Review $auditPath." -ForegroundColor Red
+    Write-Host "MiniMax/OpenCode reset v1.4 completed with failures. Review $auditPath." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "MiniMax/OpenCode reset v1.3 completed successfully." -ForegroundColor Green
+Write-Host "MiniMax/OpenCode reset v1.4 completed successfully." -ForegroundColor Green

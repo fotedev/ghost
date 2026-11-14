@@ -120,7 +120,7 @@ Safety features — never wiped:
 - `%USERPROFILE%\.mavis` is a junction to `.minimax` — audited only, never touched (reparse-point guard on all deletions).
 - Backup-first for every change; if a run changes nothing, the empty backup dir is removed and no restore script is written.
 
-**Before running:** Close MiniMax Agent and OpenCode first, and run from a terminal *outside* OpenCode (the script also force-kills them). Run PowerShell as Administrator. No Python required — the script performs no SQLite writes.
+**Before running:** Close MiniMax Agent and OpenCode first, and run from a terminal *outside* OpenCode (the script also force-kills them). Run PowerShell as Administrator. Python is required since v1.4 — the script performs no SQLite writes, but every JSON/file store mutation routes through the Python core (fail-fast preflight).
 
 ### 8. Change Windows Device ID (`change_device_id.ps1`)
 

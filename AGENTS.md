@@ -837,7 +837,23 @@ reset_qoderwork.ps1   # QoderWork v0.2 THIN MANIFEST (2026-11-14): 26 steps
                                    #          stay PS by contract); FIXED v0.1's heredoc crash on a
                                    #          missing app_settings table (schema-missing is now
                                    #          per-key tolerated + audited)
-reset_minimax_opencode.ps1  # MiniMax/OpenCode: 22 steps (OpenCode auth.json wipe -> {} unless
+reset_minimax_opencode.ps1  # MiniMax/OpenCode v1.4 THIN MANIFEST (2026-11-14):
+                                   #          22 steps; every store mutation via Invoke-GhostCore,
+                                   #          same contract as cursor v0.3 / devin v0.4 / trae v0.3 /
+                                   #          qoderwork v0.2 (step order/audit keys/restore/summary
+                                   #          identical to v1.3, archived at
+                                   #          archive/reset_minimax_opencode_windows-v1.3.ps1,
+                                   #          local-only): auth wipes = json-remove empty-prefix,
+                                   #          node removals = json-remove + PS keep-check, tree sweeps
+                                   #          = backup + sweep-tree (the v1.3 no-backup-no-delete
+                                   #          guard KEPT), salts = salt-rotate PER PROFILE (v1.3
+                                   #          shared one salt across both apps - a cross-profile
+                                   #          correlation signal), windowIds = backup + json-patch,
+                                   #          store deletes = store-delete, Clear-AllJsonNodes and
+                                   #          the QoderWork-style wrappers thin. DELTA: an unparseable
+                                   #          auth file now FAILS loudly instead of being force-
+                                   #          overwritten; Python required (was: none)
+                                   #          (v1.3 step inventory unchanged:) OpenCode auth.json wipe -> {} unless
                                    #          -KeepLogin, version preflight ≥1.17.0, distinct
                                    #          updater IDs, Chromium state per profile; v1.2 adds
                                    #          updater-tmp sweep, DIPS/SharedStorage suffix sweep,
