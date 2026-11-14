@@ -215,6 +215,28 @@ READ (AUMID discovery), never written.
 
 ## 8. Operational rules
 
+- Identity reset (2026-11-14): `src/windows/reset_autoclaw2.ps1`
+  (`-Target Primary|c1..c5|All`, `-KeepLogin`, `-DryRun`; menu AutoClaw2
+  [14]-[20] = gids 84-90, the ALL row gated by `:ConfirmAc2Reset`). Thin
+  manifest over the Python core (`store-delete` / `sweep-tree` / `json-patch`
+  / `backup` / audit / restore). Phase-1 store map (provenance 2026-11-14,
+  read-only probes of the Primary + c1): `device\device-id.json` =
+  `{"schemaVersion":1,"deviceId":"<uuid4>"}` (ROTATED in place, verified
+  old != new); `device\active-product-account.json` = the signed-out
+  pointer; per-account auth = `account-credentials.enc` +
+  `account-profile.json`; per-account secrets =
+  `runtime\owner-secrets.enc` + `runtime\model-connection-command-claims.enc`;
+  `Local State` = ONLY `os_crypt` + `uninstall_metrics` (deleted whole —
+  skipped under `-KeepLogin`, which would otherwise break the kept
+  credentials); `Network\` session stores + telemetry (`apmplus`,
+  `log_sdk_v2.db`, `startup-analytics-marker.json`, `diagnostics`, `logs`)
+  + caches + `Partitions\zwork-account-*` / `zwork-native-browser-*` swept.
+  PRESERVED by design: `runtime\` (runtime.sqlite + artifacts + attachments
+  + projects + desktop-preferences.json), `telegram-connection.json`,
+  `user-notifications.json`, channel/launch config, toolchain, window
+  state, ID_Backups. Live acceptance is user-supervised (the reset is a
+  destructive identity wipe; nothing was executed against the live
+  profiles during implementation).
 - Launch clones SEQUENTIALLY (the all-five script does this).
 - Never launch elevated (UIPI), even though the app is asInvoker.
 - `-Status` reads the lockfile with an exclusive-open probe (same semantics

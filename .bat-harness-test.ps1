@@ -156,6 +156,11 @@ $out = Invoke-Scenario 'H_autoclaw_render' @('4', '0', '0')
 if ($out -match 'Unknown task')                  { $failures += 'H: Unknown task on AutoClaw2 submenu render' }
 if ($out -match '%PENDING_CHAIN%')               { $failures += 'H: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'AutoClaw2 Multi-Instance')   { $failures += 'H: AutoClaw2 submenu not shown' }
+if ($out -notmatch '\[14\].*Reset Blue clone')   { $failures += 'H: AutoClaw2 [14] Blue reset not rendered' }
+if ($out -notmatch '\[18\].*Reset Orange clone') { $failures += 'H: AutoClaw2 [18] Orange reset not rendered' }
+if ($out -notmatch '\[19\].*Reset Primary')      { $failures += 'H: AutoClaw2 [19] Primary reset not rendered' }
+if ($out -notmatch '\[20\].*Reset ALL profiles') { $failures += 'H: AutoClaw2 [20] all-profiles reset not rendered' }
+if ($out -notmatch '\[14\].*chats \+ work kept') { $failures += 'H: AutoClaw2 [14] reset tail not rendered' }
 
 # I) invalid AutoClaw chain id "4 42" -> exactly one legit Unknown task "42"
 $out = Invoke-Scenario 'I_invalid_autoclaw' @('4 42', '0', '0')

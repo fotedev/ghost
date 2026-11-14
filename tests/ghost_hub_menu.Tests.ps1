@@ -32,24 +32,29 @@ BeforeAll {
 
     # wrapper -> expected menu.json mode (:Run* wrappers, GHOST.bat)
     $script:ModeByWrapper = @{
-        'Run'           = 'inline'
-        'RunWith'       = 'inline-note'
-        'RunZcodeReset' = 'zcode-reset'
-        'ConfirmReset'  = 'confirm-reset'
-        'ConfirmRun'    = 'confirm-run'
-        'Detached'      = 'detached'
-        'StartClone'    = 'detached'
+        'Run'             = 'inline'
+        'RunWith'         = 'inline-note'
+        'RunZcodeReset'   = 'zcode-reset'
+        'RunAc2Reset'     = 'zcode-reset'
+        'ConfirmReset'    = 'confirm-reset'
+        'ConfirmAc2Reset' = 'confirm-reset'
+        'ConfirmRun'      = 'confirm-run'
+        'Detached'        = 'detached'
+        'StartClone'      = 'detached'
     }
     # wrapper -> index of the quoted token holding the script path
-    # (:Detached = title, psFlags, script; :ConfirmReset/:ConfirmRun = label, script)
+    # (:Detached = title, psFlags, script; :ConfirmReset/:ConfirmRun = label,
+    # script; :ConfirmAc2Reset = label, script)
     $script:ScriptArgIndex = @{
-        'Run'           = 0
-        'RunWith'       = 0
-        'RunZcodeReset' = 0
-        'ConfirmReset'  = 1
-        'ConfirmRun'    = 1
-        'Detached'      = 2
-        'StartClone'    = 0
+        'Run'             = 0
+        'RunWith'         = 0
+        'RunZcodeReset'   = 0
+        'RunAc2Reset'     = 0
+        'ConfirmReset'    = 1
+        'ConfirmAc2Reset' = 1
+        'ConfirmRun'      = 1
+        'Detached'        = 2
+        'StartClone'      = 0
     }
 
     # parse :DispatchOne: single-line cases + multi-line block cases
@@ -113,10 +118,17 @@ BeforeAll {
                 }
                 return @()
             }
-            'Run'           { $rest = 1 }
-            'RunZcodeReset' { $rest = 1 }
-            'RunWith'       { $rest = 2 }
-            'ConfirmRun'    { $rest = 3 }
+            'ConfirmAc2Reset' {
+                if ($Full.Count -gt 2 -and $Full[2]) {
+                    return @($Full[2] -split '\s+' | Where-Object { $_ })
+                }
+                return @()
+            }
+            'Run'             { $rest = 1 }
+            'RunZcodeReset'   { $rest = 1 }
+            'RunAc2Reset'     { $rest = 1 }
+            'RunWith'         { $rest = 2 }
+            'ConfirmRun'      { $rest = 3 }
             default         { throw "unexpected wrapper '$Wrapper'" }
         }
         if ($Full.Count -gt $rest) { return @($Full[$rest..($Full.Count - 1)]) }
@@ -130,7 +142,7 @@ Describe 'menu.json schema' {
             Should -Be 'IDE Resets,ZCode,AutoClaw2,Cline,OpenCode,Maintenance'
     }
 
-    It 'every row has a gid in the 1-82 range, unique per section, and no retired/reserved gid' {
+    It 'every row has a gid in the 1-90 range, unique per section, and no retired/reserved gid' {
         foreach ($sec in $Menu.sections) {
             $gids = @($sec.rows | ForEach-Object { $_.gid })
             ($gids | Select-Object -Unique).Count | Should -Be $gids.Count -Because "section '$($sec.name)'"
@@ -139,7 +151,7 @@ Describe 'menu.json schema' {
         $gids.Count | Should -BeGreaterThan 0
         foreach ($g in $gids) {
             $g | Should -BeGreaterThan 0
-            $g | Should -BeLessOrEqual 83
+            $g | Should -BeLessOrEqual 90
             $ReservedGids | Should -Not -Contain $g
         }
     }
