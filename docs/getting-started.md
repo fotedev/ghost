@@ -200,9 +200,12 @@ Or run scripts directly:
 ./src/linux/reset_cursor.sh
 sudo ./src/linux/reset_cursor.sh   # also resets /etc/machine-id
 
-# Windsurf (close Windsurf first)
-./src/linux/reset_windsurf.sh
-sudo ./src/linux/reset_windsurf.sh
+# Windsurf/Devin (close Windsurf/Devin first)
+./src/linux/reset_devin.sh
+sudo ./src/linux/reset_devin.sh
+
+# Trae (close Trae first)
+./src/linux/reset_trae.sh
 
 # Fingerprint only (no root)
 ./src/linux/change_device_id.sh Fingerprint
@@ -216,19 +219,27 @@ sudo ./src/linux/change_device_id.sh ResetMachineId
 | App | Config location |
 |-----|-----------------|
 | Cursor | `~/.config/Cursor/` |
-| Windsurf | `~/.config/Windsurf/`, `~/.windsurf/`, `~/.codeium/` |
+| Windsurf/Devin | `~/.config/Windsurf/`, `~/.windsurf/`, `~/.codeium/` |
 | Trae | `~/.config/Trae/` |
 | Fingerprint state | `~/.local/state/LicenseIdentity/fingerprint_state.json` |
 
-`XDG_CONFIG_HOME` and `XDG_STATE_HOME` are respected when set.
+`XDG_CONFIG_HOME` and `XDG_STATE_HOME` are respected when set. The full
+per-OS path maps (with provenance flags) live in `src/python/ghost/platform.py`
+— resolve them with `python3 src/python/ghost_cli.py paths <slug>`.
 
 ### Linux scripts
 
-- `reset_cursor.sh` — Resets Cursor IDs (`machineId`, `storage.json`, `state.vscdb`)
-- `reset_windsurf.sh` — Resets Windsurf and Codeium IDs
-- Trae Linux: no current wrapper yet — the legacy standalone lives in `archive/` (local-only, never committed)
+- `reset_cursor.sh` — Resets Cursor IDs (`machineId`, `storage.json`,
+  `state.vscdb`) through the shared Python core; timestamped
+  `ID_Backups/<ts>` + JSONL audit + a self-contained `restore.sh`
+- `reset_devin.sh` — Resets Devin (formerly Windsurf) and Codeium IDs
+  (Codeium-era waitlist URL scrubbed); same audit/restore standard
+- `reset_trae.sh` — Resets Trae IDs (promoted from the local-only archive
+  v0.1 and modernized); deeper Windows-side Trae stores not covered on
+  Linux yet
 - `change_device_id.sh` — `Fingerprint` or `ResetMachineId`
-- `id_reset_common.sh` — Shared helpers sourced by the thin-wrapper scripts above
+- `id_reset_common.sh` — Shared helpers (core bridge, backups, audit,
+  restore emission, verify-after) sourced by the scripts above
 - `ghost.sh` — Interactive menu (repo root)
 
 > **Note:** `change_device_id.ps1` modes `LegacyReset` and `RepairProfiles` are **Windows-only** (registry and profile list). On Linux use `ResetMachineId` for system ID changes.

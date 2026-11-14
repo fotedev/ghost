@@ -8,6 +8,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Linux resets modernized to the Windows standard** (2026-11-14):
+  `reset_cursor.sh` v0.2 + `reset_trae.sh` v0.2 route every store mutation
+  through the shared Python core (`ghost_cli.py json-patch` /
+  `sqlite-update` / `machineid-file` — ONE copy of the logic for Windows +
+  Linux), and fail loudly when python3 or the core file is missing instead
+  of silently skipping (the thin-manifest contract). Both now carry
+  timestamped `ID_Backups/<ts>` dirs, JSONL audit, verify-after re-reads
+  on every write, and a self-generated `restore.sh` — the README's
+  advertised verify-after/audit/restore trio finally holds on Linux.
+  `reset_windsurf.sh` → **`reset_devin.sh`** (the 2026-06-02 Devin
+  rebrand finally reached Linux; the Codeium-era `codeium.com/waitlist`
+  URL the old script wrote into the Codeium config on every reset is
+  scrubbed) with the same audit/restore standard. `reset_trae.sh`
+  PROMOTED from the local-only archive v0.1 (never committed) — deeper
+  Windows-side Trae stores are not covered on Linux yet (provenance
+  flagged in `ghost.platform`). `ghost.sh` menu upgraded (Trae row +
+  Devin naming). `id_reset_common.sh` gains the core bridge
+  (`resolve_ghost_cli`/`core_backup`), JSONL audit, restore-script
+  emission and verify-after helpers shared by all Linux resets.
 - **Cross-platform identity-store path layer** (2026-11-14): new
   `src/python/ghost/platform.py` — the single source of truth for WHERE each
   agent keeps its identity stores per OS (cursor, devin/windsurf, trae,

@@ -33,8 +33,8 @@ touches, and emits an audit log plus a self-contained restore script.
 | Task | Windows | Linux |
 |------|---------|-------|
 | Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` |
-| Reset Windsurf\Devin | `reset_devin.ps1` | `reset_windsurf.sh` |
-| Reset Trae | `reset_trae.ps1` | — (legacy only, local) |
+| Reset Windsurf\Devin | `reset_devin.ps1` | `reset_devin.sh` |
+| Reset Trae | `reset_trae.ps1` | `reset_trae.sh` (v0.2 modernized; deeper Windows stores not covered yet) |
 | Reset Qoder | `reset_qoder.ps1` | — |
 | Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | — |
 | ZCode clones (Primary + 5 branded clones) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | — |

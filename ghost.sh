@@ -12,18 +12,20 @@ while true; do
     show_banner "Interactive Menu"
     echo "  1) Generate hardware fingerprint (JSON)"
     echo "  2) Reset Cursor machine IDs"
-    echo "  3) Reset Windsurf machine IDs"
-    echo "  4) Reset system machine-id only (requires root)"
+    echo "  3) Reset Devin machine IDs (formerly Windsurf)"
+    echo "  4) Reset Trae machine IDs"
+    echo "  5) Reset system machine-id only (requires root)"
     echo "  0) Exit"
     echo ""
-    read -r -p "Select an option [0-4]: " choice
+    read -r -p "Select an option [0-5]: " choice
     case "$choice" in
         # || true: a child exiting non-zero (declined kill, non-root
         # ResetMachineId, failed reset) must not kill the menu via set -e.
         1) bash "$LINUX_DIR/change_device_id.sh" Fingerprint    || true ;;
         2) bash "$LINUX_DIR/reset_cursor.sh"                    || true ;;
-        3) bash "$LINUX_DIR/reset_windsurf.sh"                  || true ;;
-        4) bash "$LINUX_DIR/change_device_id.sh" ResetMachineId || true ;;
+        3) bash "$LINUX_DIR/reset_devin.sh"                     || true ;;
+        4) bash "$LINUX_DIR/reset_trae.sh"                      || true ;;
+        5) bash "$LINUX_DIR/change_device_id.sh" ResetMachineId || true ;;
         0) info "Goodbye."; exit 0                                     ;;
         *) err "Invalid option: $choice"                               ;;
     esac
