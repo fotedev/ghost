@@ -59,7 +59,13 @@
 param(
     [ValidateSet('c1','c2','c3','c4','c5')]
     [string]$Instance = 'c1',
-    [switch]$Status
+    [switch]$Status,
+    # Soft RAM guard threshold: at or above this many running Cline
+    # instances, launching another one asks for confirmation (shared
+    # ghost_launch_guard.ps1, same mechanics as the ZCode launcher).
+    [ValidateRange(1, 10)]
+    [int]$MaxConcurrent = 3,
+    [switch]$NonInteractive
 )
 $ErrorActionPreference = 'Stop'
 
@@ -181,6 +187,23 @@ foreach ($d in @($CloneDir, $WebViewDir)) {
 if (Test-HubLockHeld) {
     Write-Error "'$Instance' appears to be RUNNING (hub lock held). Use its window instead; stop it before relaunching."
     exit 1
+}
+
+# --- RAM/concurrency guard (2026-11-14, shared lib) ---------------------------
+# Same soft guard as the ZCode launcher (ghost_launch_guard.ps1): several
+# concurrent instances exhausted the Windows commit limit once (renderer-OOM
+# 2026-09-25, ZCode-verified). Reached only when THIS clone is provably not
+# running (the hub-lock abort above).
+. "$PSScriptRoot\ghost_launch_guard.ps1"
+$clineMains = @(Get-GhostSuiteMainIds -WmiFamilyFilter "Name LIKE 'Cline%'")
+if ($clineMains.Count -ge $MaxConcurrent) {
+    $guardProceed = Invoke-GhostLaunchGuard -RunningMains $clineMains.Count -MaxConcurrent $MaxConcurrent `
+        -SuiteName 'Cline' -WmiFamilyFilter "Name LIKE 'Cline%'" -ProcessFamily 'Cline*' `
+        -RiskLine '[ram-guard] More instances risk the same renderer-OOM commit-limit freeze documented for ZCode (verified 2026-09-25).' `
+        -NonInteractive:$NonInteractive
+    if (-not $guardProceed) {
+        exit 0
+    }
 }
 
 # --- Neutralize the single-instance window (pre-launch) ---------------------

@@ -48,7 +48,13 @@
 param(
     [ValidateSet('c1','c2','c3','c4','c5')]
     [string]$Instance = 'c1',
-    [switch]$Status
+    [switch]$Status,
+    # Soft RAM guard threshold: at or above this many running OpenCode
+    # instances, launching another one asks for confirmation (shared
+    # ghost_launch_guard.ps1, same mechanics as the ZCode launcher).
+    [ValidateRange(1, 10)]
+    [int]$MaxConcurrent = 3,
+    [switch]$NonInteractive
 )
 $ErrorActionPreference = 'Stop'
 
@@ -182,6 +188,23 @@ Write-Host "      $CloneHome"
 if (Test-LockfileHeld $Lockfile) {
     Write-Warning "'$Instance' appears to be RUNNING (lockfile held) - this launch will focus it instead of starting a new copy."
     exit 0
+}
+
+# --- RAM/concurrency guard (2026-11-14, shared lib) ---------------------------
+# Same soft guard as the ZCode launcher (ghost_launch_guard.ps1): several
+# concurrent Electron instances exhausted the Windows commit limit once
+# (renderer-OOM 2026-09-25, ZCode-verified). Reached only when THIS clone is
+# provably not running (the lockfile focus path above exits early).
+. "$PSScriptRoot\ghost_launch_guard.ps1"
+$ocMains = @(Get-GhostSuiteMainIds -WmiFamilyFilter "Name LIKE 'OpenCode%'")
+if ($ocMains.Count -ge $MaxConcurrent) {
+    $guardProceed = Invoke-GhostLaunchGuard -RunningMains $ocMains.Count -MaxConcurrent $MaxConcurrent `
+        -SuiteName 'OpenCode' -WmiFamilyFilter "Name LIKE 'OpenCode%'" -ProcessFamily 'OpenCode*' `
+        -RiskLine '[ram-guard] More instances risk the same renderer-OOM commit-limit freeze documented for ZCode (verified 2026-09-25).' `
+        -NonInteractive:$NonInteractive
+    if (-not $guardProceed) {
+        exit 0
+    }
 }
 
 # Identity marker + icon (consumed by the patched AUMID wrap and the

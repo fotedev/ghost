@@ -715,6 +715,24 @@ reset_zcode.ps1       # ZCode: 27 steps + [6b/27] config.json provider-apiKey st
                                    #          setting.json deviceSid, embedded-browser partition;
                                    #          -Target Primary|Secondary|Third|Fourth|Fifth|Sixth|Both|All (selective
                                    #          tree-kill, per-target ID_Backups, independent IDs per child)
+ghost_launch_guard.ps1             # Shared 3-way RAM/concurrency launch guard (2026-11-14) —
+                                   #   the generalized mechanics that launch_zcode_second_instance
+                                   #   carried since 2026-10-28; wired into ALL FOUR suites' launchers
+                                   #   (ZCode refactored onto it; AutoClaw2/Cline/OpenCode gained
+                                   #   -MaxConcurrent 3 + -NonInteractive): Get-GhostSuiteMainIds
+                                   #   (EC-K01 bare-exe counting), Get-GhostSuiteCommitMb, the
+                                   #   visible Read-Host / hidden-console topmost YesNo default-No /
+                                   #   -NonInteractive|redirected warn+continue routing, and
+                                   #   Invoke-GhostLaunchGuard printing live commit numbers. The
+                                   #   caller keeps its suite-specific already-running check (the
+                                   #   guard fires only for a NEW instance). Pester:
+                                   #   tests/ghost_launch_guard.Tests.ps1 (11 - mock-routed; NEVER
+                                   #   invoke the real hidden-console branch in tests - it pops a
+                                   #   topmost MessageBox; also NOTE: Assert-MockCalled is Pester-3
+                                   #   syntax whose autoload poisons Pester 6's Should mid-run - use
+                                   #   Should -Invoke); guard lines use the suite name, risk line is
+                                   #   a parameter (ZCode's cites Start Plan throttling; the others
+                                   #   cite the ZCode-verified commit-limit freeze)
 launch_zcode_second_instance.ps1   # ZCode multi-instance launcher -Instance Second|Third|Fourth|Fifth|Sixth
                                    #          (own window via cmd/start; first run clones+scrubs profile,
                                    #          routes Telegram bots to Primary via per-home marker;

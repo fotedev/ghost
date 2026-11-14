@@ -75,6 +75,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   NO `-ApplyLive` by design — the AutoClaw2 sync targets CLOSED profiles
   only (D7), so a synced definition lands on each profile's next launch.
   Menu: new AutoClaw2 [11] row (locals 12+ shifted +1, gids unchanged).
+- **Shared RAM/concurrency launch guard across all four suites**
+  (2026-11-14): the soft guard `launch_zcode_second_instance.ps1` carried
+  since 2026-10-28 (count running mains; at/over the threshold print live
+  commit numbers and route the ask: visible console → Read-Host, hidden
+  console → topmost Yes/No default-No, `-NonInteractive`/redirected stdin →
+  warn+continue) is generalized into `src/windows/ghost_launch_guard.ps1`
+  and wired into the AutoClaw2, Cline and OpenCode clone launchers
+  (`-MaxConcurrent 3`, `-NonInteractive`; ZCode refactored onto the lib).
+  EC-K01 bare-exe mains counting per suite family; the guard fires only
+  for a NEW instance — each launcher's own relaunch-focus/single-instance
+  check runs first. Rationale: the 2026-09-25 renderer-OOM commit-limit
+  freeze is a Windows ceiling, not a ZCode quirk; every suite can now hit
+  it. Unit-tested via mocks (`tests/ghost_launch_guard.Tests.ps1`, 11).
 - **AutoClaw2 chat sync: `-Account` source hint + source-account
   provenance** (2026-11-11): `tools/sync_autoclaw2_chats.ps1 -Account
   <sha-prefix>` pins the multi-account Primary's account dir for the
