@@ -395,6 +395,28 @@ c1/c2/c3/c4/c5 = OpenCode [1]-[5]; all five = [6]; light worker = [7]
 (gids 79/80 for worker/login); login = [8]; shortcuts = [9]
 (`-Remove` = [12]); patch = [10]; status = [11].
 
+### OpenCode identity reset (OpenCode [13]-[19])
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target c1        # [13] — Blue (c2..c5 = [14]..[17])
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target Primary   # [18] — the stock profile
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target All       # [19] — clones first, Primary last (menu row asks first)
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target c1 -KeepLogin  # keep the sign-in
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target c1 -DryRun     # plan only
+```
+
+One target spans TWO profile surfaces (the clone-home patch pins them per
+clone): the Electron userData (`desktop\` per clone,
+`%APPDATA%\ai.opencode.desktop` for the Primary) and the XDG data home
+(`data\opencode` per clone, `~\.local\share\opencode` for the Primary).
+Deletes `auth.json` + `mcp-auth.json` (CLI OAuth), `gh\device-id`,
+`desktop\.updaterId` (clones), the session profile's `Local State` +
+network session stores, caches, Crashpad/logs/compile-cache. Preserves
+`opencode.db` (sessions), repos, snapshots, drafts, the CLI cache and the
+MCP config. Backups + audit + restore script per target. Menu
+equivalents: Blue..Orange = [13]-[17]; Primary = [18]; ALL = [19]
+(confirmation gate).
+
 The light worker (`src/windows/launch_opencode_cli_light.ps1`, OpenCode
 [7]) runs the shipped `opencode-cli.exe` headless on the clone's own
 XDG state — sessions share history with that clone's desktop app. A

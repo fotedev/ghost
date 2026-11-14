@@ -623,10 +623,24 @@ whole-file .lnk decoding — EC-C09).
   or an `ai.opencode.desktop://` protocol launch always boots the
   PRIMARY profile (no flag, stock userData).
 - One manual login per fresh clone — by design, never automated.
-- Clone "reset" = stop the instance, delete
-  `%USERPROFILE%\OpenCodeClonesHome\<cN>`, launch again (no reset script
-  in this suite; the Primary reset is the existing IDE Resets [8],
-  out of scope here).
+- Identity reset (2026-11-14): `src/windows/reset_opencode.ps1`
+  (`-Target Primary|c1..c5|All`, `-KeepLogin`, `-DryRun`; OpenCode
+  [13]-[19] = gids 98-104, the ALL row gated by `:ConfirmOpenCodeReset`).
+  One target spans TWO profile surfaces: userData (`desktop\` per clone,
+  `%APPDATA%\ai.opencode.desktop` for the Primary) and the XDG data home
+  (`data\opencode` per clone, `~\.local\share\opencode` for the
+  Primary). Deleted: `auth.json` + `mcp-auth.json` (CLI OAuth),
+  `gh\device-id`, `desktop\.updaterId` (clones), the session profile's
+  `Local State` (OSCrypt key) + network session stores, caches and
+  Crashpad/logs/compile-cache. PRESERVED: `opencode.db` (+wal/shm) =
+  sessions, repos, shell, snapshot, tool-output, `drafts.sqlite`,
+  `opencode.settings`, window state, the CLI cache and
+  `config\opencode\*.json` (MCP definitions). Phase-1 store map verified
+  read-only 2026-11-14 on the Primary + c1/c2 (clones not yet signed in:
+  no auth.json present — deletion steps handle absence cleanly). The
+  whole-home delete below stays valid as the nuclear option.
+- Clone "reset" (nuclear) = stop the instance, delete
+  `%USERPROFILE%\OpenCodeClonesHome\<cN>`, launch again.
 - `-Status` = clone-home process markers (`--opencode-clone-home` in
   main command lines) + materialized subdirs + the clone's own
   `desktop\lockfile` presence.

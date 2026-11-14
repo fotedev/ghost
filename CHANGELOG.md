@@ -43,6 +43,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hub rows + wrapper table + harness scenarios extended. Pure helpers
   unit-tested via the dot-source guard (`tests/reset_cline.Tests.ps1`,
   11 tests). Live acceptance stays user-supervised.
+- **OpenCode desktop identity reset** (2026-11-14): new
+  `src/windows/reset_opencode.ps1` (`-Target Primary|c1..c5|All`,
+  `-KeepLogin`, `-DryRun`). One target spans TWO profile surfaces (the
+  clone-home patch pins them per clone): the Electron userData
+  (`desktop\` per clone; `%APPDATA%\ai.opencode.desktop` for the
+  Primary) and the XDG data home (`data\opencode` per clone;
+  `~\.local\share\opencode` for the Primary). Deletes `auth.json` +
+  `mcp-auth.json` (CLI OAuth), `gh\device-id`, `desktop\.updaterId`
+  (clones), the session profile's `Local State` (OSCrypt key) + network
+  session stores, caches and Crashpad/logs/compile-cache. Preserves
+  `opencode.db` (+wal/shm) = sessions, repos, snapshots, drafts, the CLI
+  cache and `config\opencode\*.json` (MCP definitions). Menu: OpenCode
+  [13]-[19] (gids 98-104, appended in display order; the ALL row gated
+  by `:ConfirmOpenCodeReset`; `:RunOpenCodeReset` prints the
+  relaunch-safety note); hub rows + wrapper table + harness scenarios
+  extended. Pure helpers unit-tested via the dot-source guard
+  (`tests/reset_opencode.Tests.ps1`, 7 tests). Live acceptance stays
+  user-supervised.
 - **AutoClaw2 chat sync: `-Account` source hint + source-account
   provenance** (2026-11-11): `tools/sync_autoclaw2_chats.ps1 -Account
   <sha-prefix>` pins the multi-account Primary's account dir for the
