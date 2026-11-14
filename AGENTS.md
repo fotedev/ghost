@@ -173,7 +173,15 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     ~\.agents store (live skills, no elevation needed), and
                                    #     robocopy /MIRs cli\plugins\cache + marketplaces +
                                    #     known_marketplaces.json when the version set drifts
-                                   #     (plugins\data + cli\agents stay per-instance). Running
+                                   #     (plugins\data + cli\agents stay per-instance), and
+                                   #     since 2026-11-11 syncs plugins\installed_plugins.json
+                                   #     from the Primary with every installPath rewritten to
+                                   #     the clone's own cache mirror (area 4 - before this
+                                   #     fix clones had no file and could not activate ANY
+                                   #     plugin even with the cache mirrored; backup +
+                                   #     verify-after incl. per-entry installPath existence,
+                                   #     skipped by -McpOnly, clone file preserved when the
+                                   #     Primary has none). Running
                                    #     instance (marker match) = SKIP + WARN for skills/plugins
                                    #     (mirroring must not race a live app); the MCP definitions
                                    #     themselves need NO skip — verified 2026-10-27 (app.asar +
@@ -488,6 +496,10 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     Primary config.json (mtime+size, JSON parse-guard,
                                    #     ~1s debounce) and on every change invokes
                                    #     sync_zcode_assets.ps1 -McpOnly -Target All as a child —
+                                   #     spawned console-less (CreateNoWindow: a console-less
+                                   #     watcher would flash a visible cmd window on every
+                                   #     5-minute deep-verify) with a 600s kill cap (a wedged
+                                   #     child must never block the loop) —
                                    #     the watcher writes NOTHING itself; first pass converges
                                    #     drift, deep re-verify every 60 passes (~5 min), log at
                                    #     %LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log,

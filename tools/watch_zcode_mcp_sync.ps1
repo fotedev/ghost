@@ -327,14 +327,34 @@ function Invoke-SyncChild {
         Write-WatchLog "sync script missing: $SyncScript" 'FAIL'
         return 'failed'
     }
-    $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $SyncScript, '-Target', $Target, '-McpOnly')
-    if ($DryRun) { $childArgs += '-DryRun' }
+    $argStr = '-NoProfile -ExecutionPolicy Bypass -File "' + $SyncScript + '" -Target ' + $Target + ' -McpOnly'
+    if ($DryRun) { $argStr += ' -DryRun' }
+    # Console-less child spawn (CreateNoWindow) + 600s cap: a watcher running
+    # without a console would otherwise give this child a brand-new VISIBLE
+    # cmd window on every 5-minute deep-verify, and a wedged child would
+    # block the watch loop forever.
     $out = ''
-    try { $out = & $PsExe @childArgs 2>&1 | Out-String } catch {
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $PsExe
+        $psi.Arguments = $argStr
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $soTask = $proc.StandardOutput.ReadToEndAsync()
+        $seTask = $proc.StandardError.ReadToEndAsync()
+        if (-not $proc.WaitForExit(600000)) {
+            try { $proc.Kill() } catch { }
+            Write-WatchLog 'sync child timed out after 600s - killed' 'FAIL'
+        }
+        $out = $soTask.Result + $seTask.Result
+        try { $code = $proc.ExitCode } catch { $code = 1 }
+    } catch {
         Write-WatchLog ("sync child threw: {0}" -f $_.Exception.Message) 'FAIL'
         return 'failed'
     }
-    $code = $LASTEXITCODE
     foreach ($line in ($out -split "`r?`n")) {
         $t = $line.Trim()
         if ($t) { Write-WatchLog ('child| ' + $t) 'CHILD' }

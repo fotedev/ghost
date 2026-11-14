@@ -29,6 +29,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to sync".
 
 ### Fixed
+- **ZCode clones could not activate ANY plugin** (2026-11-11):
+  `tools/sync_zcode_assets.ps1` mirrored `cli\plugins\cache` but never
+  synced `cli\plugins\installed_plugins.json` — clones had no file at all,
+  so nothing enabled on the Primary ever activated on a clone. New area 4
+  copies the Primary's file with every `installPath` rewritten from the
+  Primary cache to the clone's own cache mirror; backup + verify-after
+  (full-file round-trip + per-entry installPath existence on the clone) +
+  audit, skipped by `-McpOnly`, and an existing clone file is preserved
+  when the Primary has none (no destructive delete).
+- **Console-less processes flashed visible cmd windows** (2026-11-11):
+  `tools/watch_zcode_mcp_sync.ps1` spawned its sync child via a bare `&`
+  call and `tools/sync_zcode_assets.ps1` fell back to `cmd.exe /c mklink`
+  the same way — a watcher running without a console gave the child a
+  brand-new VISIBLE window on every 5-minute deep-verify. Both now spawn
+  console-less (`CreateNoWindow`); the watcher child also gained a 600s
+  kill cap so a wedged sync can never block the watch loop.
 - **GHOST.exe "Import chats to clones" row failed on its own script**
   (2026-11-11): menu.json gid 76 was missing `-AllMissing` (the GHOST.bat
   row has carried it since the 2026-11-09 `:Run` arg fix), so importing
