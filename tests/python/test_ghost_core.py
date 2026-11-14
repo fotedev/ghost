@@ -156,6 +156,115 @@ class DeleteSecretsTests(unittest.TestCase):
         self.assertEqual(remaining, ["innocent.key"])
 
 
+class ScrubIdentityRowsTests(unittest.TestCase):
+    """ghost.sqlite_keys.scrub_identity_rows — the Trae ai-agent scrub twin
+    (v0.2's temp-.py heredoc): key-NAME matching across every scrub-able
+    table; values (chat content) are never inspected or modified."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="ghost_scrub_")
+
+    def _make_db(self, path):
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+        # Typed key column: identity rows + chat/user rows side by side.
+        cursor.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT)")
+        cursor.executemany(
+            "INSERT INTO kv (key, value) VALUES (?, ?)",
+            [("deviceId", "123"), ("machine_id", "abc"),
+             ("authToken", "tok"), ("telemetry.enabled", "true"),
+             ("chat:message:1", "hello"),
+             ("chat:title", "how to auth token")])
+        # Untyped columns (identity rows previously survived this shape).
+        cursor.execute("CREATE TABLE loose (name, data)")
+        cursor.executemany(
+            "INSERT INTO loose (name, data) VALUES (?, ?)",
+            [("device_id", "9"), ("user:profile", "keep me")])
+        # id column preferred over name (key_priority order).
+        cursor.execute("CREATE TABLE rows (id TEXT, label TEXT)")
+        cursor.executemany(
+            "INSERT INTO rows (id, label) VALUES (?, ?)",
+            [("machineid-1", "x"), ("row-2", "keep")])
+        # No key-like column -> skipped, never silently ignored.
+        cursor.execute("CREATE TABLE nocolumns (value TEXT)")
+        cursor.execute("INSERT INTO nocolumns (value) VALUES ('deviceId')")
+        # Non-whitelisted table name -> skipped, never interpolated.
+        cursor.execute('CREATE TABLE "1bad name" (key TEXT)')
+        conn.commit()
+        conn.close()
+
+    def _tables(self, path):
+        conn = sqlite3.connect(path)
+        try:
+            names = set(row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"))
+            kv = set(row[0] for row in conn.execute("SELECT key FROM kv"))
+            loose = set(row[0] for row in
+                        conn.execute("SELECT name FROM loose"))
+            ids = set(row[0] for row in conn.execute("SELECT id FROM rows"))
+        finally:
+            conn.close()
+        return names, kv, loose, ids
+
+    def test_scrubs_identity_rows_preserves_values_and_reports_skips(self):
+        path = os.path.join(self.base, "ai.db")
+        self._make_db(path)
+        r = sqlite_keys.scrub_identity_rows(path)
+        self.assertEqual(r["survivors"], 0, r)
+        self.assertEqual(r["deleted"], 6)
+        _names, kv, loose, ids = self._tables(path)
+        # Identity rows gone (typed + untyped + id-priority columns).
+        self.assertNotIn("deviceId", kv)
+        self.assertNotIn("machine_id", kv)
+        self.assertNotIn("authToken", kv)
+        self.assertNotIn("telemetry.enabled", kv)
+        self.assertNotIn("device_id", loose)
+        self.assertNotIn("machineid-1", ids)
+        # Chat/user rows preserved: spaced human text ("auth token") can
+        # never match the ESCAPE'd single-token-adjacency patterns.
+        self.assertIn("chat:message:1", kv)
+        self.assertIn("chat:title", kv)
+        self.assertIn("user:profile", loose)
+        self.assertIn("row-2", ids)
+        # Skips are reported, not silent.
+        self.assertIn("nocolumns", r["skipped_tables"])
+        self.assertIn("1bad name", r["skipped_tables"])
+
+    def test_escape_controls_underscore_literal(self):
+        path = os.path.join(self.base, "esc.db")
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT)")
+        cursor.executemany(
+            "INSERT INTO kv (key, value) VALUES (?, ?)",
+            [("machine_id", "a"), ("machineXid", "b")])
+        conn.commit()
+        conn.close()
+        # Default escape="\\": "_" is ESCAPE'd to its literal self (the
+        # pattern must carry the literal backslash), so it matches ONLY the
+        # literal underscore form.
+        r = sqlite_keys.scrub_identity_rows(
+            path, like_patterns=("%machine\\_id%",))
+        self.assertEqual(r["deleted"], 1, r)
+        conn = sqlite3.connect(path)
+        try:
+            left = set(row[0] for row in conn.execute("SELECT key FROM kv"))
+        finally:
+            conn.close()
+        self.assertEqual(left, {"machineXid"})
+        # escape="": "_" keeps its LIKE wildcard meaning -> both forms match.
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute(
+                "INSERT INTO kv (key, value) VALUES ('machine_id', 'c')")
+            conn.commit()
+        finally:
+            conn.close()
+        r = sqlite_keys.scrub_identity_rows(
+            path, like_patterns=("%machine_id%",), escape="")
+        self.assertEqual(r["deleted"], 2, r)
+
+
 class ClearCliTelemetryTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -522,6 +631,46 @@ class CliSmokeTests(unittest.TestCase):
             self.assertTrue(report["ok"])
             self.assertEqual(report["deleted"], 1)
             self.assertEqual(report["remaining"], 0)
+
+    def test_scrub_rows_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "ai.db")
+            conn = sqlite3.connect(db)
+            conn.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT)")
+            conn.execute("INSERT INTO kv VALUES ('deviceId', 'x')")
+            conn.execute("INSERT INTO kv VALUES ('chat:1', 'keep')")
+            conn.commit()
+            conn.close()
+            proc = self._run("scrub-rows", db)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["survivors"], 0)
+            self.assertEqual(result["deleted"], 1)
+            self.assertEqual(result["skipped_tables"], [])
+
+    def test_json_remove_prefixes_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "storage.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "iCubeAuthInfo://auth.trae.ai?token=1": "tok",
+                    "xiCubeAuthInfo://decoy": "keep",
+                    "telemetry.machineId": "abc"}))
+            root = os.path.join(tmp, "ID_Backups", "ts")
+            payload_b64 = _b64({"keys": [],
+                                "prefixes": ["iCubeAuthInfo://"]})
+            proc = self._run("json-remove", path, root, "storage.json",
+                             payload_b64)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertTrue(report["ok"])
+            self.assertEqual(
+                report["removed_prefixes"]["iCubeAuthInfo://"], 1)
+            with open(path, "r", encoding="utf-8-sig") as f:
+                content = json.load(f)
+            self.assertNotIn("iCubeAuthInfo://auth.trae.ai?token=1", content)
+            self.assertIn("xiCubeAuthInfo://decoy", content)
+            self.assertEqual(content["telemetry.machineId"], "abc")
 
 
 class BackupToTimestampedDirTests(unittest.TestCase):
@@ -974,6 +1123,44 @@ class DevinPrepTests(unittest.TestCase):
         self.assertTrue(r["skipped"])
         with open(path, "r", encoding="utf-8-sig") as f:
             self.assertEqual(json.load(f)["devin"]["org_id"], "")
+
+
+class RemoveJsonKeysPrefixTests(unittest.TestCase):
+    """remove_json_keys prefix removal — the Trae 'iCubeAuthInfo://*' auth
+    keys (URLs inside key names cannot be addressed as dotted paths)."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="ghost_prefix_")
+        self.backup_root = os.path.join(self.base, "ID_Backups", "ts")
+
+    def test_prefix_removes_top_level_keys_only(self):
+        path = os.path.join(self.base, "storage.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "iCubeAuthInfo://a.b": "tok",
+                "xiCubeAuthInfo://decoy": "keep",
+                "nested": {"iCubeAuthInfo://inner": "keep too"}}))
+        r = winstore.remove_json_keys(path, [], self.backup_root,
+                                      "storage.json",
+                                      prefixes=["iCubeAuthInfo://"])
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["removed_prefixes"], {"iCubeAuthInfo://": 1})
+        with open(path, "r", encoding="utf-8-sig") as f:
+            content = json.load(f)
+        self.assertNotIn("iCubeAuthInfo://a.b", content)
+        self.assertIn("xiCubeAuthInfo://decoy", content)
+        self.assertEqual(
+            content["nested"]["iCubeAuthInfo://inner"], "keep too")
+
+    def test_absent_prefix_is_ok_without_write(self):
+        path = os.path.join(self.base, "storage.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"other": 1}')
+        r = winstore.remove_json_keys(path, [], self.backup_root,
+                                      "storage.json",
+                                      prefixes=["iCubeAuthInfo://"])
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["removed_prefixes"], {"iCubeAuthInfo://": 0})
 
 
 if __name__ == "__main__":

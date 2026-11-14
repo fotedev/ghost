@@ -147,13 +147,20 @@ def rotate_device_id_salt(path, backup_root, label, new_salt=None):
     return report
 
 
-def remove_json_keys(path, keys, backup_root, label):
+def remove_json_keys(path, keys, backup_root, label, prefixes=None):
     """Remove-OsCryptEncryptedKey twin, generalized to dotted key paths
     (e.g. 'os_crypt.encrypted_key'). Missing file OR missing walk -> skipped
     with ok=True (the PS contract: os_crypt absent is a SKIP, not a failure).
     Removing an already-absent leaf is also ok.
+
+    `prefixes` (optional): TOP-LEVEL key prefixes -- every top-level key
+    whose NAME startswith a prefix is removed. Needed for auth keys whose
+    names embed URLs (Trae storage.json 'iCubeAuthInfo://*' carries
+    'iCubeAuthInfo://auth.trae.ai?token=...' names that dotted-path walking
+    cannot address). The report carries removed_prefixes {prefix: count}.
     """
     report = {"ok": False, "skipped": False, "before": {}, "removed": [],
+              "removed_prefixes": {},
               "backed_up_to": None, "backup_error": None, "error": None}
     if not os.path.exists(path):
         report["ok"] = True
@@ -191,7 +198,15 @@ def remove_json_keys(path, keys, backup_root, label):
         del node[parts[-1]]
         report["removed"].append(dotted)
 
-    if report["removed"]:
+    if prefixes:
+        for prefix in prefixes:
+            doomed = [name for name in content.keys()
+                      if isinstance(name, str) and name.startswith(prefix)]
+            for name in doomed:
+                del content[name]
+            report["removed_prefixes"][prefix] = len(doomed)
+
+    if report["removed"] or any(report["removed_prefixes"].values()):
         try:
             _write_json(path, content)
         except OSError as exc:
@@ -215,6 +230,10 @@ def remove_json_keys(path, keys, backup_root, label):
             node = node[part]
         if not missing and isinstance(node, dict) and dotted.split(".")[-1] in node:
             still.append(dotted)
+    for prefix in (prefixes or []):
+        for name in verified.keys():
+            if isinstance(name, str) and name.startswith(prefix):
+                still.append(prefix + "* (" + name + ")")
     if still:
         report["error"] = "verify: still present: " + ", ".join(still)
         return report

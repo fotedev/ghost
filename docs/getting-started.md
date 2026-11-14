@@ -36,7 +36,8 @@ repo root, or use `GHOST.bat` (interactive menu).
 
 ### 3. Reset Trae ID (`reset_trae.ps1`)
 
-- Resets Trae configuration via `identity_utils.ps1`
+- Resets Trae configuration via the Python core (thin manifest over
+  `ghost_cli.py` — Python required for every step)
 - Updates `machineid`, `storage.json` (4 telemetry keys + removes `iCubeAuthInfo://*` + `has_device_id_updated_to_aha=false`), `state.vscdb`, `ModularData\ckg_server\local_env.json` (`device_id` + `host_map`), deletes `aha` (encrypted TinyStorage), scrubs only identity rows in `ModularData\ai-agent` (**chat preserved**), Cookies / Network state / DIPS / SharedStorage / `Partitions\trae-webview` / workspace DB entries
 - Timestamped backups + audit log under `%APPDATA%\Trae\ID_Backups\<ts>`
 
