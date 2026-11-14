@@ -540,6 +540,25 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     app-servers after a real change (idle-guarded, never
                                    #     -Force, respawn wait ≤30s — refresh_zcode_second_chats
                                    #     mechanics); GHOST.bat gids 67/68/69 (2026-10-27));
+                                   #   watch_autoclaw2_mcp_sync.ps1 — resident MCP sync watcher for
+                                   #     the AutoClaw2 suite (AutoClaw2 [11] = gid 74 — reserved
+                                   #     2026-11-04, LIVE 2026-11-14; -RunOnce, -DryRun,
+                                   #     -IntervalSeconds, -Target All|c1,c3|c1,
+                                   #     -InstallAutostart/-RemoveAutostart): stat-guards the CENTRAL
+                                   #     master manifest tools/autoclaw2-mcp.master.json (mtime+size
+                                   #     + JSON parse-guard — a torn manifest skips the pass, never
+                                   #     syncs) and on every change invokes sync_autoclaw2_mcp.ps1
+                                   #     as a child (console-less spawn + 600s kill cap, same
+                                   #     mechanics as the ZCode watcher's 2026-11-11 fix) — the
+                                   #     watcher writes NOTHING itself; first pass converges drift,
+                                   #     deep re-verify every 60 passes (~5 min), log at
+                                   #     %LOCALAPPDATA%\watch-autoclaw2-mcp-sync\ac2-mcp-sync.log,
+                                   #     single instance via mutex Autoclaw2McpSyncWatcher + startup
+                                   #     process scan; NO -ApplyLive by design — the AutoClaw2 sync
+                                   #     targets CLOSED profiles only (D7), so a synced definition
+                                   #     lands on each profile's next launch (launcher step 2b stays
+                                   #     the primary path); locals 12+ shifted +1 for the row, gids
+                                   #     unchanged);
                                    #   make_ghost_icon.ps1 — regenerates assets\ghost.ico (16..256,
                                    #     PNG-in-ICO) from the poster art: row/col background-fraction
                                    #     profiles detect the app tile in the checkerboard jpg, inset
@@ -921,13 +940,17 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   Diagnostics [25]-[27] / Maintenance [28]-[31] (patch, login helper,
   shortcuts remove, [31] gid 83 = the clone Task-Manager exe-identity
   rebuild — appended 2026-11-11 in display order, no renumber); AutoClaw2: Launch Clones [1]-[7]
-  (Blue..Orange, ALL, shortcuts) / Sync + Chat Import [8]-[10] (Import MCPs
-  gid 73, Chat inventory gid 75, Import chats gid 76 — the MCP watcher row is
-  deferred to the follow-up PR and keeps its reserved gid 74) / Maintenance
-  [11]-[13] (status, remove-shortcuts, [13] gid 78 = the window identity
-  patch — colored taskbar buttons, 2026-11-06) / Identity Resets [14]-[20]
-  (gids 84-90, appended 2026-11-14 — reset_autoclaw2.ps1 c1..c5/Primary,
-  [20] gid 90 = ALL behind :ConfirmAc2Reset; :RunAc2Reset = the
+  (Blue..Orange, ALL, shortcuts) / Sync + Chat Import [8]-[11] (Import MCPs
+  gid 73, Chat inventory gid 75, Import chats gid 76, [11] MCP sync watcher
+  gid 74 — reserved 2026-11-04, LIVE 2026-11-14: watch_autoclaw2_mcp_sync.ps1
+  stat-guards tools/autoclaw2-mcp.master.json and re-applies it via the sync
+  child, console-less spawn + 600s cap, mutex + startup-scan single instance,
+  no -ApplyLive by design — closed profiles converge at once, running ones on
+  their next launch; locals 12+ shifted +1 for the row, gids unchanged) /
+  Maintenance [12]-[14] (status, remove-shortcuts, [14] gid 78 = the window
+  identity patch — colored taskbar buttons, 2026-11-06) / Identity Resets
+  [15]-[21] (gids 84-90, appended 2026-11-14 — reset_autoclaw2.ps1
+  c1..c5/Primary, [21] gid 90 = ALL behind :ConfirmAc2Reset; :RunAc2Reset = the
   :RunZcodeReset-shaped wrapper with the AutoClaw2 relaunch note); Cline: Launch Clones [1]-[7]
   (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9] / Identity Resets
   [10]-[16] (gids 91-97, appended 2026-11-14 — reset_cline.ps1

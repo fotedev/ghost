@@ -61,6 +61,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   extended. Pure helpers unit-tested via the dot-source guard
   (`tests/reset_opencode.Tests.ps1`, 7 tests). Live acceptance stays
   user-supervised.
+- **AutoClaw2 MCP sync watcher** (2026-11-14): the gid-74 row — reserved
+  since 2026-11-04 — is LIVE. New
+  `tools/watch_autoclaw2_mcp_sync.ps1` stat-guards the central master
+  manifest `tools/autoclaw2-mcp.master.json` (mtime+size + JSON
+  parse-guard — a torn manifest skips the pass, never syncs) and
+  re-applies it via `sync_autoclaw2_mcp.ps1` as a child (console-less
+  spawn + 600s kill cap). The watcher writes nothing itself; the first
+  pass converges drift, a deep re-verify runs every ~5 min, and the log
+  lives at `%LOCALAPPDATA%\watch-autoclaw2-mcp-sync\ac2-mcp-sync.log`.
+  Single instance via mutex + startup process scan;
+  `-InstallAutostart`/`-RemoveAutostart` manage a hidden Startup .lnk.
+  NO `-ApplyLive` by design — the AutoClaw2 sync targets CLOSED profiles
+  only (D7), so a synced definition lands on each profile's next launch.
+  Menu: new AutoClaw2 [11] row (locals 12+ shifted +1, gids unchanged).
 - **AutoClaw2 chat sync: `-Account` source hint + source-account
   provenance** (2026-11-11): `tools/sync_autoclaw2_chats.ps1 -Account
   <sha-prefix>` pins the multi-account Primary's account dir for the

@@ -154,15 +154,18 @@ $hits = ([regex]::Matches($out, 'Unknown task "42"')).Count
 if ($hits -ne 1)                           { $failures += "G: expected 1 Unknown task from ZCode submenu, got $hits" }
 
 # H) open AutoClaw2 submenu (PENDING_CHAIN undefined), back, exit -> clean render
+#    (2026-11-14: the MCP sync watcher row [11] shifted Maintenance to
+#    [12]-[14] and Identity Resets to [15]-[21])
 $out = Invoke-Scenario 'H_autoclaw_render' @('4', '0', '0')
 if ($out -match 'Unknown task')                  { $failures += 'H: Unknown task on AutoClaw2 submenu render' }
 if ($out -match '%PENDING_CHAIN%')               { $failures += 'H: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'AutoClaw2 Multi-Instance')   { $failures += 'H: AutoClaw2 submenu not shown' }
-if ($out -notmatch '\[14\].*Reset Blue clone')   { $failures += 'H: AutoClaw2 [14] Blue reset not rendered' }
-if ($out -notmatch '\[18\].*Reset Orange clone') { $failures += 'H: AutoClaw2 [18] Orange reset not rendered' }
-if ($out -notmatch '\[19\].*Reset Primary')      { $failures += 'H: AutoClaw2 [19] Primary reset not rendered' }
-if ($out -notmatch '\[20\].*Reset ALL profiles') { $failures += 'H: AutoClaw2 [20] all-profiles reset not rendered' }
-if ($out -notmatch '\[14\].*chats \+ work kept') { $failures += 'H: AutoClaw2 [14] reset tail not rendered' }
+if ($out -notmatch '\[11\].*MCP sync watcher')   { $failures += 'H: AutoClaw2 [11] MCP watcher not rendered' }
+if ($out -notmatch '\[15\].*Reset Blue clone')   { $failures += 'H: AutoClaw2 [15] Blue reset not rendered' }
+if ($out -notmatch '\[19\].*Reset Orange clone') { $failures += 'H: AutoClaw2 [19] Orange reset not rendered' }
+if ($out -notmatch '\[20\].*Reset Primary')      { $failures += 'H: AutoClaw2 [20] Primary reset not rendered' }
+if ($out -notmatch '\[21\].*Reset ALL profiles') { $failures += 'H: AutoClaw2 [21] all-profiles reset not rendered' }
+if ($out -notmatch '\[15\].*chats \+ work kept') { $failures += 'H: AutoClaw2 [15] reset tail not rendered' }
 
 # H2) Cline submenu render incl. the new Identity Resets rows
 $out = Invoke-Scenario 'H2_cline_render' @('5', '0', '0')
@@ -280,9 +283,10 @@ $out = Invoke-Scenario 'U_autoclaw_sync_render' @('4', '0', '0')
 if ($out -notmatch '\[ 8\].*Import MCPs to clones')  { $failures += 'U: AutoClaw2 [8] Import MCPs not rendered' }
 if ($out -notmatch '\[ 9\].*Chat inventory')         { $failures += 'U: AutoClaw2 [9] Chat inventory not rendered' }
 if ($out -notmatch '\[10\].*Import chats to clones') { $failures += 'U: AutoClaw2 [10] Import chats not rendered' }
-if ($out -notmatch '\[11\].*Clone status')           { $failures += 'U: AutoClaw2 [11] Clone status not rendered' }
-if ($out -notmatch '\[12\].*Remove clone shortcuts') { $failures += 'U: AutoClaw2 [12] Remove shortcuts not rendered' }
-if ($out -notmatch '\[13\].*Apply clone identity patch') { $failures += 'U: AutoClaw2 [13] identity patch not rendered' }
+if ($out -notmatch '\[11\].*MCP sync watcher')       { $failures += 'U: AutoClaw2 [11] MCP watcher not rendered' }
+if ($out -notmatch '\[12\].*Clone status')           { $failures += 'U: AutoClaw2 [12] Clone status not rendered' }
+if ($out -notmatch '\[13\].*Remove clone shortcuts') { $failures += 'U: AutoClaw2 [13] Remove shortcuts not rendered' }
+if ($out -notmatch '\[14\].*Apply clone identity patch') { $failures += 'U: AutoClaw2 [14] identity patch not rendered' }
 
 # T) System & GHOST Maintenance submenu (main [3]): renders clean incl. the
 #    MCP registry sync row (2026-11-04, gid 77); invalid chain id -> one

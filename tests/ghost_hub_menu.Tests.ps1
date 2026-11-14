@@ -27,8 +27,9 @@ BeforeAll {
     # known modes (the C# RunRow switch must handle exactly these)
     $script:KnownModes = @('inline', 'inline-note', 'zcode-reset', 'confirm-reset',
         'confirm-run', 'detached', 'windows-staggered', 'chain-pause')
-    # gids retired with the AutoClaw v1.20 sunset (37-40), unused (63), reserved (74)
-    $script:ReservedGids = @(37, 38, 39, 40, 63, 74)
+    # gids retired with the AutoClaw v1.20 sunset (37-40), unused (63)
+    # (74 = the AutoClaw2 MCP sync watcher - reserved 2026-11-04, LIVE 2026-11-14)
+    $script:ReservedGids = @(37, 38, 39, 40, 63)
 
     # wrapper -> expected menu.json mode (:Run* wrappers, GHOST.bat)
     $script:ModeByWrapper = @{
