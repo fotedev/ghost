@@ -108,5 +108,8 @@ _analysis/
 # Local bug-sweep scratch - never commit.
 _bug_sweep/
 
+# Agent-session scratch - never commit.
+_agent_scratch/
+
 # Editor settings (VS Code)
 .vscode/
