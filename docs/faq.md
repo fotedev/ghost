@@ -51,6 +51,13 @@ Process tree-kill of elevated app instances and (for some scripts) registry
 steps require elevation. The scripts self-elevate and log to `%TEMP%`.
 
 **Does this work on Linux for every tool?**
-No. Linux currently covers Cursor, Windsurf, fingerprint, and machine-id.
-Trae/Qoder/ZCode/MiniMax resetters are Windows-only — the platform table in
-the [README](../README.md#how-it-works) is authoritative.
+Mostly, with an honest caveat. Linux now ships resets for Cursor, Devin
+(formerly Windsurf), Trae, Qoder, QoderWork, ZCode, and MiniMax/OpenCode
+plus fingerprint and machine-id — but only Cursor/Devin/OpenCode-CLI store
+paths are live-verified; the Trae/Qoder/QoderWork/ZCode/MiniMax Linux
+layouts are derived from the Windows layout + Electron conventions and
+flagged unverified (see `src/python/ghost/platform.py` — the scripts print
+the caveat and skip loudly when a store is absent). The deeper Windows-side
+stores (webview partitions, auth DBs, webview caches) are Windows-only.
+The platform table in the [README](../README.md#how-it-works) is
+authoritative.

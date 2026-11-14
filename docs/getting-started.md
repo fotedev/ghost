@@ -237,6 +237,13 @@ per-OS path maps (with provenance flags) live in `src/python/ghost/platform.py`
 - `reset_trae.sh` — Resets Trae IDs (promoted from the local-only archive
   v0.1 and modernized); deeper Windows-side Trae stores not covered on
   Linux yet
+- `reset_qoder.sh` / `reset_qoderwork.sh` — Derived-path resets
+  (storage.json + state.vscdb + machineid file); deeper Windows stores not
+  covered on Linux yet
+- `reset_zcode.sh` — Default-profile reset (Electron stores); the shared
+  CLI session store is deliberately untouched (matches the Windows reset)
+- `reset_minimax_opencode.sh` — Derived-path reset; the OpenCode CLI XDG
+  stores are deliberately untouched (they carry the CLI login)
 - `change_device_id.sh` — `Fingerprint` or `ResetMachineId`
 - `id_reset_common.sh` — Shared helpers (core bridge, backups, audit,
   restore emission, verify-after) sourced by the scripts above
