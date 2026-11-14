@@ -792,6 +792,34 @@ ghost_launch_guard.ps1             # Shared 3-way RAM/concurrency launch guard (
 launch_zcode_second_instance.ps1   # ZCode multi-instance launcher -Instance Second|Third|Fourth|Fifth|Sixth
                                    #          (own window via cmd/start; first run clones+scrubs profile,
                                    #          routes Telegram bots to Primary via per-home marker;
+                                   #          2026-11-15 BUG-SWEEP HARDENING (BS-4, _bug_sweep/fixes/
+                                   #          10-fixes.md designs applied): the seed gate is a completion
+                                   #          MARKER .zcode-seeded written only after robocopy 0-7 AND
+                                   #          the identity scrub verified (the old single-file gate let
+                                   #          an aborted robocopy pass as seeded); .zcode-seeding is
+                                   #          written BEFORE the copy so a crash mid-seed re-clears +
+                                   #          re-seeds next launch; pre-marker profiles are ADOPTED;
+                                   #          Primary-CLOSED gate — the copy source ~\.zcode holds the
+                                   #          shared CLI db held by EVERY running instance, so the seed
+                                   #          waits up to 180s for ALL ZCode mains to close, fails CLOSED
+                                   #          on WMI error, throws with remediation (first-time multi-
+                                   #          clone seeding = one at a time, closing each); every
+                                   #          seed-scrub write re-read-verifies (deviceMid, deviceSid,
+                                   #          credentials oauth:/zcodejwttoken, provider apiKeys,
+                                   #          .updaterId) and a FAILED scrub throws before launch so the
+                                   #          clone can never run on Primary identity; deviceSid now
+                                   #          CSPRNG GetBytes + rejection sampling (was Get-Random);
+                                   #          telegram reconcile fingerprints ALL Primary bots into
+                                   #          sha8/id SETS (was first-bot-only) and a failed/unavailable
+                                   #          fingerprint FAILS CLOSED — disables every enabled clone bot
+                                   #          (the old code only printed "falling back to disable" then
+                                   #          preserved the seed-copy duplicate = two pollers, HTTP 409
+                                   #          + billing) and every disable write is re-read-verified,
+                                   #          the .telegram-routed marker is withheld on any write
+                                   #          failure so the reconcile retries; window resolve = title
+                                   #          ONLY (fresh-PID fallback removed — it adopted any new
+                                   #          bare-exe main incl. a sibling clone's); branding Copy-Item
+                                   #          try/catch + ZcodeWindowAumid Add-Type -as [type] guard;
                                    #          step 2e ensures the MCP sync + taskbar identity watchers
                                    #          are running hidden and installs their Startup .lnks once —
                                    #          mutex probe, best-effort, never blocks the launch;
