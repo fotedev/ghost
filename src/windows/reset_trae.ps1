@@ -73,11 +73,17 @@ if (-not $traeIsAdmin) {
     # its FULL main path, so delete it before launching (an early child exit
     # then surfaces as no result, never as the old Pass/Fail lines).
     Remove-Item -LiteralPath "$env:TEMP\trae_v0.3_done.txt" -Force -ErrorAction SilentlyContinue
-    Start-Process powershell -Verb RunAs -ArgumentList $traeArgs -WindowStyle Normal -Wait
+    # -PassThru + .ExitCode: relay the elevated child's exit code (the bug
+    # sweep's remaining half of the self-elevation finding - a bare -Wait
+    # always exited 0, so a failing reset looked green to callers that check
+    # $LASTEXITCODE). The child exits 1 when failCount > 0.
+    $traeChild = Start-Process powershell -Verb RunAs -ArgumentList $traeArgs -WindowStyle Normal -Wait -PassThru
     if (Test-Path -LiteralPath "$env:TEMP\trae_v0.3_done.txt") {
         Get-Content -LiteralPath "$env:TEMP\trae_v0.3_done.txt" -Encoding UTF8
     }
-    exit
+    $traeChildCode = $traeChild.ExitCode
+    if ($null -eq $traeChildCode) { $traeChildCode = 1 }
+    exit $traeChildCode
 }
 
 Write-GhostBanner -Target "Trae Identity Reset" -Version "0.3"
