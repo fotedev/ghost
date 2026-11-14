@@ -8,6 +8,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Cross-platform identity-store path layer** (2026-11-14): new
+  `src/python/ghost/platform.py` — the single source of truth for WHERE each
+  agent keeps its identity stores per OS (cursor, devin/windsurf, trae,
+  qoder, qoderwork, zcode, minimax, opencode-cli; the desktop clone suites
+  are deliberately unmapped — no Linux builds discovered, guessing
+  forbidden). New `ghost_cli.py paths <slug>` verb prints the resolved map
+  as JSON with `unverified` rows surfaced loudly (exit 2 on an unknown
+  slug) — the Linux `.sh` resets consume it instead of hardcoding paths,
+  so a path fix lands in one place. Provenance flags: cursor/devin/
+  opencode-cli verified on both platforms (existing shipped scripts / live
+  probing); trae/qoder/qoderwork/zcode-Linux rows derived from the Windows
+  layout + documented Linux conventions and flagged `verified: false`
+  (ground truth #5) pending live Linux verification. CI's python-core job
+  gains an ubuntu-latest matrix leg so the core stays path-correct on
+  Linux. Unit tests: `tests/python/test_ghost_platform.py` (9).
 - **AutoClaw2 identity reset** (2026-11-14): new
   `src/windows/reset_autoclaw2.ps1` (`-Target Primary|c1..c5|All`,
   `-KeepLogin`, `-DryRun`) closes the suite's last MANDATORY playbook gap —
