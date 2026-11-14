@@ -112,6 +112,26 @@ def _cmd_purge_tables(args):
     return 0
 
 
+def _cmd_purge_keys(args):
+    cfg = _decode_updates(args.config_b64)
+    result = sqlite_keys.purge_keys(
+        args.db, exact_keys=cfg.get("exact_keys"),
+        like_patterns=cfg.get("like_patterns"),
+        table=cfg.get("table", "ItemTable"))
+    print(json.dumps(result))
+    return 0
+
+
+def _cmd_count_keys(args):
+    cfg = _decode_updates(args.config_b64)
+    result = sqlite_keys.count_keys(
+        args.db, exact_keys=cfg.get("exact_keys"),
+        like_patterns=cfg.get("like_patterns"),
+        table=cfg.get("table", "ItemTable"))
+    print(json.dumps(result))
+    return 0
+
+
 def _cmd_clear_cli_telemetry(args):
     result = sqlite_keys.clear_cli_telemetry(args.db)
     print(json.dumps(result))
@@ -273,6 +293,26 @@ def build_parser():
                    help='base64 of {"exact_keys": [...], "like_patterns": '
                         '[...], "escape": "\\\\"} (default: Cursor keys)')
     p.set_defaults(func=_cmd_delete_secrets)
+
+    p = sub.add_parser(
+        "purge-keys",
+        help="DELETE exact-key + LIKE-pattern rows from one keyed table + "
+             "read-only reopen verify (Qoder state.vscdb secrets scrub twin)")
+    p.add_argument("db")
+    p.add_argument("config_b64",
+                   help='base64 of {"exact_keys": [...], "like_patterns": '
+                        '[...], "table": "ItemTable"}')
+    p.set_defaults(func=_cmd_purge_keys)
+
+    p = sub.add_parser(
+        "count-keys",
+        help="READ-ONLY count of exact-key + LIKE-pattern rows in one "
+             "keyed table (Qoder device-flow probe twin)")
+    p.add_argument("db")
+    p.add_argument("config_b64",
+                   help='base64 of {"exact_keys": [...], "like_patterns": '
+                        '[...], "table": "ItemTable"}')
+    p.set_defaults(func=_cmd_count_keys)
 
     p = sub.add_parser(
         "clear-cli-telemetry",

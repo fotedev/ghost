@@ -265,6 +265,101 @@ class ScrubIdentityRowsTests(unittest.TestCase):
         self.assertEqual(r["deleted"], 2, r)
 
 
+class PurgeKeysTests(unittest.TestCase):
+    """ghost.sqlite_keys.purge_keys — the Qoder state.vscdb secrets-scrub
+    twin (v0.4's temp-.py heredoc): exact-key + LIKE-pattern DELETEs on one
+    keyed table, per-name before/after counts, read-only reopen verify."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="ghost_purgekeys_")
+
+    def _make_db(self, path):
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE ItemTable ("
+                       "key TEXT PRIMARY KEY, value TEXT)")
+        cursor.executemany(
+            "INSERT INTO ItemTable VALUES (?, ?)",
+            [("secret://aicoding.auth.userInfo", "tok"),
+             ("aicoding.auth.loginBroadcast", "bc"),
+             ("gituser", "name"),
+             ("secret://blackbox.extra", "enc"),
+             ('secret://{"extensionId":"aicoding.aicoding-agent",'
+              '"key":"secret.local.machine.variables"}', "vars"),
+             # Chat/model keys deliberately NOT matched (chat preserved).
+             ("aicoding-chat-1.state.hidden", "keep"),
+             ("modelConfigs", "keep")])
+        conn.commit()
+        conn.close()
+
+    def test_purges_exact_and_like_keys_reports_per_name(self):
+        path = os.path.join(self.base, "state.vscdb")
+        self._make_db(path)
+        r = sqlite_keys.purge_keys(
+            path,
+            exact_keys=["secret://aicoding.auth.userInfo",
+                        "aicoding.auth.loginBroadcast", "gituser"],
+            like_patterns=["secret://blackbox.%",
+                           "%secret.local.machine.variables%"])
+        for name in ("secret://aicoding.auth.userInfo",
+                     "aicoding.auth.loginBroadcast", "gituser",
+                     "secret://blackbox.%",
+                     "%secret.local.machine.variables%"):
+            self.assertEqual(r["after"][name], 0, name)
+        self.assertGreaterEqual(r["before"]["gituser"], 1)
+        conn = sqlite3.connect(path)
+        try:
+            left = set(row[0] for row in conn.execute("SELECT key FROM ItemTable"))
+        finally:
+            conn.close()
+        self.assertEqual(left, {"aicoding-chat-1.state.hidden", "modelConfigs"})
+
+    def test_missing_table_raises(self):
+        path = os.path.join(self.base, "empty.db")
+        sqlite3.connect(path).close()
+        with self.assertRaises(sqlite3.OperationalError):
+            sqlite_keys.purge_keys(path, exact_keys=["x"])
+
+
+class CountKeysTests(unittest.TestCase):
+    """ghost.sqlite_keys.count_keys — the Qoder device-flow final probe
+    twin: READ-ONLY survivor count (no mutation, no table creation)."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="ghost_countkeys_")
+
+    def test_counts_survivors_read_only(self):
+        path = os.path.join(self.base, "state.vscdb")
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE ItemTable ("
+                     "key TEXT PRIMARY KEY, value TEXT)")
+        conn.executemany(
+            "INSERT INTO ItemTable VALUES (?, ?)",
+            [("secret://aicoding.auth.userInfo", "tok"),
+             ("secret://blackbox.x", "enc"),
+             ("chat:1", "keep")])
+        conn.commit()
+        conn.close()
+        r = sqlite_keys.count_keys(
+            path,
+            exact_keys=["secret://aicoding.auth.userInfo"],
+            like_patterns=["secret://blackbox.%"])
+        self.assertEqual(r["survivors"], 2)
+        # Read-only: the rows are still there afterwards.
+        conn = sqlite3.connect(path)
+        try:
+            n = conn.execute("SELECT COUNT(*) FROM ItemTable").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(n, 3)
+
+    def test_missing_table_raises(self):
+        path = os.path.join(self.base, "empty.db")
+        sqlite3.connect(path).close()
+        with self.assertRaises(sqlite3.OperationalError):
+            sqlite_keys.count_keys(path, exact_keys=["x"])
+
+
 class PurgeTableRowsTests(unittest.TestCase):
     """ghost.sqlite_keys.purge_table_rows — the QoderWork agents.db scrub
     twin (v0.1's temp-.py heredoc): exact-table wipes + keyed-table exact
@@ -709,6 +804,30 @@ class CliSmokeTests(unittest.TestCase):
             self.assertTrue(report["ok"])
             self.assertEqual(report["deleted"], 1)
             self.assertEqual(report["remaining"], 0)
+
+    def test_purge_keys_and_count_keys_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "state.vscdb")
+            conn = sqlite3.connect(db)
+            conn.execute("CREATE TABLE ItemTable ("
+                         "key TEXT PRIMARY KEY, value TEXT)")
+            conn.execute("INSERT INTO ItemTable VALUES ('gituser', 'n')")
+            conn.execute("INSERT INTO ItemTable VALUES ('secret://blackbox.1', 'e')")
+            conn.execute("INSERT INTO ItemTable VALUES ('chat:1', 'keep')")
+            conn.commit()
+            conn.close()
+            cfg_b64 = _b64({"exact_keys": ["gituser"],
+                            "like_patterns": ["secret://blackbox.%"]})
+            proc = self._run("count-keys", db, cfg_b64)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["survivors"], 2)
+            proc = self._run("purge-keys", db, cfg_b64)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["after"]["gituser"], 0)
+            self.assertEqual(result["after"]["secret://blackbox.%"], 0)
+            proc = self._run("count-keys", db, cfg_b64)
+            self.assertEqual(json.loads(proc.stdout)["survivors"], 0)
 
     def test_purge_tables_command(self):
         with tempfile.TemporaryDirectory() as tmp:
