@@ -506,7 +506,7 @@ chmod +x src/linux/*.sh
 # Or run directly:
 ./src/linux/reset_cursor.sh                          # close Cursor first
 sudo ./src/linux/reset_cursor.sh                     # also resets /etc/machine-id
-./src/linux/reset_windsurf.sh                        # close Windsurf first
+./src/linux/reset_devin.sh                           # close Windsurf/Devin first
 ./src/linux/change_device_id.sh Fingerprint          # no root
 sudo ./src/linux/change_device_id.sh ResetMachineId  # /etc/machine-id (root)
 ```

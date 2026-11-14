@@ -76,8 +76,7 @@ timestamp() {
     date +%Y%m%d_%H%M%S
 }
 
-has_python3() {
-    command -v python3 >/dev/null 2>&1
+has_python3() {    command -v python3 >/dev/null 2>&1
 }
 
 # ── Backup ──────────────────────────────────────────────────────────────
@@ -161,5 +160,160 @@ reset_system_machine_id() {
     ok "Updated system machine-id."
     if [[ -f "$etc_id" ]]; then
         dim "New machine-id: $(cat "$etc_id")"
+    fi
+}
+
+# ── GHOST Python core bridge (2026-11-14) ───────────────────────────────
+# The shared store-mutation logic lives in src/python/ghost (ONE copy for
+# Windows + Linux). Linux resets resolve it repo-relative and route every
+# mutation through the core verbs (base64 payload in, JSON report out);
+# without python3 or the core file, callers fall back to their inline
+# python3 heredocs - reported loudly, never silent.
+GHOST_CLI_PATH=""
+
+resolve_ghost_cli() {
+    # Sets GHOST_CLI_PATH to the repo's ghost_cli.py when BOTH python3 and
+    # the file exist; returns 1 otherwise (callers decide the fallback).
+    if ! has_python3; then
+        return 1
+    fi
+    local candidate="$SCRIPT_DIR/../python/ghost_cli.py"
+    candidate="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
+    if [[ -f "$candidate" ]]; then
+        GHOST_CLI_PATH="$candidate"
+        return 0
+    fi
+    return 1
+}
+
+b64_payload() {
+    # Compact JSON on stdin -> base64 (no line breaks; GNU + busybox safe).
+    base64 -w0 2>/dev/null || base64
+}
+
+core_backup() {
+    # Backup via the core's timestamped-dir verb (lock retries + verify),
+    # falling back to a plain copy. Echoes the backup destination, or
+    # nothing when the source is absent. RESTORE_ENTRIES must be an array
+    # declared by the caller.
+    local src="$1" backup_root="$2" label="$3"
+    if [[ ! -e "$src" ]]; then
+        return 0
+    fi
+    if [[ -n "$GHOST_CLI_PATH" ]]; then
+        local out
+        if out=$(python3 "$GHOST_CLI_PATH" backup "$src" "$backup_root" "$label" 2>/dev/null); then
+            local dest
+            dest=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('destination',''))" "$out" 2>/dev/null || true)
+            if [[ -n "$dest" ]]; then
+                RESTORE_ENTRIES+=("$dest|$src")
+                echo "$dest"
+                return 0
+            fi
+        fi
+        warn "core backup FAILED for $src - plain-copy fallback"
+    fi
+    local dest
+    dest="$backup_root/${label}_$(timestamp).backup"
+    mkdir -p "$backup_root"
+    cp -f "$src" "$dest"
+    RESTORE_ENTRIES+=("$dest|$src")
+    echo "$dest"
+}
+
+# ── Audit (JSONL) ───────────────────────────────────────────────────────
+AUDIT_FILE=""
+
+audit_init() {
+    # $1 = backup root; creates audit_<ts>.jsonl inside it.
+    AUDIT_FILE="$1/audit_$(timestamp).jsonl"
+    mkdir -p "$1"
+    : > "$AUDIT_FILE"
+}
+
+audit_line() {
+    # audit_line <file> <key> <before> <after> <ok:0|1> [detail]
+    local file="$1" key="$2" before="$3" after="$4" okflag="$5" detail="${6:-}"
+    [[ -n "$file" ]] || return 0
+    if has_python3; then
+        python3 - "$file" "$key" "$before" "$after" "$okflag" "$detail" <<'PY'
+import json, sys
+path, key, before, after, okflag, detail = sys.argv[1:7]
+entry = {"key": key, "before": before, "after": after, "ok": okflag == "1", "detail": detail}
+with open(path, "a", encoding="utf-8") as f:
+    f.write(json.dumps(entry) + "\n")
+PY
+    else
+        printf '%s|%s|%s|%s|%s|%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$key" "$before" "$after" "$okflag" "$detail" >> "$file"
+    fi
+}
+
+# ── Restore script emission ─────────────────────────────────────────────
+RESTORE_ENTRIES=()
+
+emit_restore_script() {
+    # $1 = backup root. Writes restore.sh (copies every backup back to its
+    # original path) from the RESTORE_ENTRIES collected during the run.
+    local backup_root="$1"
+    local script_path="$backup_root/restore.sh"
+    {
+        echo '#!/usr/bin/env bash'
+        echo '# GHOST auto-generated restore script - copies the backups in this'
+        echo '# ID_Backups directory back over the live files. Review, then run.'
+        echo 'set -euo pipefail'
+        local entry dest orig
+        for entry in "${RESTORE_ENTRIES[@]}"; do
+            dest="${entry%%|*}"
+            orig="${entry#*|}"
+            printf 'mkdir -p "$(dirname %q)"\n' "$orig"
+            printf 'cp -f %q %q\n' "$dest" "$orig"
+        done
+        echo 'echo "Restore complete."'
+    } > "$script_path"
+    chmod +x "$script_path" 2>/dev/null || true
+    echo "$script_path"
+}
+
+# ── Verify-after (never silent success) ─────────────────────────────────
+verify_json_keys() {
+    # verify_json_keys <file> <key=value> [...] - re-reads the JSON file and
+    # compares every pair; returns 0 only when ALL match. Prints mismatches.
+    local file="$1"
+    shift
+    if ! has_python3; then
+        warn "python3 not found - verify-after SKIPPED for $file (unverified write!)"
+        return 1
+    fi
+    python3 - "$file" "$@" <<'PY'
+import json, sys
+path, pairs = sys.argv[1], sys.argv[2:]
+with open(path, encoding="utf-8-sig") as f:
+    data = json.load(f)
+bad = []
+for pair in pairs:
+    key, _, expected = pair.partition("=")
+    actual = data
+    for part in key.split("."):
+        if not isinstance(actual, dict) or part not in actual:
+            actual = None
+            break
+        actual = actual[part]
+    if actual != expected:
+        bad.append("%s (expected %r, got %r)" % (key, expected, actual))
+if bad:
+    print("VERIFY FAILED for %s: %s" % (path, "; ".join(bad)))
+    sys.exit(1)
+PY
+}
+
+verify_file_value() {
+    # verify_file_value <file> <expected> - text file re-read compare.
+    local file="$1" expected="$2"
+    [[ -f "$file" ]] || { echo "VERIFY FAILED: $file missing"; return 1; }
+    local actual
+    actual=$(tr -d '[:space:]' < "$file")
+    if [[ "$actual" != "$(printf '%s' "$expected" | tr -d '[:space:]')" ]]; then
+        echo "VERIFY FAILED: $file does not hold the written value"
+        return 1
     fi
 }
