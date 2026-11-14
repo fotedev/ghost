@@ -351,6 +351,93 @@ def purge_table_rows(db_path, tables, key_table=None, keys=None):
     return {"before": before, "after": after}
 
 
+def purge_keys(db_path, exact_keys=None, like_patterns=None, table="ItemTable"):
+    """DELETE exact-key rows + LIKE-pattern rows from one keyed table and
+    verify zero survivors via read-only reopen -- the Qoder state.vscdb
+    auth-secrets scrub twin (v0.4's temp-.py heredoc).
+
+    Per-key/per-pattern before/after COUNT reports (the PS side audits each
+    name individually with "count=X" -> "count=0"). A missing table raises
+    (caller contract: non-zero exit -> PowerShell FAILED). Raises on any
+    sqlite error. Parameterized ? placeholders for every value; only the
+    whitelist-validated table name is ever interpolated.
+    """
+    _validate_table_name(table)
+    if exact_keys is None:
+        exact_keys = []
+    if like_patterns is None:
+        like_patterns = []
+
+    before = {}
+    after = {}
+    conn = sqlite3.connect(db_path, timeout=10)
+    try:
+        cursor = conn.cursor()
+        for k in exact_keys:
+            cursor.execute(
+                "SELECT COUNT(*) FROM " + table + " WHERE key = ?", (k,))
+            before[k] = cursor.fetchone()[0]
+        for p in like_patterns:
+            cursor.execute(
+                "SELECT COUNT(*) FROM " + table + " WHERE key LIKE ?", (p,))
+            before[p] = cursor.fetchone()[0]
+        for k in exact_keys:
+            cursor.execute("DELETE FROM " + table + " WHERE key = ?", (k,))
+        for p in like_patterns:
+            cursor.execute("DELETE FROM " + table + " WHERE key LIKE ?", (p,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Verify-after (module invariant): read-only reopen recount.
+    verify_conn = _ro_connect(db_path)
+    try:
+        verify_cursor = verify_conn.cursor()
+        for k in exact_keys:
+            verify_cursor.execute(
+                "SELECT COUNT(*) FROM " + table + " WHERE key = ?", (k,))
+            after[k] = verify_cursor.fetchone()[0]
+        for p in like_patterns:
+            verify_cursor.execute(
+                "SELECT COUNT(*) FROM " + table + " WHERE key LIKE ?", (p,))
+            after[p] = verify_cursor.fetchone()[0]
+    finally:
+        verify_conn.close()
+
+    return {"before": before, "after": after}
+
+
+def count_keys(db_path, exact_keys=None, like_patterns=None, table="ItemTable"):
+    """READ-ONLY survivor count for identity-key patterns in one keyed
+    table -- the Qoder device-flow final probe twin (v0.4's temp-.py
+    heredoc). No mutation, no table creation: a missing table raises
+    (caller contract: non-zero exit -> PowerShell FAILED).
+
+    Returns {"survivors": N}.
+    """
+    _validate_table_name(table)
+    if exact_keys is None:
+        exact_keys = []
+    if like_patterns is None:
+        like_patterns = []
+
+    conn = _ro_connect(db_path)
+    survivors = 0
+    try:
+        cursor = conn.cursor()
+        for k in exact_keys:
+            cursor.execute(
+                "SELECT COUNT(*) FROM " + table + " WHERE key = ?", (k,))
+            survivors += cursor.fetchone()[0]
+        for p in like_patterns:
+            cursor.execute(
+                "SELECT COUNT(*) FROM " + table + " WHERE key LIKE ?", (p,))
+            survivors += cursor.fetchone()[0]
+    finally:
+        conn.close()
+    return {"survivors": survivors}
+
+
 def clear_cli_telemetry(db_path):
     """DELETE telemetry-like keys from the ZCode CLI db.sqlite ItemTable.
 

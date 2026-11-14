@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 param(
-    # v0.4 keeps the v0.3 opt-out switches for the system-level steps.
+    # v0.5 keeps the v0.3 opt-out switches for the system-level steps.
     # Default = ON (i.e., do them). Use -SkipMac / -SkipHostname to suppress.
     # Note: NO [CmdletBinding()] -- plain param() is deliberate: the
     # self-elevation block invokes this script with -File plus only these
@@ -31,16 +31,52 @@ if (-not $qoderIsAdmin) {
     # undeclared argument (the *_done.txt marker file is the persisted result).
     $qoderArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$qoderScript`"$qoderSwitchString"
     Start-Process powershell -Verb RunAs -ArgumentList $qoderArgs -WindowStyle Normal -Wait
-    if (Test-Path "$env:TEMP\qoder_v0.4_done.txt") {
-        Get-Content "$env:TEMP\qoder_v0.4_done.txt"
+    if (Test-Path "$env:TEMP\qoder_v0.5_done.txt") {
+        Get-Content "$env:TEMP\qoder_v0.5_done.txt"
     }
     exit
 }
 
-Write-GhostBanner -Target "Qoder Identity Reset" -Version "0.4"
+Write-GhostBanner -Target "Qoder Identity Reset" -Version "0.5"
 
-# Qoder v0.4 -- comprehensive identity reset + system-level defenses + device-flow purge.
+# Qoder v0.5 -- comprehensive identity reset + system-level defenses + device-flow purge.
+# THIN MANIFEST over the Python core (Phase 3 migration #6 per
+# docs/PYTHON_HYBRID_ROADMAP.md: cursor v0.3 pilot, devin v0.4, trae v0.3,
+# qoderwork v0.2, minimax v1.4). The 31 steps, their order, audit keys,
+# restore actions and summary are IDENTICAL to v0.4 (archived at
+# archive/reset_qoder_windows-v0.4.ps1, local-only); every store mutation now
+# runs through src\python\ghost_cli.py (base64 payload in, JSON report out)
+# via ONE invocation helper. What was deleted from v0.4: BOTH temp-.py
+# heredocs and the local mutation helpers, replaced by the tested
+# ghost.filesweep / ghost.winstore / ghost.backup / ghost.sqlite_keys modules.
 #
+#   v0.4 helper / mechanism         -> v0.5 core verb
+#   Set-VerifiedMachineIdFile       -> machineid-file
+#   Set-JsonIdentity (storage.json) -> backup + json-patch
+#   Set-SqliteKeys (state.vscdb)    -> backup + sqlite-update
+#   Clear-QoderSecrets heredoc      -> purge-keys (per-name before/after
+#                                      counts, read-only reopen verify; the
+#                                      v0.4 exact-key + LIKE-pattern lists and
+#                                      the no-re-backup comment are kept)
+#   qoder_device_probe heredoc      -> count-keys (READ-ONLY survivor count)
+#   Update-QoderPreferences         -> salt-rotate (salt now generated in the
+#                                      core: 32 lowercase hex per profile;
+#                                      v0.4 used an uppercase GUID-N shared
+#                                      across profiles -- same length/format
+#                                      class, case not significant to the app)
+#   Update-QoderArgvJson            -> patch-argv (JSONC regex twin: comments
+#                                      survive, crash-reporter-id replaced,
+#                                      verify-after)
+#   Clear-BinaryIdentityStore       -> store-delete --action delete
+#   Clear-TreeFilesIndividually     -> sweep-tree
+#   Remove-VerifiedFileNoBackup     -> sweep-file
+#
+# The registry/MAC/hostname system steps ([23]-[27]) and the system-restore
+# generator stay PowerShell -- OS operations, not application-store mutations
+# (same split as reset_cursor v0.3's step table). Python required for every
+# file/SQLite step now (fail-fast preflight).
+#
+# Builds on v0.3 (27 steps) with FOUR new device-flow steps (28-31) driven by
 # Builds on v0.3 (27 steps) with FOUR new device-flow steps (28-31) driven by
 # forensics on the live box (2026-09-15) plus the OAuth device-login URL
 # (qoder.com/device/selectAccounts?challenge=...&challenge_method=S256&
@@ -196,6 +232,108 @@ function Get-UserProfileBackupLabel {
     return Get-PathBackupLabel -Path $TargetPath
 }
 
+function _B64Payload {
+    # Compact JSON -> base64: the core bridge's payload contract (sidesteps
+    # PS 5.1 native-argument quoting entirely).
+    param([Parameter(Mandatory = $true)][hashtable]$Payload)
+    $json = $Payload | ConvertTo-Json -Depth 6 -Compress
+    return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
+}
+
+function Invoke-GhostCore {
+    # The one PS -> Python invocation point for every store mutation / core
+    # probe. Returns the parsed JSON report, or $null when the core is
+    # missing or the subcommand failed (exit code non-zero). Same recipe
+    # Set-SqliteKeys uses: functional python probe + UTF-8 console + exit-
+    # code check.
+    param([Parameter(Mandatory = $true)][string[]]$CliArgs)
+
+    $cli = Get-GhostPythonCli
+    if (-not $cli) {
+        Write-Host "[FAILED] GHOST Python core not found (src\python\ghost_cli.py)." -ForegroundColor Red
+        return $null
+    }
+    $pythonCommand = Get-PythonCommandInfo
+    if (-not $pythonCommand) {
+        Write-Host "[FAILED] no functional Python 3 found - every Qoder reset step needs it." -ForegroundColor Red
+        return $null
+    }
+    Set-GhostConsoleUtf8
+    $output = & $pythonCommand $cli @CliArgs
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
+    try {
+        return ($output -join "`n") | ConvertFrom-Json
+    }
+    catch {
+        Write-Host "[FAILED] unparseable core output: $($output -join ' ')" -ForegroundColor Red
+        return $null
+    }
+}
+
+function Backup-ViaCore {
+    # Backup-FileToTimestampDir via the core, plus the restore-manifest
+    # action. A locked/failed backup is reported but NOT fatal - the v0.4
+    # contract verbatim (a file whose copy could not be read may still be
+    # deletable, and the caller proceeds).
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    $report = Invoke-GhostCore @("backup", $Source, $BackupRoot, $Label)
+    if ($null -eq $report) {
+        Write-Host "    [WARN] backup FAILED - proceeding WITHOUT backup: $Source" -ForegroundColor Yellow
+        return $false
+    }
+    if ($report.skipped) { return $false }
+    if ($report.ok -and $report.destination) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Source -BackupPath $report.destination
+        return $true
+    }
+    Write-Host "    [WARN] backup did not complete ($($report.error)) - proceeding" -ForegroundColor Yellow
+    return $false
+}
+
+# Clear-BinaryIdentityStore twin over the core's store-delete verb (one path
+# per core invocation; the PS side loops). Same interface as the shared
+# identity_utils helper so the call sites only swap the function name.
+function Invoke-StoreDelete {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Paths,
+        [ValidateSet("rename", "delete")][string]$Action = "delete",
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [string]$RootPath
+    )
+
+    $results = @()
+    foreach ($path in $Paths) {
+        # Empty label -> the core derives the relative label from --root-path
+        # (same contract as the shared helper's -RootPath).
+        $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot, "",
+            "--action", $Action, "--root-path", $RootPath)
+        if ($null -ne $storeReport) {
+            Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before $storeReport.before -After $storeReport.after -Ok $storeReport.ok
+            if ($storeReport.ok -and $storeReport.backed_up_to) {
+                $results += [ordered]@{
+                    action       = $Action
+                    originalPath = $path
+                    backupPath   = $storeReport.backed_up_to
+                    renamedPath  = $storeReport.renamed_to
+                }
+            }
+        }
+        else {
+            Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before "present" -After "core-invoke-failed" -Ok $false
+        }
+    }
+    return $results
+}
+
 function Set-VerifiedMachineIdFile {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -208,26 +346,29 @@ function Set-VerifiedMachineIdFile {
 
     $beforeValue = $null
     if (Test-Path -LiteralPath $Path) {
-        $beforeValue = (Get-Content -LiteralPath $Path -Raw).Trim()
-        $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-        if ($backupPath) {
-            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+        try {
+            $beforeValue = (Get-Content -LiteralPath $Path -Raw).Trim()
+        }
+        catch {
+            $beforeValue = $null
         }
     }
 
-    $parent = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($parent)) {
-        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    # Core: machineid-file (backup if present, BOM-less UTF-8 write, re-read
+    # verify -- the v0.4 contract verbatim; the core also creates the parent
+    # directory when missing).
+    $report = Invoke-GhostCore @("machineid-file", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ value = $Value }))
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "machineid" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+        }
+        return $true
     }
 
-    # No-BOM UTF-8 write (mirrors reset_zcode_windows-v1.0.ps1:63). Set-Content
-    # with -Encoding UTF8 emits a BOM under PowerShell 5.1, which corrupts the
-    # JSON parsers in Qoder and falls back to the old machineid.
-    [System.IO.File]::WriteAllText($Path, $Value, (New-Object System.Text.UTF8Encoding $false))
-    $afterValue = (Get-Content -LiteralPath $Path -Raw).Trim()
-    $ok = $afterValue -eq $Value
-    Add-AuditEntry -Audit $Audit -File $Path -Key "machineid" -Before $beforeValue -After $afterValue -Ok $ok
-    return $ok
+    Add-AuditEntry -Audit $Audit -File $Path -Key "machineid" -Before $beforeValue -After "verify-failed" -Ok $false
+    return $false
 }
 
 function Confirm-JsonValues {
@@ -261,13 +402,20 @@ function Invoke-WorkspaceSqliteUpdate {
         [Parameter(Mandatory = $true)][ref]$Actions
     )
 
-    $ok = Set-SqliteKeys `
-        -Path $WorkspaceDbPath `
-        -Updates @{ "storage.serviceMachineId" = $DeviceId } `
-        -Audit $Audit `
-        -BackupRoot $BackupRoot `
-        -BackupLabel (Get-AppRelativeBackupLabel -RootPath $RootPath -TargetPath $WorkspaceDbPath) `
-        -Actions $Actions
+    # Core: backup + sqlite-update (Set-SqliteKeys' backup+UPSERT+verify
+    # contract split across the core verbs).
+    $null = Backup-ViaCore -Source $WorkspaceDbPath -BackupRoot $BackupRoot -Label (Get-AppRelativeBackupLabel -RootPath $RootPath -TargetPath $WorkspaceDbPath) -Actions $Actions
+    $wsReport = Invoke-GhostCore @("sqlite-update", $WorkspaceDbPath, (_B64Payload @{ "storage.serviceMachineId" = $DeviceId }))
+    # [OK] only when the core's verify-after re-read returned the exact value
+    # we asked for - a non-null report alone is not verification.
+    $ok = $false
+    if ($null -ne $wsReport -and $null -ne $wsReport.after -and ($wsReport.after."storage.serviceMachineId" -eq $DeviceId)) {
+        Add-AuditEntry -Audit $Audit -File $WorkspaceDbPath -Key "storage.serviceMachineId" -Before $wsReport.before."storage.serviceMachineId" -After $wsReport.after."storage.serviceMachineId" -Ok $true
+        $ok = $true
+    }
+    else {
+        Add-AuditEntry -Audit $Audit -File $WorkspaceDbPath -Key "storage.serviceMachineId" -Before $null -After $DeviceId -Ok $false
+    }
 
     if ($ok) {
         Write-Host "    [OK] workspace DB updated: $WorkspaceDbPath" -ForegroundColor Green
@@ -278,12 +426,13 @@ function Invoke-WorkspaceSqliteUpdate {
 }
 
 # Qoder Preferences is a Chromium JSON file with a nested
-# electron.media.device_id_salt key. Sets it to a fresh uppercase GUID (N-format,
-# no dashes) and verifies after re-read.
+# electron.media.device_id_salt key. The fresh salt is generated in the core
+# (salt-rotate: 32 lowercase hex; v0.4 used an uppercase GUID-N -- same
+# length/format class, case not significant to the app) and verified after
+# re-read.
 function Update-QoderPreferences {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$NewDeviceIdSalt,
         [Parameter(Mandatory = $true)][string]$BackupRoot,
         [Parameter(Mandatory = $true)][string]$BackupLabel,
         [Parameter(Mandatory = $true)][ref]$Audit,
@@ -295,65 +444,17 @@ function Update-QoderPreferences {
         return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    $report = Invoke-GhostCore @("salt-rotate", $Path, $BackupRoot, $BackupLabel)
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+        }
+        return $true
     }
 
-    try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $null -After $null -Ok $false
-        return $false
-    }
-
-    $beforeValue = $null
-    if ($null -ne $content.PSObject.Properties['electron'] -and
-        $null -ne $content.electron.PSObject.Properties['media'] -and
-        $null -ne $content.electron.media.PSObject.Properties['device_id_salt']) {
-        $beforeValue = $content.electron.media.device_id_salt
-    }
-
-    if ($null -eq $content.PSObject.Properties['electron']) {
-        $mediaObj = [ordered]@{ device_id_salt = $NewDeviceIdSalt }
-        $electronObj = [ordered]@{ media = $mediaObj }
-        Add-Member -InputObject $content -NotePropertyName 'electron' -NotePropertyValue $electronObj
-    }
-    elseif ($null -eq $content.electron.PSObject.Properties['media']) {
-        $mediaObj = [ordered]@{ device_id_salt = $NewDeviceIdSalt }
-        Add-Member -InputObject $content.electron -NotePropertyName 'media' -NotePropertyValue $mediaObj
-    }
-    elseif ($null -eq $content.electron.media.PSObject.Properties['device_id_salt']) {
-        Add-Member -InputObject $content.electron.media -NotePropertyName 'device_id_salt' -NotePropertyValue $NewDeviceIdSalt
-    }
-    else {
-        $content.electron.media.device_id_salt = $NewDeviceIdSalt
-    }
-
-    # No-BOM UTF-8 write (mirrors reset_zcode_windows-v1.0.ps1:384). Set-Content
-    # with -Encoding UTF8 emits a BOM under PS 5.1, which Chromium's Preferences
-    # parser rejects and falls back to the old device_id_salt.
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $beforeValue -After $null -Ok $false
-        return $false
-    }
-
-    $afterValue = $null
-    if ($null -ne $verified.PSObject.Properties['electron'] -and
-        $null -ne $verified.electron.PSObject.Properties['media'] -and
-        $null -ne $verified.electron.media.PSObject.Properties['device_id_salt']) {
-        $afterValue = $verified.electron.media.device_id_salt
-    }
-
-    $ok = $afterValue -eq $NewDeviceIdSalt
-    Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before $beforeValue -After $afterValue -Ok $ok
-    return $ok
+    Add-AuditEntry -Audit $Audit -File $Path -Key "device_id_salt" -Before "present" -After "verify-failed" -Ok $false
+    return $false
 }
 
 # Qoder spawns 14+ processes including a sub-binary at
@@ -434,11 +535,12 @@ function Stop-QoderProcessesAggressive {
 }
 
 # aicoding.auth.* and Blackbox gituser/secret://blackbox.% rows in state.vscdb
-# ItemTable leak the account email. Set-SqliteKeys only UPSERTs -- never deletes.
-# This DELETEs and verifies the survivors are zero via read-only reopen.
-# Uses Python with parameterized ? placeholders. The caller already backed up
-# state.vscdb via Set-SqliteKeys (Backup-FileToTimestampDir uses -Force, so
-# re-backing here would clobber the pristine copy).
+# ItemTable leak the account email. sqlite-update only UPSERTs -- never deletes.
+# This DELETEs (core: purge-keys) and verifies the survivors are zero via
+# read-only reopen, with parameterized ? placeholders. The caller already
+# backed up state.vscdb in step [3/31] (the core's backup verb uniquifies
+# same-label re-backups, so no re-backup here either -- one pristine pre-run
+# copy, one manifest entry).
 #
 # v0.4 expansion (forensics 2026-09-15 + device-login URL analysis):
 #   - Exact: aicoding.auth.loginBroadcast (36-char broadcast token observed live;
@@ -475,102 +577,36 @@ function Clear-QoderSecrets {
         return $true
     }
 
-    $pythonCommand = Get-PythonCommandInfo
-    if (-not $pythonCommand) {
+    # Core: purge-keys (exact keys + LIKE patterns on ItemTable; per-name
+    # before/after COUNT reports; read-only reopen verify). The v0.4 comment
+    # stands: the caller already backed up state.vscdb in step [3/31] (the
+    # core's backup verb uniquifies same-label re-backups, so no re-backup
+    # here either -- one pristine pre-run copy, one manifest entry).
+    $purgeConfig = @{
+        exact_keys    = $exactKeys
+        like_patterns = $likePatterns
+        table         = "ItemTable"
+    }
+    $result = Invoke-GhostCore @("purge-keys", $DbPath, (_B64Payload $purgeConfig))
+    if ($null -eq $result -or $null -eq $result.after) {
         foreach ($key in ($exactKeys + $likePatterns)) {
-            Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "python-missing" -Ok $false
+            Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "core-invoke-failed" -Ok $false
         }
-        Write-Host "    [FAILED] Python not found - cannot scrub state.vscdb secrets" -ForegroundColor Red
+        Write-Host "    [FAILED] secret scrub core invocation failed: $DbPath" -ForegroundColor Red
         return $false
     }
 
-    $exactKeysPy = "[" + (($exactKeys | ForEach-Object { "'$_'" }) -join ", ") + "]"
-    $likePatternsPy = "[" + (($likePatterns | ForEach-Object { "'$_'" }) -join ", ") + "]"
-
-    $tempScriptPath = Join-Path $env:TEMP ("qoder_scrub_secrets_{0}.py" -f ([guid]::NewGuid().ToString("N")))
-    $pythonScript = @"
-import json
-import sqlite3
-import sys
-
-db_path = sys.argv[1]
-exact_keys = $exactKeysPy
-like_patterns = $likePatternsPy
-
-result = {"before": {}, "after": {}}
-
-conn = sqlite3.connect(db_path)
-try:
-    cursor = conn.cursor()
-    for k in exact_keys:
-        cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key = ?", (k,))
-        result["before"][k] = cursor.fetchone()[0]
-    for p in like_patterns:
-        cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key LIKE ?", (p,))
-        result["before"][p] = cursor.fetchone()[0]
-
-    for k in exact_keys:
-        cursor.execute("DELETE FROM ItemTable WHERE key = ?", (k,))
-    for p in like_patterns:
-        cursor.execute("DELETE FROM ItemTable WHERE key LIKE ?", (p,))
-    conn.commit()
-finally:
-    conn.close()
-
-verify_conn = sqlite3.connect("file:" + db_path + "?mode=ro", uri=True)
-try:
-    verify_cursor = verify_conn.cursor()
-    for k in exact_keys:
-        verify_cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key = ?", (k,))
-        result["after"][k] = verify_cursor.fetchone()[0]
-    for p in like_patterns:
-        verify_cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key LIKE ?", (p,))
-        result["after"][p] = verify_cursor.fetchone()[0]
-finally:
-    verify_conn.close()
-
-print(json.dumps(result))
-"@
-
-    try {
-        # No-BOM UTF-8 write for the temp .py (mirrors reset_zcode_windows-v1.0.ps1:176).
-        # A BOM at the start of the temp file trips CPython's parser before the
-        # shebang line is read.
-        [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
-        $commandOutput = & $pythonCommand $tempScriptPath $DbPath
-        if ($LASTEXITCODE -ne 0) {
-            foreach ($key in ($exactKeys + $likePatterns)) {
-                Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "command-failed" -Ok $false
-            }
-            Write-Host "    [FAILED] secret scrub Python command failed: $DbPath" -ForegroundColor Red
-            return $false
-        }
-
-        $result = ($commandOutput -join "`n") | ConvertFrom-Json
-        $allMatched = $true
-        foreach ($key in ($exactKeys + $likePatterns)) {
-            $before = $result.before.$key
-            $after = $result.after.$key
-            $ok = ($after -eq 0)
-            Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before ("count=" + $before) -After ("count=" + $after) -Ok $ok
-            if (-not $ok) {
-                $allMatched = $false
-            }
-        }
-        return $allMatched
-    }
-    catch {
-        foreach ($key in ($exactKeys + $likePatterns)) {
-            Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before $null -After "exception" -Ok $false
-        }
-        Write-Host "    [FAILED] secret scrub threw an error: $DbPath" -ForegroundColor Red
-        return $false
-    }
-    finally {
-        if (Test-Path -LiteralPath $tempScriptPath) {
-            Remove-Item -LiteralPath $tempScriptPath -Force -ErrorAction SilentlyContinue
+    $allMatched = $true
+    foreach ($key in ($exactKeys + $likePatterns)) {
+        $before = $result.before.$key
+        $after = $result.after.$key
+        $ok = ($after -eq 0)
+        Add-AuditEntry -Audit $Audit -File $DbPath -Key $key -Before ("count=" + $before) -After ("count=" + $after) -Ok $ok
+        if (-not $ok) {
+            $allMatched = $false
         }
     }
+    return $allMatched
 }
 
 # Post-reset watchdog probe: if a slow-shutdown helper recreated core auth files
@@ -637,9 +673,10 @@ function Get-ProfileLabel {
     return Split-Path -Leaf $ProfileRoot
 }
 
-# %USERPROFILE%\.qoder\argv.json is JSONC (comments allowed). ConvertFrom-Json
-# cannot parse JSONC, so we regex-replace just the crash-reporter-id value and
-# preserve every comment + other field verbatim.
+# %USERPROFILE%\.qoder\argv.json is JSONC (comments allowed). Core: patch-argv
+# (winstore.patch_argv_json -- the JSONC regex twin: comments + every other
+# field survive verbatim, the crash-reporter-id value is regex-replaced or
+# inserted, verify-after by re-read).
 function Update-QoderArgvJson {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -656,34 +693,18 @@ function Update-QoderArgvJson {
         return $true
     }
 
-    $raw = Get-Content -LiteralPath $Path -Raw
-    $before = $null
-    if ($raw -match '"crash-reporter-id"\s*:\s*"([^"]+)"') {
-        $before = $matches[1]
+    $report = Invoke-GhostCore @("patch-argv", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ new_id = $NewCrashReporterId }))
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "crash-reporter-id" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+        }
+        return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-    }
-
-    $pattern = '"crash-reporter-id"\s*:\s*"[^"]+"'
-    $replacement = '"crash-reporter-id": "' + $NewCrashReporterId + '"'
-    $newRaw = [regex]::Replace($raw, $pattern, $replacement)
-
-    # No-BOM UTF-8 write (mirrors reset_zcode_windows-v1.0.ps1:923). The argv.json
-    # is JSONC and Set-Content -Encoding UTF8 emits a BOM under PS 5.1, breaking
-    # the Qoder JSONC loader for argv.json.
-    [System.IO.File]::WriteAllText($Path, $newRaw, (New-Object System.Text.UTF8Encoding $false))
-
-    # Re-read to confirm. JSONC reads back the same regex works.
-    $verifyRaw = Get-Content -LiteralPath $Path -Raw
-    $verifyMatch = [regex]::Match($verifyRaw, '"crash-reporter-id"\s*:\s*"([^"]+)"')
-    $verified = if ($verifyMatch.Success) { $verifyMatch.Groups[1].Value } else { $null }
-
-    $ok = ($verified -eq $NewCrashReporterId)
-    Add-AuditEntry -Audit $Audit -File $Path -Key "crash-reporter-id" -Before $before -After $verified -Ok $ok
-    return $ok
+    Add-AuditEntry -Audit $Audit -File $Path -Key "crash-reporter-id" -Before "present" -After "verify-failed" -Ok $false
+    return $false
 }
 
 # Old ID_Backups directories (from previous reset runs) preserve complete snapshots
@@ -763,17 +784,18 @@ function Remove-QoderPathSafely {
         return "link-removed"
     }
 
-    $binaryActions = Clear-BinaryIdentityStore -Paths @($Path) -Action "delete" -BackupRoot $BackupRoot -Audit $Audit -RootPath $env:USERPROFILE
+    $binaryActions = Invoke-StoreDelete -Paths @($Path) -Action "delete" -BackupRoot $BackupRoot -Audit $Audit -RootPath $env:USERPROFILE
     $Actions.Value += @($binaryActions)
     return "deleted"
 }
 
-# Delete every file under $Path individually with retry, then prune empty dirs.
-# Why: Clear-BinaryIdentityStore does Remove-Item -Recurse on the whole tree,
-# which fails FAST on the first locked file and leaves 99% of the tree intact.
-# Verified on this box: 1-Cline.log locked by orphan kilo.exe, 237 other log
-# files stayed on disk. Per-file delete means 1 stuck file doesn't block the
-# rest -- we still delete 237/238 and surface the 1 failure honestly in audit.
+# Delete every file under $Path individually with retry, then prune empty dirs
+# (core: sweep-tree -- the per-file retry curve twin). Why not a whole-tree
+# delete: it fails FAST on the first locked file and leaves 99% of the tree
+# intact. Verified on this box: 1-Cline.log locked by orphan kilo.exe, 237
+# other log files stayed on disk. Per-file delete means 1 stuck file doesn't
+# block the rest -- we still delete 237/238 and surface the 1 failure honestly
+# in audit.
 function Clear-TreeFilesIndividually {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -787,50 +809,21 @@ function Clear-TreeFilesIndividually {
         return @{ Deleted = 0; Failed = 0; FailedPaths = @() }
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-
-    $files = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)
-    $deleted = 0
-    $failed = 0
-    $failedPaths = @()
-
-    foreach ($file in $files) {
-        $fileDeleted = $false
-        $lastError = $null
-        for ($i = 0; $i -lt 4; $i++) {
-            try {
-                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
-                $fileDeleted = $true
-                break
-            }
-            catch {
-                $lastError = $_.Exception.Message
-                Start-Sleep -Milliseconds (500 * ($i + 1))
-            }
-        }
-        if ($fileDeleted) {
-            $deleted++
-        }
-        else {
-            $failed++
-            $failedPaths += $file.FullName
-            Add-AuditEntry -Audit $Audit -File $file.FullName -Key "binary-store" -Before "present" -After ("delete-failed: " + $lastError) -Ok $false
-        }
+    $sweepReport = Invoke-GhostCore @("sweep-tree", $Path, $BackupRoot, $BackupLabel)
+    if ($null -eq $sweepReport) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After "core-invoke-failed" -Ok $false
+        return @{ Deleted = 0; Failed = 0; FailedPaths = @() }
     }
 
-    # Prune empty dirs bottom-up so the root path can also be removed.
-    $dirs = @(Get-ChildItem -LiteralPath $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue |
-        Sort-Object { $_.FullName.Length } -Descending)
-    foreach ($dir in $dirs) {
-        $null = Remove-Item -LiteralPath $dir.FullName -Force -ErrorAction SilentlyContinue
+    foreach ($failedPath in @($sweepReport.failed_paths)) {
+        Add-AuditEntry -Audit $Audit -File $failedPath -Key "binary-store" -Before "present" -After "delete-failed" -Ok $false
     }
-    $null = Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 
-    $summary = "deleted=$deleted failed=$failed"
-    $ok = ($failed -eq 0)
+    $summary = "deleted=" + $sweepReport.deleted + " failed=" + $sweepReport.failed
+    $ok = ($sweepReport.failed -eq 0)
     Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After $summary -Ok $ok
 
-    return @{ Deleted = $deleted; Failed = $failed; FailedPaths = $failedPaths }
+    return @{ Deleted = $sweepReport.deleted; Failed = $sweepReport.failed; FailedPaths = @($sweepReport.failed_paths) }
 }
 
 # Look at audit entries added since $StartIndex. If any of them pertain to
@@ -985,6 +978,9 @@ function Remove-VerifiedFileNoBackup {
         return $true
     }
 
+    # v0.4's before-audit detail (byte size / directory) is kept: a read-only
+    # item probe, then the core's sweep-file (delete file-or-tree + re-read
+    # verify).
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($item -and $item.PSIsContainer) {
         $before = "directory"
@@ -996,22 +992,19 @@ function Remove-VerifiedFileNoBackup {
         $before = "present"
     }
 
-    try {
-        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $before -After ("delete-failed: " + $_.Exception.Message) -Ok $false
-        Write-Host "    [FAILED] could not delete stale backup: $Path" -ForegroundColor Red
-        return $false
+    $report = Invoke-GhostCore @("sweep-file", $Path)
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $before -After "deleted" -Ok $true
+        return $true
     }
 
-    $ok = -not (Test-Path -LiteralPath $Path)
-    $after = if ($ok) { "deleted" } else { "still-present" }
-    Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $before -After $after -Ok $ok
-    if (-not $ok) {
-        Write-Host "    [FAILED] stale backup still present after delete: $Path" -ForegroundColor Red
+    $failAfter = "delete-failed"
+    if ($null -ne $report -and $report.error) {
+        $failAfter = "delete-failed: " + $report.error
     }
-    return $ok
+    Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $before -After $failAfter -Ok $false
+    Write-Host "    [FAILED] could not delete stale backup: $Path" -ForegroundColor Red
+    return $false
 }
 
 # Write NetworkAddress to the adapter's class key, then disable+enable the
@@ -1343,10 +1336,26 @@ function Test-QoderDeviceFlowAbsence {
     )
 
     $probeOk = $true
-    $pythonCommand = Get-PythonCommandInfo
 
-    $exactKeysPy = "['secret://aicoding.auth.userInfo', 'secret://aicoding.auth.userPlan', 'secret://aicoding.auth.creditUsage', 'aicoding.auth.loginBroadcast', 'gituser']"
-    $likePatternsPy = "['secret://blackbox.%', 'secret://aicoding.auth.%', '%secret.local.machine.variables%']"
+    # The v0.4 read-only survivor probe (qoder_device_probe heredoc) is now
+    # the core's count-keys verb: same read-only reopen, {"survivors": N}
+    # contract, no temp script, no mutation, no table creation.
+    $probeConfig = @{
+        exact_keys    = @(
+            "secret://aicoding.auth.userInfo",
+            "secret://aicoding.auth.userPlan",
+            "secret://aicoding.auth.creditUsage",
+            "aicoding.auth.loginBroadcast",
+            "gituser"
+        )
+        like_patterns = @(
+            "secret://blackbox.%",
+            "secret://aicoding.auth.%",
+            "%secret.local.machine.variables%"
+        )
+        table         = "ItemTable"
+    }
+    $probeConfigB64 = _B64Payload $probeConfig
 
     foreach ($pr in $ProfileRoots) {
         $dbPath = Join-Path $pr "User\globalStorage\state.vscdb"
@@ -1354,61 +1363,17 @@ function Test-QoderDeviceFlowAbsence {
             Add-AuditEntry -Audit $Audit -File $dbPath -Key "device-flow-probe" -Before "missing" -After "skipped" -Ok $true
             continue
         }
-        if (-not $pythonCommand) {
-            Add-AuditEntry -Audit $Audit -File $dbPath -Key "device-flow-probe" -Before $null -After "python-missing" -Ok $false
+
+        $result = Invoke-GhostCore @("count-keys", $dbPath, $probeConfigB64)
+        if ($null -eq $result -or $null -eq $result.survivors) {
+            Add-AuditEntry -Audit $Audit -File $dbPath -Key "device-flow-probe" -Before $null -After "core-invoke-failed" -Ok $false
             $probeOk = $false
             continue
         }
-
-        $tempScriptPath = Join-Path $env:TEMP ("qoder_device_probe_{0}.py" -f ([guid]::NewGuid().ToString("N")))
-        $pythonScript = @"
-import json
-import sqlite3
-import sys
-
-db_path = sys.argv[1]
-exact_keys = $exactKeysPy
-like_patterns = $likePatternsPy
-
-conn = sqlite3.connect("file:" + db_path + "?mode=ro", uri=True)
-try:
-    cursor = conn.cursor()
-    survivors = 0
-    for k in exact_keys:
-        cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key = ?", (k,))
-        survivors += cursor.fetchone()[0]
-    for p in like_patterns:
-        cursor.execute("SELECT COUNT(*) FROM ItemTable WHERE key LIKE ?", (p,))
-        survivors += cursor.fetchone()[0]
-finally:
-    conn.close()
-
-print(json.dumps({"survivors": survivors}))
-"@
-        try {
-            # No-BOM UTF-8 write for the temp .py (mirrors Clear-QoderSecrets).
-            [System.IO.File]::WriteAllText($tempScriptPath, $pythonScript, (New-Object System.Text.UTF8Encoding $false))
-            $commandOutput = & $pythonCommand $tempScriptPath $dbPath
-            if ($LASTEXITCODE -ne 0) {
-                Add-AuditEntry -Audit $Audit -File $dbPath -Key "device-flow-probe" -Before $null -After "command-failed" -Ok $false
-                $probeOk = $false
-                continue
-            }
-            $result = ($commandOutput -join "`n") | ConvertFrom-Json
-            $ok = ($result.survivors -eq 0)
-            Add-AuditEntry -Audit $Audit -File $dbPath -Key "device-flow-probe" -Before "scrubbed" -After ("survivors=" + $result.survivors) -Ok $ok
-            if (-not $ok) {
-                $probeOk = $false
-            }
-        }
-        catch {
-            Add-AuditEntry -Audit $Audit -File $dbPath -Key "device-flow-probe" -Before $null -After "exception" -Ok $false
+        $ok = ($result.survivors -eq 0)
+        Add-AuditEntry -Audit $Audit -File $dbPath -Key "device-flow-probe" -Before "scrubbed" -After ("survivors=" + $result.survivors) -Ok $ok
+        if (-not $ok) {
             $probeOk = $false
-        }
-        finally {
-            if (Test-Path -LiteralPath $tempScriptPath) {
-                Remove-Item -LiteralPath $tempScriptPath -Force -ErrorAction SilentlyContinue
-            }
         }
     }
 
@@ -1465,9 +1430,17 @@ if (-not (Test-Path -LiteralPath $root)) {
     exit 1
 }
 
+# v0.5: the core must be present and a functional Python 3 with it - fail
+# fast BEFORE touching anything (v0.4 needed Python only for the SQLite
+# steps; v0.5 routes every store mutation through the core).
+if ((-not (Get-GhostPythonCli)) -or (-not (Get-PythonCommandInfo))) {
+    Write-Host "[FAILED] GHOST Python core (src\python\ghost_cli.py) missing or no functional Python 3 found - every Qoder reset step needs it (winget install Python.Python.3.12)." -ForegroundColor Red
+    exit 1
+}
+
 New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
 
-Write-Host "=== Qoder Identity Reset (v0.4) ===" -ForegroundColor Cyan
+Write-Host "=== Qoder Identity Reset (v0.5) ===" -ForegroundColor Cyan
 Write-Host "Root: $root" -ForegroundColor Gray
 Write-Host ("Profiles: " + (($profileRoots | ForEach-Object { Get-ProfileLabel -MainRoot $root -ProfileRoot $_ }) -join ", ")) -ForegroundColor Gray
 Write-Host "User-level: $userQoderRoot" -ForegroundColor Gray
@@ -1486,8 +1459,10 @@ $actions = @()
 $ids = New-IdentitySet
 
 # Qoder-specific client device IDs (distinct from VS Code telemetry IDs).
+# (The Preferences salt is no longer PS-generated: the core's salt-rotate
+# generates a fresh 32-lowercase-hex salt PER PROFILE -- v0.4 shared one
+# uppercase GUID-N salt across profiles.)
 $clientDeviceId = ([guid]::NewGuid().ToString()).ToLowerInvariant()
-$deviceIdSalt = ([guid]::NewGuid().ToString("N")).ToUpperInvariant()
 $newCrashReporterId = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 
 # --- [1/31] machineid (per profile) ---
@@ -1517,24 +1492,47 @@ $stepFailed = $false
 foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $path = Join-Path $pr "User\globalStorage\storage.json"
-    if (Set-JsonIdentity -Path $path -Updates $storageUpdates -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $path) -Actions ([ref]$actions)) {
+    # Core: backup + json-patch (Set-JsonIdentity's backup+patch+verify
+    # contract split across the core verbs).
+    $null = Backup-ViaCore -Source $path -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $path) -Actions ([ref]$actions)
+    $storageReport = Invoke-GhostCore @("json-patch", $path, (_B64Payload $storageUpdates))
+    if ($null -ne $storageReport -and $storageReport.ok) {
+        foreach ($key in $storageUpdates.Keys) {
+            Add-AuditEntry -Audit ([ref]$audit) -File $path -Key $key -Before $storageReport.before.$key -After $storageReport.after.$key -Ok $true
+        }
         Write-Host "    [$label] [OK] storage.json verified" -ForegroundColor Green
     } else {
+        foreach ($key in $storageUpdates.Keys) {
+            Add-AuditEntry -Audit ([ref]$audit) -File $path -Key $key -Before $null -After $storageUpdates[$key] -Ok $false
+        }
         Write-Host "    [$label] [FAILED] storage.json verification failed" -ForegroundColor Red
         $stepFailed = $true
     }
 }
 if ($stepFailed) { $failCount++ } else { $passCount++ }
 
-# --- [3/31] state.vscdb serviceMachineId (per profile) ---
+# --- [3/31] state.vscdb serviceMachineId (per profile; core: sqlite-update) ---
 Write-Host "`n[3/31] Updating global state.vscdb serviceMachineId (per profile)..." -ForegroundColor Cyan
 $stepFailed = $false
 foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $path = Join-Path $pr "User\globalStorage\state.vscdb"
-    if (Set-SqliteKeys -Path $path -Updates @{ "storage.serviceMachineId" = $ids.devDeviceId } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $path) -Actions ([ref]$actions)) {
+    if (-not (Test-Path -LiteralPath $path)) {
+        # sqlite-update would CREATE a missing DB (sqlite3.connect + CREATE
+        # TABLE IF NOT EXISTS); fail loudly instead of silently minting a
+        # fresh 1-row DB on a broken profile (reset_cursor v0.3 guard).
+        Add-AuditEntry -Audit ([ref]$audit) -File $path -Key "storage.serviceMachineId" -Before "missing" -After "not-found" -Ok $false
+        Write-Host "    [$label] [FAILED] state.vscdb not found: $path" -ForegroundColor Red
+        $stepFailed = $true
+        continue
+    }
+    $null = Backup-ViaCore -Source $path -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $path) -Actions ([ref]$actions)
+    $svReport = Invoke-GhostCore @("sqlite-update", $path, (_B64Payload @{ "storage.serviceMachineId" = $ids.devDeviceId }))
+    if ($null -ne $svReport -and $null -ne $svReport.after -and ($svReport.after."storage.serviceMachineId" -eq $ids.devDeviceId)) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $path -Key "storage.serviceMachineId" -Before $svReport.before."storage.serviceMachineId" -After $svReport.after."storage.serviceMachineId" -Ok $true
         Write-Host "    [$label] [OK] state.vscdb serviceMachineId verified" -ForegroundColor Green
     } else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $path -Key "storage.serviceMachineId" -Before $null -After $ids.devDeviceId -Ok $false
         Write-Host "    [$label] [FAILED] state.vscdb serviceMachineId failed" -ForegroundColor Red
         $stepFailed = $true
     }
@@ -1577,7 +1575,7 @@ $localDbShmPath = Join-Path $cacheDir "db\local.db-shm"
 $localDbWalPath = Join-Path $cacheDir "db\local.db-wal"
 Write-Host "`n[5/31] Deleting SharedClientCache\cache auth files after backup (machine_token, status, quota, local.db)..." -ForegroundColor Cyan
 $step5AuditStart = $audit.Count
-$binaryActions = Clear-BinaryIdentityStore -Paths @($machineTokenPath, $statusPath, $quotaPath, $localDbPath, $localDbShmPath, $localDbWalPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
+$binaryActions = Invoke-StoreDelete -Paths @($machineTokenPath, $statusPath, $quotaPath, $localDbPath, $localDbShmPath, $localDbWalPath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 $actions += @($binaryActions)
 $step5Status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step5AuditStart -Path (Join-Path $root "SharedClientCache")
 if ($step5Status.Success) {
@@ -1591,7 +1589,7 @@ if ($step5Status.Success) {
 # --- [6/31] Whole SharedClientCache tree (MAIN ONLY) ---
 Write-Host "`n[6/31] Deleting entire SharedClientCache tree (main only)..." -ForegroundColor Cyan
 $step6AuditStart = $audit.Count
-$binaryActions = Clear-BinaryIdentityStore -Paths @((Join-Path $root "SharedClientCache")) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
+$binaryActions = Invoke-StoreDelete -Paths @((Join-Path $root "SharedClientCache")) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $root
 $actions += @($binaryActions)
 $step6Status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step6AuditStart -Path (Join-Path $root "SharedClientCache")
 if ($step6Status.Success) {
@@ -1609,7 +1607,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $path = Join-Path $pr "Local State"
     $step7AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths @($path) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths @($path) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     if ((Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step7AuditStart -Path $path).Success) {
         Write-Host "    [$label] [OK] Local State" -ForegroundColor Green
@@ -1631,7 +1629,7 @@ foreach ($pr in $profileRoots) {
         (Join-Path $pr "Network\Trust Tokens")
     )
     $step8AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     $anyFail = $false
     foreach ($p in $paths) {
@@ -1653,7 +1651,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "DIPS"), (Join-Path $pr "DIPS-wal"))
     $step9AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     $anyFail = $false
     foreach ($p in $paths) {
@@ -1675,7 +1673,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "SharedStorage"), (Join-Path $pr "SharedStorage-wal"))
     $step10AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     $anyFail = $false
     foreach ($p in $paths) {
@@ -1697,7 +1695,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $path = Join-Path $pr "WebStorage"
     $step11AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths @($path) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths @($path) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     if ((Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step11AuditStart -Path $path).Success) {
         Write-Host "    [$label] [OK] WebStorage" -ForegroundColor Green
@@ -1715,7 +1713,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "Session Storage"), (Join-Path $pr "Local Storage"))
     $step12AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     $anyFail = $false
     foreach ($p in $paths) {
@@ -1737,7 +1735,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "Cache"), (Join-Path $pr "Code Cache"), (Join-Path $pr "GPUCache"))
     $step13AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     $anyFail = $false
     foreach ($p in $paths) {
@@ -1759,7 +1757,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "Service Worker"), (Join-Path $pr "blob_storage"))
     $step14AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     $anyFail = $false
     foreach ($p in $paths) {
@@ -1781,7 +1779,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "Crashpad"), (Join-Path $pr "CrashFeedback"))
     $step15AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     $anyFail = $false
     foreach ($p in $paths) {
@@ -1802,7 +1800,7 @@ $stepFailed = $false
 foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $path = Join-Path $pr "Preferences"
-    if (Update-QoderPreferences -Path $path -NewDeviceIdSalt $deviceIdSalt -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $path) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+    if (Update-QoderPreferences -Path $path -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $path) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
         Write-Host "    [$label] [OK] Preferences device_id_salt verified" -ForegroundColor Green
     } else {
         Write-Host "    [$label] [FAILED] Preferences device_id_salt verification failed" -ForegroundColor Red
@@ -1854,7 +1852,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $path = Join-Path $pr "logs"
     $step18AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths @($path) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths @($path) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     if (-not (Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step18AuditStart -Path $path).Success) {
         Write-Host "    [$label] [PARTIAL] logs" -ForegroundColor Yellow
@@ -2089,7 +2087,7 @@ $qoderCacheFiles = @(
     (Join-Path $userQoderRoot ".cache\dns-cache.json"),
     (Join-Path $userQoderRoot ".cache\endpoint-cache.json")
 )
-$binaryActions = Clear-BinaryIdentityStore -Paths $qoderCacheFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
+$binaryActions = Invoke-StoreDelete -Paths $qoderCacheFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
 $actions += @($binaryActions)
 foreach ($p in $qoderCacheFiles) {
     if (-not (Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step28AuditStart -Path $p).Success) { $step28Failed = $true; break }
@@ -2107,7 +2105,7 @@ foreach ($pr in $profileRoots) {
     $label = Get-ProfileLabel -MainRoot $root -ProfileRoot $pr
     $paths = @((Join-Path $pr "IndexedDB"), (Join-Path $pr "Partitions"), (Join-Path $pr "Storage"))
     $step29AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+    $binaryActions = Invoke-StoreDelete -Paths $paths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
     $actions += @($binaryActions)
     $anyFail = $false
     foreach ($p in $paths) {
@@ -2133,7 +2131,7 @@ $step30Failed = $false
 $qoderRunTrees = @((Join-Path $userQoderRoot "tmp\telemetry"), (Join-Path $userQoderRoot "logs"))
 foreach ($tree in $qoderRunTrees) {
     $step30AuditStart = $audit.Count
-    $binaryActions = Clear-BinaryIdentityStore -Paths @($tree) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
+    $binaryActions = Invoke-StoreDelete -Paths @($tree) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
     $actions += @($binaryActions)
     if ((Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step30AuditStart -Path $tree).Success) {
         Write-Host "    [OK] $tree" -ForegroundColor Green
@@ -2227,7 +2225,7 @@ if (-not $SkipHostname) {
     Write-Host ">>> (the registry is already updated; \$env:COMPUTERNAME in any current shell is stale until reboot) <<<" -ForegroundColor Magenta
 }
 
-$qoderDoneMarker = "$env:TEMP\qoder_v0.4_done.txt"
+$qoderDoneMarker = "$env:TEMP\qoder_v0.5_done.txt"
 $summaryLines = @(
     "PASS=$passCount",
     "FAIL=$failCount",
