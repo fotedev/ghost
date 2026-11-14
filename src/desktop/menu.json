@@ -123,7 +123,8 @@
           "One-time per clone home: it routes light workers and the T3 bridge to the Start Plan instead of the free model."
         ] },
         { "gid": 72, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_zcode_second_shortcuts.ps1", "args": ["-Remove"], "notes": [] },
-        { "gid": 83, "label": "Rebuild clone Task Manager icons", "tail": "- colored rows in Task Manager - run after app updates", "mode": "inline", "script": "tools/patch_zcode_exe_identity.ps1", "args": ["-Target", "All"], "notes": [] }
+        { "gid": 83, "label": "Rebuild clone Task Manager icons", "tail": "- colored rows in Task Manager - run after app updates", "mode": "inline", "script": "tools/patch_zcode_exe_identity.ps1", "args": ["-Target", "All"], "notes": [] },
+        { "gid": 108, "label": "Clone status", "tail": "- all 6 - running, profiles, device-id, pressure", "mode": "inline", "script": "tools/status_zcode_instances.ps1", "args": [], "notes": [] }
       ]
     },
     {

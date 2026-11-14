@@ -128,16 +128,16 @@ if ($out -match 'Unknown task')            { $failures += 'C: Unknown task on to
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'C: ZCode submenu not shown' }
 
 # D) invalid main-menu id -> exactly one legit Unknown task "99"
-$out = Invoke-Scenario 'D_invalid_main' @('108', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "108"')).Count
+$out = Invoke-Scenario 'D_invalid_main' @('109', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "109"')).Count
 if ($hits -ne 1)                           { $failures += "D: expected 1 legit Unknown task, got $hits" }
 
-# E) main sub-path "2 108" -> chain reaches ZCodeOne, exactly one legit
+# E) main sub-path "2 109" -> chain reaches ZCodeOne, exactly one legit
 #    Unknown task, and the PENDING_CHAIN literal never appears
-#    (108 = the next unassigned gid; 105-107 became REAL when the suite
-#    exe-identity rebuild rows landed 2026-11-14)
-$out = Invoke-Scenario 'E_subpath_chain' @('2 108', '0', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "108"')).Count
+#    (109 = the next unassigned gid; 108 became REAL when the ZCode clone
+#    status row landed 2026-11-14)
+$out = Invoke-Scenario 'E_subpath_chain' @('2 109', '0', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "109"')).Count
 if ($hits -ne 1)                           { $failures += "E: expected 1 Unknown task from chain, got $hits" }
 if ($out -match '%PENDING_CHAIN%')         { $failures += 'E: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'E: ZCode submenu not reached via sub-path' }
@@ -147,6 +147,7 @@ if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'E: ZCode submenu not 
 # Primary [9] was added)
 $out = Invoke-Scenario 'F_new_entry_render' @('2', '0', '0')
 if ($out -notmatch '\[27\].*Freeze diagnostic') { $failures += 'F: ZCode submenu [27] Freeze diagnostic not rendered' }
+if ($out -notmatch '\[32\].*Clone status')      { $failures += 'F: ZCode submenu [32] Clone status not rendered' }
 
 # G) invalid ZCode submenu id -> exactly one legit Unknown task "42"
 $out = Invoke-Scenario 'G_invalid_zcode' @('2', '42', '0', '0')

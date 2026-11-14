@@ -984,9 +984,13 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   sections — ZCode: Launch Clones [1]-[9] (Blue/Yellow/Green/Red/Orange,
   ALL, light worker, shortcuts, Primary) / Reset Clones [10]-[17] (Blue..Orange,
   Primary, Both, ALL SIX) / Sync + Chat Refresh [18]-[24] / Watchers +
-  Diagnostics [25]-[27] / Maintenance [28]-[31] (patch, login helper,
+  Diagnostics [25]-[27] / Maintenance [28]-[32] (patch, login helper,
   shortcuts remove, [31] gid 83 = the clone Task-Manager exe-identity
-  rebuild — appended 2026-11-11 in display order, no renumber); AutoClaw2:
+  rebuild — appended 2026-11-11 in display order, no renumber, [32] gid 108
+  = the clone status row — 2026-11-14, ZCode's parity for the newer
+  suites' -Status: running state per instance (copy-family + marker
+  classified), profile dirs, v2\telemetry-state.json deviceMid prefix,
+  per-instance commit pressure; tools/status_zcode_instances.ps1); AutoClaw2:
   Launch Clones [1]-[7]
   gid 73, Chat inventory gid 75, Import chats gid 76, [11] MCP sync watcher
   gid 74 — reserved 2026-11-04, LIVE 2026-11-14: watch_autoclaw2_mcp_sync.ps1

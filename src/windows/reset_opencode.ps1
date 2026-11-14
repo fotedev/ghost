@@ -296,11 +296,15 @@ function Get-OpenCodeTargetMains {
     }
 
     function Test-SubtreeMarkers($Proc, [string[]]$Markers) {
-        $stack = @($Proc)
+        # Queue semantics (Dequeue REMOVES): an array-slice "pop" does NOT
+        # shrink a 1-element array in PowerShell (@('A')[1..0] == @('A')), so
+        # a slice-based walk spins forever on leaf nodes (latent hang, caught
+        # 2026-11-14).
+        $queue = New-Object System.Collections.Queue
+        $queue.Enqueue($Proc)
         $seen = @{}
-        while ($stack.Count -gt 0) {
-            $cur = $stack[0]
-            $stack = $stack[1..($stack.Count - 1)]
+        while ($queue.Count -gt 0) {
+            $cur = $queue.Dequeue()
             if ($null -eq $cur -or $seen.ContainsKey([int]$cur.ProcessId)) { continue }
             $seen[[int]$cur.ProcessId] = $true
             $cmd = [string]$cur.CommandLine
@@ -308,7 +312,9 @@ function Get-OpenCodeTargetMains {
                 if ($cmd -like $m) { return $true }
             }
             $kids = $byParent[[int]$cur.ProcessId]
-            if ($kids) { $stack = @($kids) + $stack }
+            if ($kids) {
+                foreach ($k in $kids) { $queue.Enqueue($k) }
+            }
         }
         return $false
     }
