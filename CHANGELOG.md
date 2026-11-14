@@ -8,6 +8,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Linux resets for the remaining agents** (2026-11-14): new
+  `reset_qoder.sh`, `reset_qoderwork.sh`, `reset_zcode.sh` (default
+  profile; the shared CLI session store deliberately untouched — matches
+  the Windows reset) and `reset_minimax_opencode.sh` (the OpenCode CLI
+  XDG stores deliberately untouched — they carry the CLI login). All four
+  are DERIVED-PATH scope: the Linux layouts come from `ghost.platform`
+  (provenance-flagged unverified, printed loudly at run start) and the
+  scripts skip loudly when a store is absent — nothing is guessed. Every
+  mutation goes through the shared Python core with verify-after, audit
+  and restore emission. `ghost.sh` upgraded to grouped sections (IDE
+  Resets 1-7 / System 8-9). FAQ's honest Linux answer updated (the
+  "Windows-only" phrasing was stale).
 - **Linux resets modernized to the Windows standard** (2026-11-14):
   `reset_cursor.sh` v0.2 + `reset_trae.sh` v0.2 route every store mutation
   through the shared Python core (`ghost_cli.py json-patch` /

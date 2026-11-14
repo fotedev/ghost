@@ -317,3 +317,71 @@ verify_file_value() {
         return 1
     fi
 }
+
+# ── Electron-store reset helper (2026-11-14) ────────────────────────────
+# Shared by the derived-path Linux resets (trae/qoder/qoderwork/zcode/
+# minimax): telemetry keys in <config>/User/globalStorage/storage.json via
+# the core json-patch verb + ItemTable upserts in state.vscdb via
+# sqlite-update + verify-after. Requires GHOST_CLI_PATH resolved and
+# AUDIT_FILE/BACKUP_ROOT/RESTORE_ENTRIES initialized; bumps PASS_COUNT /
+# FAIL_COUNT via the caller's counters passed by name.
+reset_electron_stores() {
+    # reset_electron_stores <config_root> <dev_device_id> <machine_id> \
+    #     <mac_machine_id> <sqm_id> <pass_var> <fail_var>
+    local config_root="$1" dev_id="$2" mach_id="$3" mac_id="$4" sqm_id="$5"
+    local pass_var="$6" fail_var="$7"
+    local storage_json="$config_root/User/globalStorage/storage.json"
+    local sqlite_db="$config_root/User/globalStorage/state.vscdb"
+    local updates="{\"telemetry.devDeviceId\":\"$dev_id\",\"telemetry.machineId\":\"$mach_id\",\"telemetry.macMachineId\":\"$mac_id\",\"telemetry.sqmId\":\"$sqm_id\",\"storage.serviceMachineId\":\"$dev_id\"}"
+    local updates_b64
+    updates_b64=$(printf '%s' "$updates" | b64_json)
+
+    if [[ ! -f "$storage_json" && ! -f "$sqlite_db" ]]; then
+        warn "no storage.json / state.vscdb under $config_root - skipped (first launch creates them)"
+        audit_line "$AUDIT_FILE" "$config_root" "missing" "skipped" 1
+        return 0
+    fi
+
+    if [[ -f "$storage_json" ]]; then
+        local sb
+        sb=$(core_backup "$storage_json" "$BACKUP_ROOT" "storage_json")
+        if python3 "$GHOST_CLI_PATH" json-patch "$storage_json" "$updates_b64" \
+           && verify_json_keys "$storage_json" \
+                "telemetry.devDeviceId=$dev_id" "telemetry.machineId=$mach_id" \
+                "telemetry.macMachineId=$mac_id" "telemetry.sqmId=$sqm_id" \
+                "storage.serviceMachineId=$dev_id"; then
+            ok "storage.json updated + verified."
+            audit_line "$AUDIT_FILE" "$storage_json" "backup=$(basename "${sb:-none}")" "$dev_id" 1
+        else
+            err "storage.json update/verify FAILED."
+            audit_line "$AUDIT_FILE" "$storage_json" "-" "failed" 0
+            return 1
+        fi
+    fi
+
+    if [[ -f "$sqlite_db" ]]; then
+        local db_b
+        db_b=$(core_backup "$sqlite_db" "$BACKUP_ROOT" "state_vscdb")
+        if python3 "$GHOST_CLI_PATH" sqlite-update "$sqlite_db" "$updates_b64" \
+           && python3 - "$sqlite_db" "$dev_id" <<'PY' >/dev/null 2>&1
+import sqlite3, sys
+db_path, dev_id = sys.argv[1:3]
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+cur.execute("SELECT key, value FROM ItemTable WHERE key LIKE 'telemetry.%' OR key = 'storage.serviceMachineId'")
+rows = dict(cur.fetchall())
+conn.close()
+assert rows.get("telemetry.devDeviceId") == dev_id
+assert rows.get("storage.serviceMachineId") == dev_id
+PY
+        then
+            ok "state.vscdb updated + verified."
+            audit_line "$AUDIT_FILE" "$sqlite_db" "backup=$(basename "${db_b:-none}")" "$dev_id" 1
+        else
+            err "state.vscdb update/verify FAILED."
+            audit_line "$AUDIT_FILE" "$sqlite_db" "-" "failed" 0
+            return 1
+        fi
+    fi
+    return 0
+}

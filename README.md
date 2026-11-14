@@ -35,14 +35,14 @@ touches, and emits an audit log plus a self-contained restore script.
 | Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` |
 | Reset Windsurf\Devin | `reset_devin.ps1` | `reset_devin.sh` |
 | Reset Trae | `reset_trae.ps1` | `reset_trae.sh` (v0.2 modernized; deeper Windows stores not covered yet) |
-| Reset Qoder | `reset_qoder.ps1` | — |
-| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | — |
+| Reset Qoder | `reset_qoder.ps1` | `reset_qoder.sh` (v0.1 derived paths - provenance flagged) |
+| Reset QoderWork | `reset_qoderwork.ps1` | `reset_qoderwork.sh` (v0.1 derived paths) |
+| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | `reset_zcode.sh` (v0.1 default profile; shared CLI db untouched - matches Windows) |
+| Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | `reset_minimax_opencode.sh` (v0.1 derived paths; CLI XDG auth untouched) |
 | ZCode clones (Primary + 5 branded clones) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | — |
 | ZCode Primary (stock profile, never elevated) | `launch_zcode_primary.ps1` (explorer spawn, verify-after) | — |
 | ZCode light headless worker (no desktop window) | `launch_zcode_cli_light.ps1 -Instance Second\|...\|Sixth` (`-Prompt` / `-Server`) | — |
 | OpenCode light headless worker (CLI only, clone XDG state) | `launch_opencode_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` / `-Server` / `-Login` / `-StopService`) | — |
-| Reset QoderWork | `reset_qoderwork.ps1` | — |
-| Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | — |
 | Reset AutoClaw2 (Primary + clones, chats/work kept) | `reset_autoclaw2.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
 | Reset Cline (Primary + clones, chats/tasks kept) | `reset_cline.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
 | Reset OpenCode desktop (Primary + clones, chats/repos kept) | `reset_opencode.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
