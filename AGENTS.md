@@ -266,9 +266,38 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     Name='ZCode.exe' makes copy-running clones invisible to
                                    #     the RAM guard, stamping, resets, sync guards, chat
                                    #     refresh and the watchdogs (all 8 sites widened 2026-11-11,
-                                   #     test-tripwired); also fixed the pre-existing
+                                   #     test-tripwired); 2026-11-14 GENERALIZED: the pure core +
+                                   #     the whole orchestration (freshness gate, running gate, copy,
+                                   #     Win32 update transaction, re-read verify, sidecar marker,
+                                   #     JSONL audit) moved VERBATIM into the generic
+                                   #     tools/exe_identity_lib.ps1 (Invoke-GhostExeIdentityPatch;
+                                   #     zcode_exe_identity_lib.ps1 is now a shim = dot-source +
+                                   #     the ZCode alias map, so tests/zcode_exe_identity.Tests.ps1
+                                   #     exercises the generic core transitively); the wrapper is a
+                                   #     thin forwarder; also fixed the pre-existing
                                    #     [^\s"]*-spaced-path gap in the unquoted bare-exe branch
                                    #     ([^"]* now — machine-wide installs were misclassified);
+                                   #   patch_autoclaw2_exe_identity.ps1 /
+                                   #     patch_cline_exe_identity.ps1 /
+                                   #     patch_opencode_exe_identity.ps1 — the OTHER THREE suites'
+                                   #     Task-Manager exe-identity rebuilders (2026-11-14, on the
+                                   #     generic core; AutoClaw2 [15] / gid 105, Cline [10] / gid
+                                   #     106, OpenCode [13] / gid 107): builds
+                                   #     <App>-<Color>.exe copies in each install dir
+                                   #     (AutoClaw2.exe / cline-app.exe / OpenCode.exe sources;
+                                   #     OpenCode ladder = @opencode-aidesktop then opencode),
+                                   #     icon groups from the suite branding dirs + FileDescription
+                                   #     "<App> <Color>", same marker/verify/audit contract, per-
+                                   #     suite audit dirs ghost-<appslug>-exe-identity.
+                                   #     REPO-ONLY + OPT-IN by explicit user decision 2026-11-14
+                                   #     ("make them in the repo but don't setup them - i'm using
+                                   #     zcode only"): NO launcher wiring (no step-2f equivalent),
+                                   #     the menu row is the only entry point, and nothing was
+                                   #     built for these suites in that session (note: AutoClaw2 +
+                                   #     OpenCode copies ALREADY existed on the dev host from an
+                                   #     earlier same-day session, markers fresh - left untouched);
+                                   #     Pester: tests/exe_identity_suites.Tests.ps1 (maps +
+                                   #     branding ICOs + no-cross-suite-drift tripwires);
                                    #   sync_autoclaw2_mcp.ps1 — AutoClaw2 MCP
                                    #     orchestrator (AutoClaw2 [8] / gid 73;
                                    #     launcher pre-launch step [2b] is the
@@ -957,28 +986,33 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   Primary, Both, ALL SIX) / Sync + Chat Refresh [18]-[24] / Watchers +
   Diagnostics [25]-[27] / Maintenance [28]-[31] (patch, login helper,
   shortcuts remove, [31] gid 83 = the clone Task-Manager exe-identity
-  rebuild — appended 2026-11-11 in display order, no renumber); AutoClaw2: Launch Clones [1]-[7]
-  (Blue..Orange, ALL, shortcuts) / Sync + Chat Import [8]-[11] (Import MCPs
+  rebuild — appended 2026-11-11 in display order, no renumber); AutoClaw2:
+  Launch Clones [1]-[7]
   gid 73, Chat inventory gid 75, Import chats gid 76, [11] MCP sync watcher
   gid 74 — reserved 2026-11-04, LIVE 2026-11-14: watch_autoclaw2_mcp_sync.ps1
   stat-guards tools/autoclaw2-mcp.master.json and re-applies it via the sync
   child, console-less spawn + 600s cap, mutex + startup-scan single instance,
   no -ApplyLive by design — closed profiles converge at once, running ones on
   their next launch; locals 12+ shifted +1 for the row, gids unchanged) /
-  Maintenance [12]-[14] (status, remove-shortcuts, [14] gid 78 = the window
-  identity patch — colored taskbar buttons, 2026-11-06) / Identity Resets
-  [15]-[21] (gids 84-90, appended 2026-11-14 — reset_autoclaw2.ps1
-  c1..c5/Primary, [21] gid 90 = ALL behind :ConfirmAc2Reset; :RunAc2Reset = the
+  Maintenance [12]-[15] (status, remove-shortcuts, [14] gid 78 = the window
+  identity patch — colored taskbar buttons, 2026-11-06, [15] gid 105 =
+  patch_autoclaw2_exe_identity — the opt-in Task-Manager exe-identity
+  rebuild, 2026-11-14) / Identity Resets
+  [16]-[22] (gids 84-90, appended 2026-11-14 — reset_autoclaw2.ps1
+  c1..c5/Primary, [22] gid 90 = ALL behind :ConfirmAc2Reset; :RunAc2Reset = the
   :RunZcodeReset-shaped wrapper with the AutoClaw2 relaunch note); Cline: Launch Clones [1]-[7]
-  (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9] / Identity Resets
-  [10]-[16] (gids 91-97, appended 2026-11-14 — reset_cline.ps1
-  c1..c5/Primary, [16] gid 97 = ALL behind :ConfirmClineReset;
+  (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[10] ([10] gid 106 =
+  patch_cline_exe_identity — the opt-in Task-Manager exe-identity rebuild,
+  2026-11-14) / Identity Resets
+  [11]-[17] (gids 91-97, appended 2026-11-14 — reset_cline.ps1
+  c1..c5/Primary, [17] gid 97 = ALL behind :ConfirmClineReset;
   :RunClineReset wrapper); OpenCode: Launch Clones
   [1]-[9] (Blue..Orange, ALL, [7] light worker gid 79, [8] login clone
   account gid 80 — 2026-11-07, ZCode LIGHT pattern; shortcuts shifted to
-  [9]) / Maintenance [10]-[12] (patch, status, remove — 2026-10-31: shortcuts
+  [9]) / Maintenance [10]-[13] (patch, status, remove — 2026-10-31: shortcuts
   moved into Launch and the patch row into Maintenance, locals [7]/[8]
-  swapped, gids unchanged) / Identity Resets [13]-[19] (gids 98-104,
+  swapped, gids unchanged; [13] gid 107 = patch_opencode_exe_identity — the
+  opt-in Task-Manager exe-identity rebuild, 2026-11-14) / Identity Resets [14]-[20] (gids 98-104,
   appended 2026-11-14 — reset_opencode.ps1 c1..c5/Primary, [19] gid 104 =
   ALL behind :ConfirmOpenCodeReset; :RunOpenCodeReset wrapper). **Gids NEVER
   renumber** — specs, wiring history and repo-integrity cite them; a

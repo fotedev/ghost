@@ -88,6 +88,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   check runs first. Rationale: the 2026-09-25 renderer-OOM commit-limit
   freeze is a Windows ceiling, not a ZCode quirk; every suite can now hit
   it. Unit-tested via mocks (`tests/ghost_launch_guard.Tests.ps1`, 11).
+- **Task-Manager exe identity generalized to all four suites**
+  (2026-11-14, repo-only + opt-in): the pure core and the whole
+  orchestration (freshness gate, running gate, copy, Win32 update
+  transaction, re-read verify, sidecar marker, JSONL audit) moved
+  verbatim from the ZCode-only files into the generic
+  `tools/exe_identity_lib.ps1` (`Invoke-GhostExeIdentityPatch`;
+  `zcode_exe_identity_lib.ps1` is now a shim = dot-source + the ZCode
+  alias map, so the existing 21 ZCode tests exercise the generic core
+  transitively). New thin patchers:
+  `tools/patch_autoclaw2_exe_identity.ps1` (AutoClaw2 [15] / gid 105),
+  `patch_cline_exe_identity.ps1` (Cline [10] / gid 106) and
+  `patch_opencode_exe_identity.ps1` (OpenCode [13] / gid 107) build
+  `<App>-<Color>.exe` copies with patched icon groups + FileDescription.
+  **Deliberately NOT wired into any launcher and NOT executed against the
+  dev host during this work** (user decision: "make them in the repo but
+  don't setup them - i'm using zcode only") — the menu rows are the only
+  entry point. Read-only `-DryRun` acceptance passed for all three
+  (noting: AutoClaw2 + OpenCode copies already existed on the host from an
+  earlier same-day session, markers fresh — left untouched; Cline has
+  none). Suite maps + branding ICOs + no-cross-suite-drift tripwires
+  unit-tested (`tests/exe_identity_suites.Tests.ps1`, 11).
 - **AutoClaw2 chat sync: `-Account` source hint + source-account
   provenance** (2026-11-11): `tools/sync_autoclaw2_chats.ps1 -Account
   <sha-prefix>` pins the multi-account Primary's account dir for the

@@ -358,7 +358,7 @@ hub locks, logs, cache and the web-login Chromium profile
 teams/connectors), `data\sessions\` and the settings files are PRESERVED.
 HKLM MachineGuid is deliberately NOT touched (system-level; shared with
 every IDE). Backups + audit + restore script per target. Menu
-equivalents: Blue..Orange = [10]-[14]; Primary = [15]; ALL = [16]
+equivalents: Blue..Orange = [11]-[15]; Primary = [16]; ALL = [17]
 (confirmation gate).
 
 ## OpenCode multi-instance (5 clones + Primary; per-user, no admin needed)
@@ -414,7 +414,7 @@ Deletes `auth.json` + `mcp-auth.json` (CLI OAuth), `gh\device-id`,
 network session stores, caches, Crashpad/logs/compile-cache. Preserves
 `opencode.db` (sessions), repos, snapshots, drafts, the CLI cache and the
 MCP config. Backups + audit + restore script per target. Menu
-equivalents: Blue..Orange = [13]-[17]; Primary = [18]; ALL = [19]
+equivalents: Blue..Orange = [14]-[18]; Primary = [19]; ALL = [20]
 (confirmation gate).
 
 The light worker (`src/windows/launch_opencode_cli_light.ps1`, OpenCode
@@ -453,8 +453,8 @@ Per profile: rotates `device\device-id.json`, clears the signed-out marker
 skips it), telemetry (`apmplus`, `log_sdk_v2.db`, `diagnostics`, `logs`) and
 caches/webview partitions. Chats, work runs, projects, MCP connections and
 Telegram routing are PRESERVED. Backups to `ID_Backups\<ts>\` + audit JSON +
-a restore script per target. Menu equivalents: Blue..Orange = [14]-[18];
-Primary = [19]; ALL = [20] (confirmation gate).
+a restore script per target. Menu equivalents: Blue..Orange = [16]-[20];
+Primary = [21]; ALL = [22] (confirmation gate).
 
 ### AutoClaw2 MCP + chat sync (AutoClaw2 [8]-[11])
 

@@ -169,6 +169,7 @@
         { "gid": 78, "label": "Apply clone identity patch", "tail": "- colored taskbar buttons - waits for AutoClaw2 to close", "mode": "inline-note", "waitForClose": true, "script": "tools/patch_autoclaw2_identity.ps1", "args": [], "notes": [
           "Patch finished - relaunch the clones via their AutoClaw2 shortcuts for colored taskbar buttons."
         ] },
+        { "gid": 105, "label": "Rebuild clone Task Manager icons", "tail": "- opt-in - close AutoClaw2 first", "mode": "inline", "script": "tools/patch_autoclaw2_exe_identity.ps1", "args": ["-Target", "All"], "notes": [] },
         { "gid": 84, "label": "Reset Blue clone", "tail": "- chats + work kept", "mode": "zcode-reset", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "c1"], "notes": [
           "NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile."
         ] },
@@ -225,6 +226,7 @@
           { "script": "src/windows/launch_cline_clone.ps1", "args": ["-Instance", "c5", "-Status"] }
         ], "notes": [] },
         { "gid": 52, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_cline_clone_shortcuts.ps1", "args": ["-Remove"], "notes": [] },
+        { "gid": 106, "label": "Rebuild clone Task Manager icons", "tail": "- opt-in - close Cline first", "mode": "inline", "script": "tools/patch_cline_exe_identity.ps1", "args": ["-Target", "All"], "notes": [] },
         { "gid": 91, "label": "Reset Blue clone", "tail": "- chats + tasks kept", "mode": "zcode-reset", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "c1"], "notes": [
           "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
         ] },
@@ -292,6 +294,7 @@
           { "script": "src/windows/launch_opencode_clone.ps1", "args": ["-Instance", "c5", "-Status"] }
         ], "notes": [] },
         { "gid": 62, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_opencode_clone_shortcuts.ps1", "args": ["-Remove"], "notes": [] },
+        { "gid": 107, "label": "Rebuild clone Task Manager icons", "tail": "- opt-in - close OpenCode first", "mode": "inline", "script": "tools/patch_opencode_exe_identity.ps1", "args": ["-Target", "All"], "notes": [] },
         { "gid": 98, "label": "Reset Blue clone", "tail": "- chats + repos kept", "mode": "zcode-reset", "script": "src/windows/reset_opencode.ps1", "args": ["-Target", "c1"], "notes": [
           "NOTE: relaunch via the OpenCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare OpenCode.exe opens the PRIMARY profile."
         ] },

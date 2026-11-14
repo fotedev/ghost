@@ -221,15 +221,16 @@ call :Div "Maintenance"
 call :Opt 12 "Clone status" "- all 5 - locks, device-id, sign-in state"
 call :Opt 13 "Remove clone shortcuts" "- Desktop + Start menu"
 call :Opt 14 "Apply clone identity patch" "- colored taskbar buttons - waits for AutoClaw2 to close"
+call :Opt 15 "Rebuild clone Task Manager icons" "- opt-in - close AutoClaw2 first"
 echo.
 call :Div "Identity Resets"
-call :Opt 15 "Reset Blue clone" "- chats + work kept"
-call :Opt 16 "Reset Yellow clone" "- chats + work kept"
-call :Opt 17 "Reset Green clone" "- chats + work kept"
-call :Opt 18 "Reset Red clone" "- chats + work kept"
-call :Opt 19 "Reset Orange clone" "- chats + work kept"
-call :Opt 20 "Reset Primary" "- default profile - chats + work kept"
-call :Opt 21 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
+call :Opt 16 "Reset Blue clone" "- chats + work kept"
+call :Opt 17 "Reset Yellow clone" "- chats + work kept"
+call :Opt 18 "Reset Green clone" "- chats + work kept"
+call :Opt 19 "Reset Red clone" "- chats + work kept"
+call :Opt 20 "Reset Orange clone" "- chats + work kept"
+call :Opt 21 "Reset Primary" "- default profile - chats + work kept"
+call :Opt 22 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -265,15 +266,16 @@ echo.
 call :Div "Maintenance"
 call :Opt 8 "Clone status" "- all 5 - locks, ports, sign-in state"
 call :Opt 9 "Remove clone shortcuts" "- Desktop + Start menu"
+call :Opt 10 "Rebuild clone Task Manager icons" "- opt-in - close Cline first"
 echo.
 call :Div "Identity Resets"
-call :Opt 10 "Reset Blue clone" "- chats + tasks kept"
-call :Opt 11 "Reset Yellow clone" "- chats + tasks kept"
-call :Opt 12 "Reset Green clone" "- chats + tasks kept"
-call :Opt 13 "Reset Red clone" "- chats + tasks kept"
-call :Opt 14 "Reset Orange clone" "- chats + tasks kept"
-call :Opt 15 "Reset Primary" "- stock profile - chats + tasks kept"
-call :Opt 16 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
+call :Opt 11 "Reset Blue clone" "- chats + tasks kept"
+call :Opt 12 "Reset Yellow clone" "- chats + tasks kept"
+call :Opt 13 "Reset Green clone" "- chats + tasks kept"
+call :Opt 14 "Reset Red clone" "- chats + tasks kept"
+call :Opt 15 "Reset Orange clone" "- chats + tasks kept"
+call :Opt 16 "Reset Primary" "- stock profile - chats + tasks kept"
+call :Opt 17 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -312,15 +314,16 @@ call :Div "Maintenance"
 call :Opt 10 "Apply clone-home patch" "- required once - waits until OpenCode closes"
 call :Opt 11 "Clone status" "- all 5 - locks, identity, sign-in state"
 call :Opt 12 "Remove clone shortcuts" "- Desktop + Start menu"
+call :Opt 13 "Rebuild clone Task Manager icons" "- opt-in - close OpenCode first"
 echo.
 call :Div "Identity Resets"
-call :Opt 13 "Reset Blue clone" "- chats + repos kept"
-call :Opt 14 "Reset Yellow clone" "- chats + repos kept"
-call :Opt 15 "Reset Green clone" "- chats + repos kept"
-call :Opt 16 "Reset Red clone" "- chats + repos kept"
-call :Opt 17 "Reset Orange clone" "- chats + repos kept"
-call :Opt 18 "Reset Primary" "- stock profile - chats + repos kept"
-call :Opt 19 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
+call :Opt 14 "Reset Blue clone" "- chats + repos kept"
+call :Opt 15 "Reset Yellow clone" "- chats + repos kept"
+call :Opt 16 "Reset Green clone" "- chats + repos kept"
+call :Opt 17 "Reset Red clone" "- chats + repos kept"
+call :Opt 18 "Reset Orange clone" "- chats + repos kept"
+call :Opt 19 "Reset Primary" "- stock profile - chats + repos kept"
+call :Opt 20 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -457,9 +460,11 @@ rem MCP watcher row is deferred and keeps gid 74), Maintenance moved to 11-12.
 rem 2026-11-06: local 13 = the window identity patch (gid 78) - colored
 rem taskbar buttons for the running clone windows.
 rem 2026-11-14: local 11 = the MCP sync watcher (gid 74 - reserved since
-rem 2026-11-04, now LIVE); locals 12-14 = Maintenance, 15-21 = Identity
+rem 2026-11-04, now LIVE); locals 12-14 = Maintenance, 15 = the Task-Manager
+rem exe-identity rebuild (gid 105, repo-only + opt-in), 16-22 = Identity
 rem Resets (gids 84-90; reset_autoclaw2.ps1 -Target c1..c5|Primary|All; the
-rem ALL row is gated). Locals shifted +1 for the watcher row - gids unchanged.
+rem ALL row is gated). Locals shifted for the watcher + rebuild rows - gids
+rem unchanged.
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=28"
 if "%~1"=="2" set "RESOLVED=29"
@@ -475,13 +480,14 @@ if "%~1"=="11" set "RESOLVED=74"
 if "%~1"=="12" set "RESOLVED=35"
 if "%~1"=="13" set "RESOLVED=36"
 if "%~1"=="14" set "RESOLVED=78"
-if "%~1"=="15" set "RESOLVED=84"
-if "%~1"=="16" set "RESOLVED=85"
-if "%~1"=="17" set "RESOLVED=86"
-if "%~1"=="18" set "RESOLVED=87"
-if "%~1"=="19" set "RESOLVED=88"
-if "%~1"=="20" set "RESOLVED=89"
-if "%~1"=="21" set "RESOLVED=90"
+if "%~1"=="15" set "RESOLVED=105"
+if "%~1"=="16" set "RESOLVED=84"
+if "%~1"=="17" set "RESOLVED=85"
+if "%~1"=="18" set "RESOLVED=86"
+if "%~1"=="19" set "RESOLVED=87"
+if "%~1"=="20" set "RESOLVED=88"
+if "%~1"=="21" set "RESOLVED=89"
+if "%~1"=="22" set "RESOLVED=90"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -501,13 +507,14 @@ if "%~1"=="6" set "RESOLVED=48"
 if "%~1"=="7" set "RESOLVED=45"
 if "%~1"=="8" set "RESOLVED=51"
 if "%~1"=="9" set "RESOLVED=52"
-if "%~1"=="10" set "RESOLVED=91"
-if "%~1"=="11" set "RESOLVED=92"
-if "%~1"=="12" set "RESOLVED=93"
-if "%~1"=="13" set "RESOLVED=94"
-if "%~1"=="14" set "RESOLVED=95"
-if "%~1"=="15" set "RESOLVED=96"
-if "%~1"=="16" set "RESOLVED=97"
+if "%~1"=="10" set "RESOLVED=106"
+if "%~1"=="11" set "RESOLVED=91"
+if "%~1"=="12" set "RESOLVED=92"
+if "%~1"=="13" set "RESOLVED=93"
+if "%~1"=="14" set "RESOLVED=94"
+if "%~1"=="15" set "RESOLVED=95"
+if "%~1"=="16" set "RESOLVED=96"
+if "%~1"=="17" set "RESOLVED=97"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -533,25 +540,28 @@ if "%~1"=="9" set "RESOLVED=60"
 if "%~1"=="10" set "RESOLVED=59"
 if "%~1"=="11" set "RESOLVED=61"
 if "%~1"=="12" set "RESOLVED=62"
-if "%~1"=="13" set "RESOLVED=98"
-if "%~1"=="14" set "RESOLVED=99"
-if "%~1"=="15" set "RESOLVED=100"
-if "%~1"=="16" set "RESOLVED=101"
-if "%~1"=="17" set "RESOLVED=102"
-if "%~1"=="18" set "RESOLVED=103"
-if "%~1"=="19" set "RESOLVED=104"
+if "%~1"=="13" set "RESOLVED=107"
+if "%~1"=="14" set "RESOLVED=98"
+if "%~1"=="15" set "RESOLVED=99"
+if "%~1"=="16" set "RESOLVED=100"
+if "%~1"=="17" set "RESOLVED=101"
+if "%~1"=="18" set "RESOLVED=102"
+if "%~1"=="19" set "RESOLVED=103"
+if "%~1"=="20" set "RESOLVED=104"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-104; 63 unused; 74 = the AutoClaw2 MCP sync
+rem Runs one task by global id (1-107; 63 unused; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
 rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
 rem identity; 84-90 = the AutoClaw2 identity resets; 91-97 = the Cline
-rem identity resets; 98-104 = the OpenCode identity resets).
+rem identity resets; 98-104 = the OpenCode identity resets; 105-107 = the
+rem AutoClaw2/Cline/OpenCode Task-Manager exe-identity rebuilds,
+rem repo-only + opt-in, appended 2026-11-14).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -655,6 +665,9 @@ if "%~1"=="101" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target
 if "%~1"=="102" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target c5 & exit /b)
 if "%~1"=="103" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target Primary & exit /b)
 if "%~1"=="104" (call :ConfirmOpenCodeReset "Reset ALL profiles" "src\windows\reset_opencode.ps1" "-Target All" & exit /b)
+if "%~1"=="105" (call :Run "tools\patch_autoclaw2_exe_identity.ps1" -Target All & exit /b)
+if "%~1"=="106" (call :Run "tools\patch_cline_exe_identity.ps1" -Target All & exit /b)
+if "%~1"=="107" (call :Run "tools\patch_opencode_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="81" (call :RunWith "tools\build_ghost_exe.ps1" "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or after moving this repo folder." & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
