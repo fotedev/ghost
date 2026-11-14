@@ -164,6 +164,27 @@
         { "gid": 36, "label": "Remove clone shortcuts", "tail": "- Desktop + Start menu", "mode": "inline", "script": "tools/install_autoclaw2_clone_shortcuts.ps1", "args": ["-Remove"], "notes": [] },
         { "gid": 78, "label": "Apply clone identity patch", "tail": "- colored taskbar buttons - waits for AutoClaw2 to close", "mode": "inline-note", "waitForClose": true, "script": "tools/patch_autoclaw2_identity.ps1", "args": [], "notes": [
           "Patch finished - relaunch the clones via their AutoClaw2 shortcuts for colored taskbar buttons."
+        ] },
+        { "gid": 84, "label": "Reset Blue clone", "tail": "- chats + work kept", "mode": "zcode-reset", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "c1"], "notes": [
+          "NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 85, "label": "Reset Yellow clone", "tail": "- chats + work kept", "mode": "zcode-reset", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "c2"], "notes": [
+          "NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 86, "label": "Reset Green clone", "tail": "- chats + work kept", "mode": "zcode-reset", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "c3"], "notes": [
+          "NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 87, "label": "Reset Red clone", "tail": "- chats + work kept", "mode": "zcode-reset", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "c4"], "notes": [
+          "NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 88, "label": "Reset Orange clone", "tail": "- chats + work kept", "mode": "zcode-reset", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "c5"], "notes": [
+          "NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 89, "label": "Reset Primary", "tail": "- default profile - chats + work kept", "mode": "zcode-reset", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "Primary"], "notes": [
+          "NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 90, "label": "Reset ALL profiles", "tail": "- Blue..Orange + Primary - asks first", "mode": "confirm-reset", "confirmTitle": "Reset ALL profiles", "confirmText": "This tree-kills the affected profiles and rewrites their identity stores.", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "All"], "notes": [
+          "NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile."
         ] }
       ]
     },

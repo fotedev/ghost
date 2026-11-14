@@ -758,6 +758,28 @@ reset_minimax_opencode.ps1  # MiniMax/OpenCode: 22 steps (OpenCode auth.json wip
                                    #          "{}" there throws Invalid OAuth state and blocks the login
                                    #          page — and rotates .minimax\v2\session-handoff\device-id;
                                    #          chat preserved)
+reset_autoclaw2.ps1               # AutoClaw2 (Primary + clones c1..c5): 12 steps/profile
+                                   #          (2026-11-14, AutoClaw2 [14]-[20] = gids 84-90, ALL row
+                                   #          [20] = gid 90 behind :ConfirmAc2Reset): rotates
+                                   #          device\device-id.json (verified old != new), deletes the
+                                   #          signed-out pointer (active-product-account.json), per-account
+                                   #          auth (account-credentials.enc + account-profile.json) +
+                                   #          runtime secrets (owner-secrets.enc + model-connection-
+                                   #          command-claims.enc), Network session stores, Local State
+                                   #          (os_crypt + uninstall_metrics — SKIPPED under -KeepLogin,
+                                   #          which would break the kept credentials), telemetry
+                                   #          (apmplus, log_sdk_v2.db, diagnostics, logs) + caches +
+                                   #          zwork-account/native-browser Partitions. runtime\ (chats,
+                                   #          work runs, artifacts, projects), telegram-connection.json
+                                   #          and MCP connections PRESERVED. -Target Primary|c1..c5|All
+                                   #          (clones first, Primary last, independent device ids),
+                                   #          -KeepLogin, -DryRun; thin manifest over the Python core
+                                   #          (store-delete/sweep-tree/json-patch/backup + audit +
+                                   #          restore script per target); the pure target/marker/
+                                   #          device-id-shape helpers are Pester-covered via the
+                                   #          script's dot-source guard (tests/reset_autoclaw2.Tests.ps1);
+                                   #          live acceptance = user-supervised, nothing ran against
+                                   #          live profiles during implementation)
 change_device_id.ps1              # System-level: Fingerprint (self-test) / LegacyReset (registry GUIDs)
                                    #   / RepairProfiles (ProfileList .bak keys). Windows-only.
                                    #   IDE Resets [1] = LegacyReset behind :ConfirmRun (2026-11-10 — the old
@@ -867,7 +889,10 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   gid 73, Chat inventory gid 75, Import chats gid 76 — the MCP watcher row is
   deferred to the follow-up PR and keeps its reserved gid 74) / Maintenance
   [11]-[13] (status, remove-shortcuts, [13] gid 78 = the window identity
-  patch — colored taskbar buttons, 2026-11-06); Cline: Launch Clones [1]-[7]
+  patch — colored taskbar buttons, 2026-11-06) / Identity Resets [14]-[20]
+  (gids 84-90, appended 2026-11-14 — reset_autoclaw2.ps1 c1..c5/Primary,
+  [20] gid 90 = ALL behind :ConfirmAc2Reset; :RunAc2Reset = the
+  :RunZcodeReset-shaped wrapper with the AutoClaw2 relaunch note); Cline: Launch Clones [1]-[7]
   (Blue..Orange, ALL, shortcuts) / Maintenance [8]-[9]; OpenCode: Launch Clones
   [1]-[9] (Blue..Orange, ALL, [7] light worker gid 79, [8] login clone
   account gid 80 — 2026-11-07, ZCode LIGHT pattern; shortcuts shifted to

@@ -392,6 +392,27 @@ powershell -ExecutionPolicy Bypass -File "tools\install_autoclaw2_clone_shortcut
 powershell -ExecutionPolicy Bypass -File "tools\install_autoclaw2_clone_shortcuts.ps1" -Remove
 ```
 
+### AutoClaw2 identity reset (AutoClaw2 [14]-[20])
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target c1        # [14] — Blue (c2..c5 = [15]..[18])
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target Primary   # [19] — the default profile
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target All       # [20] — clones first, Primary last (menu row asks first)
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target c1 -KeepLogin  # identity only — keep the sign-in
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target c1 -DryRun     # plan only, nothing touched
+```
+
+Per profile: rotates `device\device-id.json`, clears the signed-out marker
+(`device\active-product-account.json`), deletes the per-account auth stores
+(`account-credentials.enc`, `account-profile.json`, `runtime\owner-secrets.enc`,
+`runtime\model-connection-command-claims.enc`), the network session stores,
+`Local State` (OSCrypt key — the kept-credentials guard is why `-KeepLogin`
+skips it), telemetry (`apmplus`, `log_sdk_v2.db`, `diagnostics`, `logs`) and
+caches/webview partitions. Chats, work runs, projects, MCP connections and
+Telegram routing are PRESERVED. Backups to `ID_Backups\<ts>\` + audit JSON +
+a restore script per target. Menu equivalents: Blue..Orange = [14]-[18];
+Primary = [19]; ALL = [20] (confirmation gate).
+
 ### AutoClaw2 MCP + chat sync (AutoClaw2 [8]-[10])
 
 ```powershell

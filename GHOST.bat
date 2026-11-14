@@ -221,6 +221,15 @@ call :Opt 11 "Clone status" "- all 5 - locks, device-id, sign-in state"
 call :Opt 12 "Remove clone shortcuts" "- Desktop + Start menu"
 call :Opt 13 "Apply clone identity patch" "- colored taskbar buttons - waits for AutoClaw2 to close"
 echo.
+call :Div "Identity Resets"
+call :Opt 14 "Reset Blue clone" "- chats + work kept"
+call :Opt 15 "Reset Yellow clone" "- chats + work kept"
+call :Opt 16 "Reset Green clone" "- chats + work kept"
+call :Opt 17 "Reset Red clone" "- chats + work kept"
+call :Opt 18 "Reset Orange clone" "- chats + work kept"
+call :Opt 19 "Reset Primary" "- default profile - chats + work kept"
+call :Opt 20 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto AUTOCLAW_PROMPT
@@ -428,6 +437,8 @@ rem locals 8-10 are the new Sync + Chat Import section (gids 73/75/76; the
 rem MCP watcher row is deferred and keeps gid 74), Maintenance moved to 11-12.
 rem 2026-11-06: local 13 = the window identity patch (gid 78) - colored
 rem taskbar buttons for the running clone windows.
+rem 2026-11-14: locals 14-20 = the Identity Resets section (gids 84-90;
+rem reset_autoclaw2.ps1 -Target c1..c5|Primary|All; the ALL row is gated).
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=28"
 if "%~1"=="2" set "RESOLVED=29"
@@ -442,6 +453,13 @@ if "%~1"=="10" set "RESOLVED=76"
 if "%~1"=="11" set "RESOLVED=35"
 if "%~1"=="12" set "RESOLVED=36"
 if "%~1"=="13" set "RESOLVED=78"
+if "%~1"=="14" set "RESOLVED=84"
+if "%~1"=="15" set "RESOLVED=85"
+if "%~1"=="16" set "RESOLVED=86"
+if "%~1"=="17" set "RESOLVED=87"
+if "%~1"=="18" set "RESOLVED=88"
+if "%~1"=="19" set "RESOLVED=89"
+if "%~1"=="20" set "RESOLVED=90"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -490,10 +508,11 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-83; 63 unused; 74 reserved for the deferred
+rem Runs one task by global id (1-90; 63 unused; 74 reserved for the deferred
 rem AutoClaw2 MCP watcher; 78 = the AutoClaw2 identity patch; 79/80 = the
 rem OpenCode light worker + clone login; 81 = the desktop-app builder;
-rem 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe identity).
+rem 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe identity;
+rem 84-90 = the AutoClaw2 identity resets, appended 2026-11-14).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -575,6 +594,13 @@ if "%~1"=="75" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Inventory -Targ
 if "%~1"=="76" (call :Run "tools\sync_autoclaw2_chats.ps1" -Mode Import -Apply -AllMissing -Target All & exit /b)
 if "%~1"=="77" (call :Run "tools\sync_mcp_registry.ps1" & exit /b)
 if "%~1"=="78" (call :RunWith "tools\patch_autoclaw2_identity.ps1" "Patch finished - relaunch the clones via their AutoClaw2 shortcuts for colored taskbar buttons." -WaitForClose & exit /b)
+if "%~1"=="84" (call :RunAc2Reset "src\windows\reset_autoclaw2.ps1" -Target c1 & exit /b)
+if "%~1"=="85" (call :RunAc2Reset "src\windows\reset_autoclaw2.ps1" -Target c2 & exit /b)
+if "%~1"=="86" (call :RunAc2Reset "src\windows\reset_autoclaw2.ps1" -Target c3 & exit /b)
+if "%~1"=="87" (call :RunAc2Reset "src\windows\reset_autoclaw2.ps1" -Target c4 & exit /b)
+if "%~1"=="88" (call :RunAc2Reset "src\windows\reset_autoclaw2.ps1" -Target c5 & exit /b)
+if "%~1"=="89" (call :RunAc2Reset "src\windows\reset_autoclaw2.ps1" -Target Primary & exit /b)
+if "%~1"=="90" (call :ConfirmAc2Reset "Reset ALL profiles" "src\windows\reset_autoclaw2.ps1" "-Target All" & exit /b)
 if "%~1"=="81" (call :RunWith "tools\build_ghost_exe.ps1" "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or after moving this repo folder." & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
@@ -709,6 +735,34 @@ echo Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~1" %2 %3 %4
 echo.
 echo NOTE: relaunch clones via their ZCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare ZCode.exe opens the PRIMARY profile.
+pause
+exit /b
+
+:RunAc2Reset
+rem AutoClaw2 reset wrapper (gids 84-89): runs reset_autoclaw2.ps1 with args,
+rem then prints the relaunch-safety note (a bare AutoClaw2.exe opens the
+rem PRIMARY profile). Same shape as :RunZcodeReset.
+rem Usage: call :RunAc2Reset <script> [args...]
+echo Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~1" %2 %3 %4
+echo.
+echo NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile.
+pause
+exit /b
+
+:ConfirmAc2Reset
+rem Confirmation gate for the destructive AutoClaw2 all-profiles reset (gid 90).
+rem choice reads the CONSOLE - not stdin - so menu chains and the .bat harness
+rem stay unaffected.
+rem Usage: call :ConfirmAc2Reset <label> <script> <args>
+echo About to run: %~1
+echo This tree-kills the affected profiles and rewrites their identity stores.
+choice /C YN /N /M "Continue with the reset? Y = run, N = cancel: "
+if errorlevel 2 goto ConfirmAc2ResetNo
+call :RunAc2Reset "%~2" %~3
+exit /b
+:ConfirmAc2ResetNo
+echo Cancelled - nothing was run.
 pause
 exit /b
 

@@ -8,6 +8,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **AutoClaw2 identity reset** (2026-11-14): new
+  `src/windows/reset_autoclaw2.ps1` (`-Target Primary|c1..c5|All`,
+  `-KeepLogin`, `-DryRun`) closes the suite's last MANDATORY playbook gap —
+  the identity reset. Per profile it rotates `device\device-id.json`
+  (verified old != new), clears the signed-out pointer, deletes the
+  per-account auth + runtime-secret stores, the network session stores,
+  `Local State` (OSCrypt key), telemetry (`apmplus`, `log_sdk_v2.db`,
+  `diagnostics`, `logs`) and the caches/webview partitions; chats, work
+  runs, projects, MCP connections and Telegram routing are preserved.
+  Backups to `ID_Backups\<ts>\` + audit JSON + a restore script per
+  target; thin manifest over the Python core (`store-delete` /
+  `sweep-tree` / `json-patch` / `backup` — no new core verbs needed).
+  Menu: AutoClaw2 [14]-[20] (gids 84-90, appended in display order, never
+  renumbered; the ALL row is gated by the new `:ConfirmAc2Reset`, and
+  `:RunAc2Reset` prints the relaunch-safety note); desktop hub rows match
+  (menu.json modes `zcode-reset` / `confirm-reset`, ARGS-parity proven by
+  the extended hub test). The pure target/marker/device-id-shape helpers
+  are unit-tested through the script's dot-source guard
+  (`tests/reset_autoclaw2.Tests.ps1`, 10 tests). Live acceptance stays
+  user-supervised — nothing was executed against the live profiles.
 - **AutoClaw2 chat sync: `-Account` source hint + source-account
   provenance** (2026-11-11): `tools/sync_autoclaw2_chats.ps1 -Account
   <sha-prefix>` pins the multi-account Primary's account dir for the
