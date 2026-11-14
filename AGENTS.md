@@ -1016,7 +1016,18 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   Desktop and Start Menu locations. The resident watcher
   (`tools/watch_zcode_taskbar.ps1`) runs a periodic (~5m, every 60 passes)
   read-only check and automatically invokes the repair on hijack detection, or
-  on demand via `-CheckPrimaryHijack`. Diagnostic rule: read lnk AUMIDs via
+  on demand via `-CheckPrimaryHijack`. 2026-11-11 lesson (live-verified): the
+  pin rewrite can ALSO drift the lnk's TARGET onto a per-color exe copy
+  (`ZCode-Orange.exe`) — the step-2f exe copies made the pinned clone window's
+  process exe colored, and the old repair kept the drifted target ("the lnk's
+  own target wins") then set the icon FROM it, permanently blessing the
+  clone's orange icon behind a clean AUMID the AUMID-only guard called
+  healthy. The repair now restores target → stock `ZCode.exe` FIRST (shared
+  pure core `tools/zcode_primary_lnk_lib.ps1`, unit-tested), resolves the
+  icon from the stock exe, and the guard detects all three shapes (AUMID
+  suffix, clone-exe target, wrong/wiped icon) — target/icon checks stay
+  silent when no stock exe resolves, so the guard never demands a repair it
+  cannot complete. Diagnostic rule: read lnk AUMIDs via
   `Shell.Application` `ExtendedProperty('System.AppUserModel.ID')` — decoding
   the whole .lnk as UTF-16 and regexing MISALIGNS on odd byte offsets and
   reports false `<none>` (cost a false "clone shortcuts lost their AUMID"

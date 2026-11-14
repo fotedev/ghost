@@ -7,6 +7,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Primary `ZCode.lnk` hijack repair now also restores the drifted TARGET**
+  (2026-11-11): a Windows pin rewrite can retarget the Primary's Start-menu
+  shortcut onto a per-color exe copy — live-verified: the lnk carried target
+  `ZCode-Orange.exe` + an orange Start tile after an auto-repair had logged
+  SUCCESS, because the old repair kept the drifted target ("the lnk's own
+  target wins") and set the icon FROM it, permanently blessing the clone's
+  icon behind a clean AUMID the AUMID-only hijack guard could no longer see.
+  `tools/install_zcode_second_shortcuts.ps1 -RepairPrimaryAumid` now
+  restores target → stock `ZCode.exe` first (new `Repair-PrimaryLnkTarget`),
+  resolves the icon from the stock exe (the "target wins" rule is gone), and
+  the resident watcher's guard (`tools/watch_zcode_taskbar.ps1`) detects all
+  three hijack shapes — AUMID clone suffix, clone-exe target, wrong/wiped
+  icon — through the new shared pure core `tools/zcode_primary_lnk_lib.ps1`
+  (unit-tested by `tests/zcode_primary_lnk_lib.Tests.ps1`); target/icon
+  checks stay silent when no stock exe resolves so the guard never demands a
+  repair it cannot complete. Side-effect closed: the hijacked tile launched
+  `ZCode-Orange.exe` env-less (Primary profile, but Task Manager showed it
+  as "ZCode Orange" and the copy-family classifier treated it as that clone).
+
 ## [1.5.0] - 2026-11-11
 
 ### Added

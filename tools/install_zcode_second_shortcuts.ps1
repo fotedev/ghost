@@ -24,9 +24,11 @@
   given, each shortcut also gets System.AppUserModel.ID = <installed ZCode AUMID>
   + ".<N>" (N = 2/3/4 - the same value the app.asar patch computes for that
   clone), so a taskbar pin groups with the running clone's window. The same
-  repair path (-RepairPrimaryAumid) also strips a clone suffix hijacked onto
-  the PRIMARY ZCode.lnk AND restores the Primary shortcut's wiped icon back
-  to <ZCode.exe>,0 (a pin rewrite can empty the icon field - verified
+  repair path (-RepairPrimaryAumid) also repairs a hijacked PRIMARY ZCode.lnk:
+  restores a pin-drifted TARGET back to the stock install ZCode.exe (verified
+  2026-11-11 - a pin rewrite can retarget the lnk onto a ZCode-<Color>.exe
+  copy), strips a clone suffix from the AUMID, and restores the icon back to
+  <ZCode.exe>,0 (a pin rewrite can empty the icon field - verified
   2026-09-28 - leaving the Primary's own Start entry icon-less).
 
 .EXAMPLE
@@ -53,6 +55,13 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Launcher = Join-Path $RepoRoot 'src\windows\launch_zcode_second_instance.ps1'
+
+# Shared primary-lnk hijack decision core (pure lib, unit-tested): the path
+# list, the stock-exe candidates and the drift predicate live in ONE copy for
+# this repair path and the resident watcher guard.
+$LnkRepairLib = Join-Path $PSScriptRoot 'zcode_primary_lnk_lib.ps1'
+if (-not (Test-Path -LiteralPath $LnkRepairLib)) { throw "Primary-lnk repair lib not found: $LnkRepairLib" }
+. $LnkRepairLib
 
 # Must stay in sync with the InstanceMap in launch_zcode_second_instance.ps1.
 # Second is FROZEN (existing installed profile); Third = Yellow, Fourth = Green,
@@ -212,37 +221,59 @@ function Get-LnkAumid {
 function Get-PrimaryLnkPaths {
   # Every per-user copy of the Primary shortcut a pin can rewrite: Desktop is
   # included (healthy today, covered for the next hijack), plus both Start Menu
-  # locations the installer writes.
-  return @(
-    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'ZCode.lnk'),
-    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\ZCode.lnk'),
-    (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ZCode.lnk')
-  )
+  # locations the installer writes. Shared list from the pure lib.
+  return (Get-ZCodePrimaryLnkPaths)
 }
 
-function Get-ZCodeExeForIcon {
-  # The lnk's own target wins (a pin-rewritten lnk may drift); fall back to the
-  # install candidates when it is missing.
-  param([string]$TargetPath)
-  if (-not [string]::IsNullOrWhiteSpace($TargetPath) -and (Test-Path -LiteralPath $TargetPath)) { return $TargetPath }
-  $cands = @(
-    (Join-Path $env:LOCALAPPDATA 'Programs\ZCode\ZCode.exe'),
-    'C:\Program Files\ZCode\ZCode.exe',
-    'C:\Program Files (x86)\ZCode\ZCode.exe'
-  )
-  foreach ($c in $cands) { if (Test-Path -LiteralPath $c) { return $c } }
-  return $null
+function Get-StockZCodeExe {
+  # Resolve the STOCK install ZCode.exe (never a per-color copy). Replaces the
+  # old Get-ZCodeExeForIcon, whose "the lnk's own target wins" rule let a
+  # pin-drifted ZCode-<Color>.exe target supply the icon - permanently
+  # blessing the clone's icon behind a clean AUMID (verified 2026-11-11: the
+  # Start-menu ZCode.lnk ended up with target ZCode-Orange.exe and the orange
+  # tile after an auto-repair logged SUCCESS).
+  return (Resolve-StockZCodeExe -Candidates (Get-ZCodeExeCandidates))
+}
+
+function Repair-PrimaryLnkTarget {
+  # 2026-11-11: since the per-color exe copies (ZCode-<Color>.exe) exist, a
+  # pin rewrite can also drift the PRIMARY lnk's TARGET onto a clone exe copy.
+  # The old repair kept the drifted target ("the lnk's own target wins") and
+  # set the icon FROM it - permanently blessing the clone's icon behind a
+  # clean AUMID (live-verified: Start-menu ZCode.lnk target = ZCode-Orange.exe
+  # after an auto-repair logged SUCCESS). The Primary shortcut's target must
+  # be the stock install exe; restore it, verify-after re-read.
+  param([string]$Path)
+  $ws = New-Object -ComObject WScript.Shell
+  $sc = $ws.CreateShortcut($Path)
+  if (-not (Test-ZCodeCloneExeTarget -TargetPath $sc.TargetPath)) { return }
+  $stock = Get-StockZCodeExe
+  if (-not $stock) {
+    Write-Host "  [skip] target restore on $Path - stock ZCode.exe not found; drifted target '$($sc.TargetPath)' left untouched." -ForegroundColor Yellow
+    return
+  }
+  try {
+    $sc.TargetPath = $stock
+    $sc.Save()
+    $chk = (New-Object -ComObject WScript.Shell).CreateShortcut($Path)
+    Assert-Value 'TargetPath' $stock $chk.TargetPath
+  } catch {
+    Write-Host "  [FAILED] target restore on $Path : $($_.Exception.Message)" -ForegroundColor Red
+    $script:Failed = $true
+  }
 }
 
 function Repair-PrimaryLnkIcon {
   # A hijacked ZCode.lnk rewritten by Windows pinning can also lose its icon
   # (verified 2026-09-28: Start-menu ZCode.lnk ended with IconLocation ',0' ->
   # the shell fell back to the exe default icon for the whole AUMID). Restore
-  # it to <ZCode.exe>,0; verify-after re-read (never silent-success).
+  # it to <ZCode.exe>,0 - resolved from the STOCK exe, never from a drifted
+  # target (Repair-PrimaryLnkTarget runs first); verify-after re-read (never
+  # silent-success).
   param([string]$Path)
   $ws = New-Object -ComObject WScript.Shell
   $sc = $ws.CreateShortcut($Path)
-  $exe = Get-ZCodeExeForIcon $sc.TargetPath
+  $exe = Get-StockZCodeExe
   if (-not $exe) {
     Write-Host "  [skip] icon restore on $Path - ZCode.exe not found." -ForegroundColor Yellow
     return
@@ -265,16 +296,19 @@ function Repair-PrimaryAumid {
   # revisions shared the title) can make Windows rewrite the PRIMARY's ZCode.lnk
   # stamped with the clone's AUMID ("<base>.<N>"). That stole the Primary's
   # Start-menu pin and let the empty-icon ZCode.lnk win taskbar icon resolution
-  # for the clone. Strip any trailing ".<N>" clone suffix from the primary
-  # shortcut's AUMID; verify by re-read. The same rewrite also empties the
-  # shortcut's icon field (verified 2026-09-28), so the icon is restored to
-  # <ZCode.exe>,0 as well - an AUMID-only fix leaves the Primary's own Start
-  # entry icon-less.
+  # for the clone. Per path: restore a drifted TARGET first (2026-11-11 - the
+  # pin rewrite can retarget the lnk onto a ZCode-<Color>.exe copy), then strip
+  # any trailing ".<N>" clone suffix from the AUMID (verify by re-read), then
+  # restore the icon to <ZCode.exe>,0 (the same rewrite also empties the icon
+  # field - verified 2026-09-28; an AUMID-only fix leaves the Primary's own
+  # Start entry icon-less, and an icon resolved from a drifted target blesses
+  # the clone's icon).
   Add-AumidType
   $repaired = 0
   $base = $null
   foreach ($c in (Get-PrimaryLnkPaths)) {
     if (-not (Test-Path -LiteralPath $c)) { continue }
+    Repair-PrimaryLnkTarget $c
     $id = Get-LnkAumid $c
     if (-not [string]::IsNullOrWhiteSpace($id)) {
       if ($base -eq $null) { $base = $id }
@@ -299,7 +333,8 @@ function Repair-PrimaryAumid {
         continue
       }
     }
-    # Healthy AUMID (or no AUMID stamped): still heal a wiped icon field.
+    # Healthy AUMID (or no AUMID stamped): still heal a drifted target (done
+    # above) and a wiped icon field.
     Repair-PrimaryLnkIcon $c
   }
   if ($repaired -eq 0) { Write-Host '  [ok] no clone AUMID collision on the primary shortcut.' -ForegroundColor Green }
@@ -317,7 +352,7 @@ function Get-InstalledZCodeAumid {
 }
 
 if ($RepairPrimaryAumid) {
-  Write-Host '[repair] Checking primary ZCode.lnk AUMID...'
+  Write-Host '[repair] Checking primary ZCode.lnk (AUMID, target, icon)...'
   Add-AumidType
   [void](Repair-PrimaryAumid)
   if ($script:Failed) { Write-Host 'FAILED - see lines above.' -ForegroundColor Red; exit 1 }
@@ -336,12 +371,7 @@ if (-not (Test-Path -LiteralPath $psExe)) { throw "Windows PowerShell not found:
 $workDir   = Split-Path -Parent $Launcher
 
 # Blue/yellow/green icons ride on the one-time app.asar patch; warn when absent.
-$exeCandidates = @(
-  (Join-Path $env:LOCALAPPDATA 'Programs\ZCode\ZCode.exe'),
-  'C:\Program Files\ZCode\ZCode.exe',
-  'C:\Program Files (x86)\ZCode\ZCode.exe'
-)
-$zexe = $exeCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+$zexe = Resolve-StockZCodeExe -Candidates (Get-ZCodeExeCandidates)
 if ($zexe) {
   $marker = Join-Path (Split-Path -Parent $zexe) 'resources\zcode-icon-patch.marker.json'
   if (-not (Test-Path -LiteralPath $marker)) {
