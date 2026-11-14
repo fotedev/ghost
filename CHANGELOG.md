@@ -27,6 +27,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   shell whose APPDATA pointed elsewhere and reported Primary
   profile-missing + c1 not-signed-in, an empty diff that reads as "nothing
   to sync".
+- **ZCode clone OAuth deep-link callback forwarder** (2026-11-11, new
+  off-menu tool `tools/watch_zcode_deeplink_forward.ps1`): the machine-wide
+  URL scheme always boots the PRIMARY profile (every launch re-registers
+  `HKCU\Software\Classes\zcode\shell\open\command` to its own exe and the OS
+  spawn carries no clone env), so a clone's browser callback opened the
+  Primary and died with "OAuth state mismatch" while the clone's own poll
+  hit the business-token exchange. The watcher polls the ZCode process
+  family for fresh env-less callback spawns, re-delivers the callback URL
+  into every RUNNING instance with its own environment (the OAuth state
+  match decides which receiver completes; mismatched ones reject
+  harmlessly) and kills the stray Primary-profile spawn (`-NoKillSpawn`
+  keeps it). Read-only on the registry, writes nothing to disk.
+- **ZCode business-token exchange hardening patch** (2026-11-11, new
+  off-menu pair `tools/patch_zcode_business_exchange.ps1` + `.mjs` on the
+  shared asar-surgery layer): `exchangeBusinessToken` posted the OAuth
+  token with a HARD 10s timeout (`zLe=1e4`) and NO retry — clones died at
+  `zai_oauth_required` with the callback already delivered (a 10.14s
+  "fetch failed" = the timeout; a separate ~800ms server-envelope failure
+  later succeeded = transient). Two byte-anchors in `out/host/index.js`:
+  `zLe=1e4` → `zLe=6e4` (length-neutral) + a one-shot retry after a 3s
+  backoff spliced into the `resolve()` tail. Marker
+  `resources\zcode-business-exchange.marker.json` + `ID_Backups\<ts>`;
+  re-run after app updates; built repo-only — never live-applied on the
+  dev host (opt-in).
 
 ### Fixed
 - **ZCode clones could not activate ANY plugin** (2026-11-11):
