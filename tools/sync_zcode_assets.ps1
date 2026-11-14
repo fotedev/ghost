@@ -33,6 +33,14 @@
      + known_marketplaces.json, only when the <marketplace>\<plugin>\<version>
      set or the marketplaces file drifts. plugins\data and cli\agents stay
      per-instance (runtime state, like the session store).
+  4. Plugin activation (2026-11-11 fix): installed_plugins.json is copied from
+     the Primary with every installPath rewritten from the Primary cache to the
+     clone's own cache mirror (which area 3 has just converged), so plugins
+     enabled on the Primary actually activate on clones. Before this fix only
+     the cache was mirrored and this file was never synced - clones had no
+     file at all and could not activate any plugin. Backup + verify-after +
+     audit like every other area; skipped by -McpOnly. If the Primary has no
+     file, an existing clone file is left as-is (no destructive delete).
 
   Guards:
     - a RUNNING instance (process markers = its home/roaming dir names, same
@@ -180,9 +188,20 @@ function New-DirJunction([string]$LinkPath, [string]$TargetPath) {
         New-Item -ItemType Junction -Path $LinkPath -Value $TargetPath -ErrorAction Stop | Out-Null
         return $true
     } catch {
-        # Fallback: mklink /J needs no elevation either.
-        & cmd.exe /c mklink /J "$LinkPath" "$TargetPath" | Out-Null
-        if ($LASTEXITCODE -ne 0) { return $false }
+        # Fallback: mklink /J needs no elevation either. Console-less spawn —
+        # a console-less caller would otherwise flash a visible cmd window.
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $env:ComSpec
+        $psi.Arguments = '/d /c mklink /J "' + $LinkPath + '" "' + $TargetPath + '"'
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        [void]$proc.StandardOutput.ReadToEnd()
+        [void]$proc.StandardError.ReadToEnd()
+        $proc.WaitForExit()
+        if ($proc.ExitCode -ne 0) { return $false }
         return $true
     }
 }
@@ -510,6 +529,111 @@ function Sync-PluginCache([string]$Name, [string]$CloneZ, [string]$CloneCli) {
     return $true
 }
 
+# Area 4: plugin activation state (installed_plugins.json). The Primary is
+# the source of truth; every entry's installPath is rewritten from the
+# Primary's cache to the clone's own cache mirror. The file content shape is
+# the app's own (verified 2026-11-11 on the Primary: id/name/marketplace/
+# version/installPath/installedAt/updatedAt/scope/source/cacheTransactionId).
+function Sync-InstalledPlugins([string]$Name, [string]$CloneZ, [string]$CloneCli, [string]$CloneHome) {
+    $pFile = Join-Path $PrimaryCli 'plugins\installed_plugins.json'
+    $cFile = Join-Path $CloneCli 'plugins\installed_plugins.json'
+
+    if (-not (Test-Path -LiteralPath $pFile)) {
+        if (Test-Path -LiteralPath $cFile) {
+            Write-Tag "WARN:$(Get-SyncTargetDisplay $Name)" 'Primary has no installed_plugins.json - the clone file is left as-is (no destructive delete).' 'Yellow'
+            Add-Audit $CloneZ 'plugins' 'installed' $true 'primary file missing; clone file preserved'
+        } else {
+            Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" 'Neither Primary nor clone has installed_plugins.json - nothing to sync.' 'Green'
+            Add-Audit $CloneZ 'plugins' 'installed' $true 'both sides absent'
+        }
+        return $true
+    }
+
+    $primary = Read-JsonFile $pFile
+    if ($null -eq $primary) {
+        Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ('Primary installed_plugins.json unreadable: {0}' -f $pFile) 'Red'
+        Add-Audit $CloneZ 'plugins' 'installed' $false 'primary unreadable'
+        return $false
+    }
+
+    $target = ConvertTo-DeepHashtable $primary
+    $prefixFrom = [System.IO.Path]::GetFullPath((Join-Path $PrimaryCli 'plugins\cache')).TrimEnd('\')
+    $prefixTo   = [System.IO.Path]::GetFullPath((Join-Path $CloneCli  'plugins\cache')).TrimEnd('\')
+
+    if ($target -is [System.Collections.IDictionary] -and $target.ContainsKey('plugins') -and $target['plugins'] -is [System.Collections.IEnumerable]) {
+        foreach ($entry in $target['plugins']) {
+            if ($entry -is [System.Collections.IDictionary] -and $entry.ContainsKey('installPath')) {
+                $p = [string]$entry['installPath']
+                if (-not [string]::IsNullOrWhiteSpace($p)) {
+                    $full = [System.IO.Path]::GetFullPath($p).TrimEnd('\')
+                    if ($full -ieq $prefixFrom) {
+                        $entry['installPath'] = $prefixTo
+                    } elseif ($full.StartsWith($prefixFrom, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $entry['installPath'] = $prefixTo + $full.Substring($prefixFrom.Length)
+                    }
+                    # an installPath outside both caches is kept verbatim and
+                    # flagged in the verify step below (existence check)
+                }
+            }
+        }
+    }
+
+    # Already in sync? Compare the clone file AS-IS against the rewritten target.
+    $already = $false
+    if (Test-Path -LiteralPath $cFile) {
+        $cloneNow = $null
+        try { $cloneNow = ConvertTo-DeepHashtable (Read-JsonFile $cFile) } catch { $cloneNow = $null }
+        if ($null -ne $cloneNow -and (Test-DeepEqual $target $cloneNow)) { $already = $true }
+    }
+    if ($already) {
+        Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" 'installed_plugins.json already matches the Primary (paths rewritten).' 'Green'
+        Add-Audit $CloneZ 'plugins' 'installed' $true 'already in sync'
+        return $true
+    }
+
+    if ($DryRun) {
+        Write-Tag "DRY:$(Get-SyncTargetDisplay $Name)" 'would backup + rewrite installed_plugins.json with clone-local installPaths (no write in DryRun).' 'Cyan'
+        return $true
+    }
+
+    $bak = "$cFile.bak-$Stamp"
+    if (Test-Path -LiteralPath $bak) { Remove-Item -LiteralPath $bak -Force }
+    if (Test-Path -LiteralPath $cFile) { Copy-Item -LiteralPath $cFile -Destination $bak -Force }
+    Add-Audit $CloneZ 'plugins' 'installed-backup' $true (Split-Path -Leaf $bak)
+
+    Write-JsonNoBom $cFile $target
+    Add-Audit $CloneZ 'plugins' 'installed' $true 'rewritten with clone-local installPaths'
+
+    # Verify-after: full-file re-read must deep-equal the target, and every
+    # rewritten installPath must exist inside the clone's (mirrored) cache.
+    $bad = @()
+    $verify = $null
+    try { $verify = ConvertTo-DeepHashtable (Read-JsonFile $cFile) } catch { $verify = $null }
+    if ($null -eq $verify) {
+        $bad += 're-read failed'
+    } elseif (-not (Test-DeepEqual $target $verify)) {
+        $bad += 'full-file round-trip mismatch'
+    }
+    if ($null -ne $verify -and $verify -is [System.Collections.IDictionary] -and $verify.ContainsKey('plugins') -and $verify['plugins'] -is [System.Collections.IEnumerable]) {
+        foreach ($entry in $verify['plugins']) {
+            if ($entry -is [System.Collections.IDictionary] -and $entry.ContainsKey('installPath')) {
+                $ip = [string]$entry['installPath']
+                if (-not [string]::IsNullOrWhiteSpace($ip) -and -not (Test-Path -LiteralPath $ip)) {
+                    $bad += ('installPath missing on clone: ' + $ip)
+                }
+            }
+        }
+    }
+    if ($bad.Count -gt 0) {
+        Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ('installed_plugins.json verify-after mismatch ({0}) - restored from backup.' -f ($bad -join ', ')) 'Red'
+        if (Test-Path -LiteralPath $bak) { Copy-Item -LiteralPath $bak -Destination $cFile -Force }
+        Add-Audit $CloneZ 'plugins' 'installed' $false ('mismatch: ' + ($bad -join ', '))
+        return $false
+    }
+    Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" 'installed_plugins.json synced + verified (clone-local installPaths).' 'Green'
+    return $true
+}
+
 function Invoke-InstanceSync([hashtable]$Def) {
     $name      = $Def.Name
     $cloneHome = Join-Path $UserProfile $Def.HomeRel
@@ -551,6 +675,7 @@ function Invoke-InstanceSync([hashtable]$Def) {
     if (-not $McpOnly) {
         if (-not (Sync-SkillsJunction -Name $name -CloneZ $cloneZ -CloneHome $cloneHome)) { $ok = $false }
         if (-not (Sync-PluginCache  -Name $name -CloneZ $cloneZ -CloneCli $cloneCli))     { $ok = $false }
+        if (-not (Sync-InstalledPlugins -Name $name -CloneZ $cloneZ -CloneCli $cloneCli -CloneHome $cloneHome)) { $ok = $false }
     }
     return $ok
 }
