@@ -8,6 +8,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode reset v1.5 — thin manifest over the Python core; Phase 3
+  COMPLETE** (2026-11-14): the final migration (#7 of 7). The 27 steps,
+  their order, audit keys, restore actions and summary are identical to
+  v1.4 (archived `archive/reset_zcode_windows-v1.4.ps1`, local-only); every
+  store mutation now runs through the one `Invoke-GhostCore` helper.
+  Highlights: credentials OAuth clear = `json-remove` with the `oauth:`
+  TOP-LEVEL PREFIX + the `zcodejwttoken` exact key (the M1 prefix mode —
+  the key names embed colons, dotted walking cannot address them);
+  `provider.*.options.apiKey` strip = ONE pre-backup + per-provider
+  `json-set` gated on an EXISTING apiKey (the v1.4 conditional preserved —
+  no provider gains an `options.apiKey` it did not have); RUM store =
+  one `json-patch` (`_arms_uid` + `_arms_session`); `setting.json`
+  `deviceSid` = `json-set` dotted path (created when missing, the v1.4
+  Add-Member behavior); `clear-cli-telemetry` keeps its error-dict contract
+  through the unified helper. **RNG fix (repo convention
+  "RandomNumberGenerator via .GetBytes() only")**: v1.4 generated the
+  Preferences salt with `Get-Random` (time-seeded PRNG, not a CSPRNG) and
+  shared it across EVERY profile the run touched — the core's salt-rotate
+  now generates a CSPRNG 32-lowercase-hex salt PER PROFILE, and
+  `$newArmsUid`/`$newDeviceSid` moved off Get-Random to GetBytes. The
+  fail-fast Python preflight (one of the v1.5 items recorded PENDING in the
+  CHANGELOG) lands here; the remaining recorded v1.5 script items
+  (shared-db scrub [26b], strict backups, abort checkpoint, -DryRun, purge
+  salvage) stay PENDING — separate debt, not part of the migration.
+  **Phase 3 of the Python hybrid roadmap is now COMPLETE: all seven IDE
+  resets are thin manifests and no temp-.py heredoc remains anywhere in the
+  repo.** Pester 238/238, harness PASS, unittest 182 OK. Live comparison
+  run pending user supervision.
 - **MiniMax/OpenCode reset v1.4 — thin manifest over the Python core**
   (2026-11-14): Phase 3 migration #5 — the script that previously required
   NO Python now routes every store mutation through `Invoke-GhostCore`

@@ -53,6 +53,7 @@ repo root, or use `GHOST.bat` (interactive menu).
 ### 5. Reset ZCode ID (`reset_zcode.ps1`)
 
 - 27 steps + `[6b/27]`: everything Qoder-side above (for the Qoder stores ZCode shares) plus `.updaterId`, `telemetry-state.json` (`deviceMid`), credentials OAuth clear, **config.json provider `apiKey` strip (fixes the Unlink → Checking loop)**, coding-plan-cache invalidation, RUM store, `setting.json` (`deviceSid`), session/embedded-browser Chromium data
+- Thin manifest over the Python core since v1.5 — Python required for every step (fail-fast preflight); the per-profile Preferences salts are core-generated CSPRNG values (v1.4 shared one Get-Random salt across profiles)
 - Chat stores (`tasks-index.sqlite`, checkpoints, IndexedDB webview data, Local Storage leveldb) are never touched
 - Timestamped backups + audit log under `%APPDATA%\ZCode\ID_Backups\<ts>` (per-target: Secondary uses `%APPDATA%\ZCode-Second\ID_Backups\<ts>`, Third `%APPDATA%\ZCode-Third`, Fourth `%APPDATA%\ZCode-Fourth`, Fifth `%APPDATA%\ZCode-Fifth`, Sixth `%APPDATA%\ZCode-Sixth`)
 - `-Target Primary` (default reset scope + Qoder steps; menu: ZCode [15] or IDE Resets [7] — both run the same reset), `-Target Secondary|Third|Fourth|Fifth|Sixth` (selective tree-kill, survivors keep running, Qoder untouched), `-Target Both` (Secondary then Primary, back-compat), `-Target All` (Third + Fourth + Fifth + Sixth + Secondary, then Primary incl. Qoder; each child generates its OWN fresh ID set — IDs are never duplicated across instances)

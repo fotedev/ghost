@@ -1,5 +1,60 @@
 #Requires -Version 5.1
-# ZCode / Qoder Identity Reset v1.4
+# ZCode / Qoder Identity Reset v1.5
+#
+# v1.5 -- THIN MANIFEST over the Python core (Phase 3 migration #7 per
+# docs/PYTHON_HYBRID_ROADMAP.md: cursor v0.3 pilot, devin v0.4, trae v0.3,
+# qoderwork v0.2, minimax v1.4, qoder v0.5). The 27 steps, their order, audit
+# keys, restore actions and summary are IDENTICAL to v1.4 (archived at
+# archive/reset_zcode_windows-v1.4.ps1, local-only); every store mutation now
+# runs through src\python\ghost_cli.py (base64 payload in, JSON report out)
+# via ONE invocation helper. What was deleted from v1.4: the local mutation
+# helpers, replaced by the tested ghost.filesweep / ghost.winstore /
+# ghost.backup / ghost.sqlite_keys modules.
+#
+#   v1.4 helper / mechanism         -> v1.5 core verb
+#   Set-VerifiedMachineIdFile       -> machineid-file
+#   Set-JsonIdentity (storage.json/ -> backup + json-patch
+#     telemetry-state.json)
+#   Set-SqliteKeys (state.vscdb +   -> backup + sqlite-update (missing-DB
+#     workspace UPSERT)               loud guard added per the reset_cursor
+#                                     v0.3 pattern)
+#   Clear-SecretsFromSqlite         -> backup + delete-secrets via the ONE
+#                                     Invoke-GhostCore helper
+#   Clear-TreeFilesIndividually     -> sweep-tree
+#   Remove-VerifiedFileNoBackup     -> sweep-file
+#   Remove-OsCryptEncryptedKey      -> json-remove
+#   Set-DeviceIdSalt                -> salt-rotate (the fresh salt is now
+#                                     generated in the core: CSPRNG 32
+#                                     lowercase hex PER PROFILE -- v1.4
+#                                     generated ONE Get-Random (time-seeded
+#                                     PRNG, NOT a CSPRNG) uppercase-hex salt
+#                                     shared across every profile the run
+#                                     touches; per-profile CSPRNG salts are
+#                                     strictly better isolation)
+#   Set-RumElectronStore            -> json-patch (_arms_uid + _arms_session)
+#   Set-WebRemoteControlDeviceSid   -> json-set (dotted path, created when
+#                                     missing -- the v1.4 Add-Member behavior)
+#   Clear-ZcodeOAuthCredentials     -> backup + json-remove (oauth: PREFIX +
+#                                     the zcodejwttoken exact key -- the M1
+#                                     prefix mode; unrelated keys preserved)
+#   Clear-ZcodeProviderApiKeys      -> backup + per-provider json-set gated on
+#                                     an EXISTING apiKey (the v1.4 conditional
+#                                     blanking preserved; structure never
+#                                     gains keys it did not have)
+#   Update-ArgvJsonCrashReporterId  -> patch-argv (JSONC regex twin)
+#   Clear-BinaryIdentityStore       -> store-delete --action delete
+#   clear-cli-telemetry raw call    -> the ONE Invoke-GhostCore helper (the
+#                                     error-dict contract is kept)
+#
+# RNG FIX (repo convention "RandomNumberGenerator via .GetBytes() only"):
+# v1.4 generated $newArmsUid / $newDeviceSid with Get-Random (time-seeded
+# PRNG, not a CSPRNG) -- both generators now use RandomNumberGenerator.
+# GetBytes(). The salt weakness is fixed outright by the core migration.
+#
+# The fail-fast Python preflight (one of the v1.5 items recorded PENDING in
+# the CHANGELOG) lands with this migration; the remaining recorded v1.5
+# items (shared-db scrub [26b], strict backups, abort checkpoint, -DryRun,
+# purge salvage) stay PENDING -- separate debt, not part of the migration.
 #
 # v1.4 adds multi-instance targeting (Primary / Secondary / Third / Fourth /
 # Both / All) on top of v1.3:
@@ -72,8 +127,8 @@
 #   powershell -ExecutionPolicy Bypass -File reset_zcode.ps1 [-Target Primary|Secondary|Both]
 # Prerequisite: the TARGET instance is force-killed by the script; the survivor
 # instance (in Single mode) is intentionally left running.
-# Requirement: Python (python or python3) for SQLite writes; steps that need it
-# FAIL honestly when it is missing.
+# Requirement: Python (python or python3) for EVERY store mutation now
+# (v1.4 needed it only for the SQLite steps) -- fail-fast preflight.
 # NOTE: change_device_id.ps1 is machine-wide (MAC/hostname/registry) and affects
 # ALL ZCode instances + Qoder by design. This script is app-data-only.
 
@@ -161,13 +216,13 @@ if (-not $zcodeIsAdmin) {
     # the full live output while the run progresses.
     $zcodeArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$zcodeScript`"$zcodeFwd"
     Start-Process powershell -Verb RunAs -ArgumentList $zcodeArgs -WindowStyle Normal -Wait
-    if (Test-Path -LiteralPath "$env:TEMP\zcode_v1.3_done.txt") {
-        Get-Content -LiteralPath "$env:TEMP\zcode_v1.3_done.txt"
+    if (Test-Path -LiteralPath "$env:TEMP\zcode_v1.5_done.txt") {
+        Get-Content -LiteralPath "$env:TEMP\zcode_v1.5_done.txt"
     }
     exit
 }
 
-Write-GhostBanner -Target "ZCode/Qoder Identity Reset [$(Get-ZcodeTargetDisplay $Target)]" -Version "1.4"
+Write-GhostBanner -Target "ZCode/Qoder Identity Reset [$(Get-ZcodeTargetDisplay $Target)]" -Version "1.5"
 
 # === Local helpers (mirroring the Cursor reference pattern) ===================
 
@@ -219,6 +274,108 @@ function Get-UserProfileBackupLabel {
     return Get-PathBackupLabel -Path $TargetPath
 }
 
+function _B64Payload {
+    # Compact JSON -> base64: the core bridge's payload contract (sidesteps
+    # PS 5.1 native-argument quoting entirely).
+    param([Parameter(Mandatory = $true)][hashtable]$Payload)
+    $json = $Payload | ConvertTo-Json -Depth 6 -Compress
+    return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
+}
+
+function Invoke-GhostCore {
+    # The ONE PS -> Python invocation point for every store mutation / core
+    # probe. Returns the parsed JSON report, or $null when the core is
+    # missing or the subcommand failed (exit code non-zero). Same recipe
+    # Set-SqliteKeys uses: functional python probe + UTF-8 console + exit-
+    # code check.
+    param([Parameter(Mandatory = $true)][string[]]$CliArgs)
+
+    $cli = Get-GhostPythonCli
+    if (-not $cli) {
+        Write-Host "[FAILED] GHOST Python core not found (src\python\ghost_cli.py)." -ForegroundColor Red
+        return $null
+    }
+    $pythonCommand = Get-PythonCommandInfo
+    if (-not $pythonCommand) {
+        Write-Host "[FAILED] no functional Python 3 found - every ZCode reset step needs it." -ForegroundColor Red
+        return $null
+    }
+    Set-GhostConsoleUtf8
+    $output = & $pythonCommand $cli @CliArgs
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
+    try {
+        return ($output -join "`n") | ConvertFrom-Json
+    }
+    catch {
+        Write-Host "[FAILED] unparseable core output: $($output -join ' ')" -ForegroundColor Red
+        return $null
+    }
+}
+
+function Backup-ViaCore {
+    # Backup-FileToTimestampDir via the core, plus the restore-manifest
+    # action. A locked/failed backup is reported but NOT fatal - the v1.4
+    # contract verbatim (a file whose copy could not be read may still be
+    # deletable, and the caller proceeds).
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][ref]$Actions
+    )
+
+    $report = Invoke-GhostCore @("backup", $Source, $BackupRoot, $Label)
+    if ($null -eq $report) {
+        Write-Host "    [WARN] backup FAILED - proceeding WITHOUT backup: $Source" -ForegroundColor Yellow
+        return $false
+    }
+    if ($report.skipped) { return $false }
+    if ($report.ok -and $report.destination) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Source -BackupPath $report.destination
+        return $true
+    }
+    Write-Host "    [WARN] backup did not complete ($($report.error)) - proceeding" -ForegroundColor Yellow
+    return $false
+}
+
+# Clear-BinaryIdentityStore twin over the core's store-delete verb (one path
+# per core invocation; the PS side loops). Same interface as the shared
+# identity_utils helper so the call sites only swap the function name.
+function Invoke-StoreDelete {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Paths,
+        [ValidateSet("rename", "delete")][string]$Action = "delete",
+        [Parameter(Mandatory = $true)][string]$BackupRoot,
+        [Parameter(Mandatory = $true)][ref]$Audit,
+        [string]$RootPath
+    )
+
+    $results = @()
+    foreach ($path in $Paths) {
+        # Empty label -> the core derives the relative label from --root-path
+        # (same contract as the shared helper's -RootPath).
+        $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot, "",
+            "--action", $Action, "--root-path", $RootPath)
+        if ($null -ne $storeReport) {
+            Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before $storeReport.before -After $storeReport.after -Ok $storeReport.ok
+            if ($storeReport.ok -and $storeReport.backed_up_to) {
+                $results += [ordered]@{
+                    action       = $Action
+                    originalPath = $path
+                    backupPath   = $storeReport.backed_up_to
+                    renamedPath  = $storeReport.renamed_to
+                }
+            }
+        }
+        else {
+            Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before "present" -After "core-invoke-failed" -Ok $false
+        }
+    }
+    return $results
+}
+
 function Set-VerifiedMachineIdFile {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -231,24 +388,29 @@ function Set-VerifiedMachineIdFile {
 
     $beforeValue = $null
     if (Test-Path -LiteralPath $Path) {
-        $beforeValue = (Get-Content -LiteralPath $Path -Raw).Trim()
-        $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-        if ($backupPath) {
-            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+        try {
+            $beforeValue = (Get-Content -LiteralPath $Path -Raw).Trim()
+        }
+        catch {
+            $beforeValue = $null
         }
     }
 
-    $parent = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($parent)) {
-        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    # Core: machineid-file (backup if present, BOM-less UTF-8 write, re-read
+    # verify -- the v1.4 contract verbatim; the core also creates the parent
+    # directory when missing).
+    $report = Invoke-GhostCore @("machineid-file", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ value = $Value }))
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "machineid" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+        }
+        return $true
     }
 
-    # No-BOM UTF-8. Set-Content -Encoding UTF8 emits a BOM on PS 5.1.
-    [System.IO.File]::WriteAllText($Path, $Value, (New-Object System.Text.UTF8Encoding $false))
-    $afterValue = (Get-Content -LiteralPath $Path -Raw).Trim()
-    $ok = $afterValue -eq $Value
-    Add-AuditEntry -Audit $Audit -File $Path -Key "machineid" -Before $beforeValue -After $afterValue -Ok $ok
-    return $ok
+    Add-AuditEntry -Audit $Audit -File $Path -Key "machineid" -Before $beforeValue -After "verify-failed" -Ok $false
+    return $false
 }
 
 function Confirm-JsonValues {
@@ -283,13 +445,18 @@ function Invoke-WorkspaceSqliteUpdate {
     )
 
     # UPSERT ONLY -- never delete workspace tables/files (chat preservation).
-    $ok = Set-SqliteKeys `
-        -Path $WorkspaceDbPath `
-        -Updates @{ "storage.serviceMachineId" = $DeviceId } `
-        -Audit $Audit `
-        -BackupRoot $BackupRoot `
-        -BackupLabel (Get-AppRelativeBackupLabel -RootPath $RootPath -TargetPath $WorkspaceDbPath) `
-        -Actions $Actions
+    # Core: backup + sqlite-update (Set-SqliteKeys' contract split across the
+    # core verbs; the verify-after re-read carries the [OK]/[FAILED] verdict).
+    $null = Backup-ViaCore -Source $WorkspaceDbPath -BackupRoot $BackupRoot -Label (Get-AppRelativeBackupLabel -RootPath $RootPath -TargetPath $WorkspaceDbPath) -Actions $Actions
+    $wsReport = Invoke-GhostCore @("sqlite-update", $WorkspaceDbPath, (_B64Payload @{ "storage.serviceMachineId" = $DeviceId }))
+    $ok = $false
+    if ($null -ne $wsReport -and $null -ne $wsReport.after -and ($wsReport.after."storage.serviceMachineId" -eq $DeviceId)) {
+        Add-AuditEntry -Audit $Audit -File $WorkspaceDbPath -Key "storage.serviceMachineId" -Before $wsReport.before."storage.serviceMachineId" -After $wsReport.after."storage.serviceMachineId" -Ok $true
+        $ok = $true
+    }
+    else {
+        Add-AuditEntry -Audit $Audit -File $WorkspaceDbPath -Key "storage.serviceMachineId" -Before $null -After $DeviceId -Ok $false
+    }
 
     if ($ok) {
         Write-Host "    [OK] workspace DB updated: $WorkspaceDbPath" -ForegroundColor Green
@@ -318,54 +485,32 @@ function Clear-SecretsFromSqlite {
         return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-    }
+    $null = Backup-ViaCore -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel -Actions $Actions
 
-    $pythonCommand = Get-PythonCommandInfo
-    if (-not $pythonCommand) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "python-not-found" -Ok $false
-        Write-Host "    [FAILED] Python 3 not found -- secrets deletion SKIPPED: $Path" -ForegroundColor Red
-        Write-Host "    Install Python 3 and re-run: winget install Python.Python.3.12" -ForegroundColor Yellow
+    # Core: delete-secrets via the ONE invocation helper (the logic has lived
+    # in the shared core since the Phase 3 pilot -- v1.4 called it directly;
+    # v1.5 unifies the invocation).
+    $result = Invoke-GhostCore @("delete-secrets", $Path)
+    if ($null -eq $result -or $null -eq $result.survivors) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "core-invoke-failed" -Ok $false
+        Write-Host "    [FAILED] secrets deletion core invocation failed: $Path" -ForegroundColor Red
         return $false
     }
 
-    $ghostCli = Get-GhostPythonCli
-    if (-not $ghostCli) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "ghost-core-missing" -Ok $false
-        Write-Host "    [FAILED] GHOST Python core not found -- secrets deletion SKIPPED: $Path" -ForegroundColor Red
-        return $false
+    # survivors is a LIST (one COUNT per pattern/key): PS array -eq 0
+    # FILTERS elements instead of answering "all zero" - sum explicitly.
+    $survivorTotal = ($result.survivors | Measure-Object -Sum).Sum
+    $ok = ($survivorTotal -eq 0)
+    $deletedCount = $result.deleted.Count
+    if ($ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After ("deleted " + $deletedCount) -Ok $true
+        Write-Host "    [OK] secrets deleted: $deletedCount keys from $Path" -ForegroundColor Green
     }
-
-    try {
-        Set-GhostConsoleUtf8
-        $commandOutput = & $pythonCommand $ghostCli "delete-secrets" $Path
-        if ($LASTEXITCODE -ne 0) {
-            Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "failed" -Ok $false
-            Write-Host "    [FAILED] secrets deletion command failed: $Path" -ForegroundColor Red
-            return $false
-        }
-
-        $result = ($commandOutput -join "`n") | ConvertFrom-Json
-        $survivorTotal = ($result.survivors | Measure-Object -Sum).Sum
-        $ok = ($survivorTotal -eq 0)
-        $deletedCount = $result.deleted.Count
-        if ($ok) {
-            Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After ("deleted " + $deletedCount) -Ok $true
-            Write-Host "    [OK] secrets deleted: $deletedCount keys from $Path" -ForegroundColor Green
-        }
-        else {
-            Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After ("survivors=" + $survivorTotal) -Ok $false
-            Write-Host "    [FAILED] secrets survivors remain: $survivorTotal in $Path" -ForegroundColor Red
-        }
-        return $ok
+    else {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After ("survivors=" + $survivorTotal) -Ok $false
+        Write-Host "    [FAILED] secrets survivors remain: $survivorTotal in $Path" -ForegroundColor Red
     }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "exception" -Ok $false
-        Write-Host "    [FAILED] secrets deletion threw exception: $Path" -ForegroundColor Red
-        return $false
-    }
+    return $ok
 }
 
 # Delete every file under $Path individually with retry, then prune empty dirs.
@@ -386,56 +531,31 @@ function Clear-TreeFilesIndividually {
         return @{ Deleted = 0; Failed = 0; FailedPaths = @() }
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-
-    $files = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)
-    $deleted = 0
-    $failed = 0
-    $failedPaths = @()
-
-    foreach ($file in $files) {
-        $fileDeleted = $false
-        $lastError = $null
-        for ($i = 0; $i -lt 4; $i++) {
-            try {
-                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
-                $fileDeleted = $true
-                break
-            }
-            catch {
-                $lastError = $_.Exception.Message
-                Start-Sleep -Milliseconds (500 * ($i + 1))
-            }
-        }
-        if ($fileDeleted) {
-            $deleted++
-        }
-        else {
-            $failed++
-            $failedPaths += $file.FullName
-            Add-AuditEntry -Audit $Audit -File $file.FullName -Key "binary-store" -Before "present" -After ("delete-failed: " + $lastError) -Ok $false
-        }
+    # Core: sweep-tree (the per-file retry curve + bottom-up dir pruning twin;
+    # the whole-tree backup is the single restorable delete action).
+    $sweepReport = Invoke-GhostCore @("sweep-tree", $Path, $BackupRoot, $BackupLabel)
+    if ($null -eq $sweepReport) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After "core-invoke-failed" -Ok $false
+        return @{ Deleted = 0; Failed = 0; FailedPaths = @() }
     }
 
-    $dirs = @(Get-ChildItem -LiteralPath $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue |
-        Sort-Object { $_.FullName.Length } -Descending)
-    foreach ($dir in $dirs) {
-        $null = Remove-Item -LiteralPath $dir.FullName -Force -ErrorAction SilentlyContinue
+    foreach ($failedPath in @($sweepReport.failed_paths)) {
+        Add-AuditEntry -Audit $Audit -File $failedPath -Key "binary-store" -Before "present" -After "delete-failed" -Ok $false
     }
-    $null = Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 
-    $summary = "deleted=$deleted failed=$failed"
-    $ok = ($failed -eq 0)
+    $summary = "deleted=" + $sweepReport.deleted + " failed=" + $sweepReport.failed
+    $ok = ($sweepReport.failed -eq 0)
     Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After $summary -Ok $ok
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath -Action "delete"
+    if ($sweepReport.backed_up_to) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $sweepReport.backed_up_to -Action "delete"
     }
 
-    return @{ Deleted = $deleted; Failed = $failed; FailedPaths = $failedPaths }
+    return @{ Deleted = $sweepReport.deleted; Failed = $sweepReport.failed; FailedPaths = @($sweepReport.failed_paths) }
 }
 
 # Delete a stale file WITHOUT backing it up (used for *.backup sidecars and
-# similar regenerable files). Verifies the path is gone afterwards.
+# similar regenerable files). Verifies the path is gone afterwards. Core:
+# sweep-file.
 function Remove-VerifiedFileNoBackup {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -448,9 +568,9 @@ function Remove-VerifiedFileNoBackup {
         return $true
     }
 
-    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
-    if (-not (Test-Path -LiteralPath $Path)) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before "present" -After "deleted" -Ok $true
+    $report = Invoke-GhostCore @("sweep-file", $Path)
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key $AuditKey -Before $report.before -After $report.after -Ok $true
         return $true
     }
 
@@ -489,7 +609,7 @@ function Remove-AppPathSafely {
         return "link-removed"
     }
 
-    $binaryActions = Clear-BinaryIdentityStore -Paths @($Path) -Action "delete" -BackupRoot $BackupRoot -Audit $Audit -RootPath $env:USERPROFILE
+    $binaryActions = Invoke-StoreDelete -Paths @($Path) -Action "delete" -BackupRoot $BackupRoot -Audit $Audit -RootPath $env:USERPROFILE
     $Actions.Value += @($binaryActions)
     return "deleted"
 }
@@ -509,55 +629,36 @@ function Remove-OsCryptEncryptedKey {
         return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-    }
-
-    try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After "parse-failed" -Ok $false
-        Write-Host "    [FAILED] could not parse Local State: $Path" -ForegroundColor Red
+    # Core: json-remove (dotted path). The core backs the file up whenever it
+    # exists -- the v1.4 backup-when-present contract; the manifest action is
+    # recorded whenever the backup landed (v1.4 parity).
+    $report = Invoke-GhostCore @("json-remove", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ keys = @("os_crypt.encrypted_key") }))
+    if ($null -eq $report -or (-not $report.ok)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "present" -After "core-invoke-failed" -Ok $false
+        Write-Host "    [FAILED] os_crypt removal core invocation failed: $Path" -ForegroundColor Red
         return $false
     }
 
-    $beforeValue = if ($null -ne $content.PSObject.Properties['os_crypt']) { "present" } else { "missing" }
-    if ($null -eq $content.PSObject.Properties['os_crypt']) {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before "missing" -After "skipped" -Ok $true
+    if ($report.backed_up_to) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+    }
+
+    $osBefore = $report.before."os_crypt.encrypted_key"
+    $afterValue = if ($osBefore -eq "missing") { "skipped" } else { "removed" }
+    Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before $osBefore -After $afterValue -Ok $true
+    if ($afterValue -eq "removed") {
+        Write-Host "    [OK] os_crypt.encrypted_key removed: $Path" -ForegroundColor Green
+    }
+    else {
         Write-Host "    [SKIP] os_crypt not found in: $Path" -ForegroundColor Yellow
-        return $true
     }
-
-    $content.os_crypt.PSObject.Properties.Remove('encrypted_key')
-
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-        $afterValue = if ($null -eq $verified.os_crypt.PSObject.Properties['encrypted_key']) { "removed" } else { "still-present" }
-        $ok = $afterValue -eq "removed"
-        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before $beforeValue -After $afterValue -Ok $ok
-        if ($ok) {
-            Write-Host "    [OK] os_crypt.encrypted_key removed: $Path" -ForegroundColor Green
-        }
-        else {
-            Write-Host "    [FAILED] os_crypt.encrypted_key still present: $Path" -ForegroundColor Red
-        }
-        return $ok
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "os_crypt.encrypted_key" -Before $beforeValue -After "verify-failed" -Ok $false
-        Write-Host "    [FAILED] could not re-read Local State after write: $Path" -ForegroundColor Red
-        return $false
-    }
+    return $true
 }
 
 function Set-DeviceIdSalt {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$NewSalt,
         [Parameter(Mandatory = $true)][string]$BackupRoot,
         [Parameter(Mandatory = $true)][string]$BackupLabel,
         [Parameter(Mandatory = $true)][ref]$Audit,
@@ -570,61 +671,23 @@ function Set-DeviceIdSalt {
         return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-    }
-
-    try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before "present" -After "parse-failed" -Ok $false
-        Write-Host "    [FAILED] could not parse Preferences: $Path" -ForegroundColor Red
-        return $false
-    }
-
-    $beforeValue = $null
-    $targetKey = "electron.media.device_id_salt"
-
-    $electronProp = if ($null -ne $content.PSObject.Properties['electron']) { $content.electron } else { $null }
-    if ($electronProp -and ($null -ne $electronProp.PSObject.Properties['media'])) {
-        $mediaProp = $electronProp.media
-        if ($null -ne $mediaProp.PSObject.Properties['device_id_salt']) {
-            $beforeValue = $mediaProp.device_id_salt
+    # Core: salt-rotate -- the fresh salt is generated there (CSPRNG 32
+    # lowercase hex, PER PROFILE; v1.4 generated ONE Get-Random uppercase-hex
+    # salt shared across every profile the run touched -- a cross-profile
+    # correlation signal AND a weak PRNG).
+    $report = Invoke-GhostCore @("salt-rotate", $Path, $BackupRoot, $BackupLabel)
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
         }
+        Write-Host "    [OK] device_id_salt updated: $Path" -ForegroundColor Green
+        return $true
     }
 
-    if ($null -eq $electronProp) {
-        Add-Member -InputObject $content -NotePropertyName 'electron' -NotePropertyValue @{ media = @{ device_id_salt = $NewSalt } }
-    }
-    elseif ($null -eq $electronProp.PSObject.Properties['media']) {
-        Add-Member -InputObject $content.electron -NotePropertyName 'media' -NotePropertyValue @{ device_id_salt = $NewSalt }
-    }
-    else {
-        $content.electron.media.device_id_salt = $NewSalt
-    }
-
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-        $actualValue = $verified.electron.media.device_id_salt
-        $ok = $actualValue -eq $NewSalt
-        Add-AuditEntry -Audit $Audit -File $Path -Key $targetKey -Before $beforeValue -After $actualValue -Ok $ok
-        if ($ok) {
-            Write-Host "    [OK] device_id_salt updated: $Path" -ForegroundColor Green
-        }
-        else {
-            Write-Host "    [FAILED] device_id_salt verification failed: $Path" -ForegroundColor Red
-        }
-        return $ok
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key $targetKey -Before $beforeValue -After "verify-failed" -Ok $false
-        Write-Host "    [FAILED] could not re-read Preferences after write: $Path" -ForegroundColor Red
-        return $false
-    }
+    Add-AuditEntry -Audit $Audit -File $Path -Key "electron.media.device_id_salt" -Before "present" -After "verify-failed" -Ok $false
+    Write-Host "    [FAILED] device_id_salt verification failed: $Path" -ForegroundColor Red
+    return $false
 }
 
 function Set-RumElectronStore {
@@ -644,59 +707,22 @@ function Set-RumElectronStore {
         return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    # Core: backup + json-patch (both keys in ONE verified write; the create-
+    # when-missing behavior matches the v1.4 Add-Member branches).
+    $null = Backup-ViaCore -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel -Actions $Actions
+    $patchUpdates = @{ "_arms_uid" = $NewUid; "_arms_session" = $NewSession }
+    $report = Invoke-GhostCore @("json-patch", $Path, (_B64Payload $patchUpdates))
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "_arms_uid" -Before $report.before."_arms_uid" -After $report.after."_arms_uid" -Ok $true
+        Add-AuditEntry -Audit $Audit -File $Path -Key "_arms_session" -Before $report.before."_arms_session" -After $report.after."_arms_session" -Ok $true
+        Write-Host "    [OK] RUM telemetry updated: $Path" -ForegroundColor Green
+        return $true
     }
 
-    try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "rum-electron-store" -Before "present" -After "parse-failed" -Ok $false
-        Write-Host "    [FAILED] could not parse rum-electron-store: $Path" -ForegroundColor Red
-        return $false
-    }
-
-    $beforeUid = if ($null -ne $content.PSObject.Properties['_arms_uid']) { $content._arms_uid } else { $null }
-    $beforeSession = if ($null -ne $content.PSObject.Properties['_arms_session']) { $content._arms_session } else { $null }
-
-    if ($null -eq $content.PSObject.Properties['_arms_uid']) {
-        Add-Member -InputObject $content -NotePropertyName '_arms_uid' -NotePropertyValue $NewUid
-    }
-    else {
-        $content._arms_uid = $NewUid
-    }
-
-    if ($null -eq $content.PSObject.Properties['_arms_session']) {
-        Add-Member -InputObject $content -NotePropertyName '_arms_session' -NotePropertyValue $NewSession
-    }
-    else {
-        $content._arms_session = $NewSession
-    }
-
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-        $uidOk = $verified._arms_uid -eq $NewUid
-        $sessionOk = $verified._arms_session -eq $NewSession
-        Add-AuditEntry -Audit $Audit -File $Path -Key "_arms_uid" -Before $beforeUid -After $verified._arms_uid -Ok $uidOk
-        Add-AuditEntry -Audit $Audit -File $Path -Key "_arms_session" -Before $beforeSession -After $verified._arms_session -Ok $sessionOk
-        if ($uidOk -and $sessionOk) {
-            Write-Host "    [OK] RUM telemetry updated: $Path" -ForegroundColor Green
-        }
-        else {
-            Write-Host "    [FAILED] RUM telemetry verification failed: $Path" -ForegroundColor Red
-        }
-        return ($uidOk -and $sessionOk)
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "_arms_uid" -Before $beforeUid -After "verify-failed" -Ok $false
-        Add-AuditEntry -Audit $Audit -File $Path -Key "_arms_session" -Before $beforeSession -After "verify-failed" -Ok $false
-        Write-Host "    [FAILED] could not re-read rum-electron-store after write: $Path" -ForegroundColor Red
-        return $false
-    }
+    Add-AuditEntry -Audit $Audit -File $Path -Key "_arms_uid" -Before $null -After $NewUid -Ok $false
+    Add-AuditEntry -Audit $Audit -File $Path -Key "_arms_session" -Before $null -After $NewSession -Ok $false
+    Write-Host "    [FAILED] RUM telemetry verification failed: $Path" -ForegroundColor Red
+    return $false
 }
 
 function Set-WebRemoteControlDeviceSid {
@@ -715,56 +741,23 @@ function Set-WebRemoteControlDeviceSid {
         return $true
     }
 
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
+    # Core: json-set (dotted path; intermediate dicts created when missing --
+    # exactly the v1.4 Add-Member branches; verify-after re-read walks the
+    # same path).
+    $report = Invoke-GhostCore @("json-set", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ key = "webRemoteControlExternalRelayDevice.deviceSid"; value = $NewSid }))
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "webRemoteControlExternalRelayDevice.deviceSid" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
+        }
+        Write-Host "    [OK] deviceSid updated: $Path" -ForegroundColor Green
+        return $true
     }
 
-    try {
-        $content = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "webRemoteControlExternalRelayDevice.deviceSid" -Before "present" -After "parse-failed" -Ok $false
-        Write-Host "    [FAILED] could not parse setting.json: $Path" -ForegroundColor Red
-        return $false
-    }
-
-    $beforeValue = $null
-    $deviceProp = $null
-    if ($null -ne $content.PSObject.Properties['webRemoteControlExternalRelayDevice']) {
-        $deviceProp = $content.webRemoteControlExternalRelayDevice
-        if ($null -ne $deviceProp.PSObject.Properties['deviceSid']) {
-            $beforeValue = $deviceProp.deviceSid
-            $content.webRemoteControlExternalRelayDevice.deviceSid = $NewSid
-        }
-        else {
-            Add-Member -InputObject $deviceProp -NotePropertyName 'deviceSid' -NotePropertyValue $NewSid
-        }
-    }
-    else {
-        Add-Member -InputObject $content -NotePropertyName 'webRemoteControlExternalRelayDevice' -NotePropertyValue @{ deviceSid = $NewSid }
-    }
-
-    [System.IO.File]::WriteAllText($Path, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-
-    try {
-        $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-        $actualValue = $verified.webRemoteControlExternalRelayDevice.deviceSid
-        $ok = $actualValue -eq $NewSid
-        Add-AuditEntry -Audit $Audit -File $Path -Key "webRemoteControlExternalRelayDevice.deviceSid" -Before $beforeValue -After $actualValue -Ok $ok
-        if ($ok) {
-            Write-Host "    [OK] deviceSid updated: $Path" -ForegroundColor Green
-        }
-        else {
-            Write-Host "    [FAILED] deviceSid verification failed: $Path" -ForegroundColor Red
-        }
-        return $ok
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $Path -Key "webRemoteControlExternalRelayDevice.deviceSid" -Before $beforeValue -After "verify-failed" -Ok $false
-        Write-Host "    [FAILED] could not re-read setting.json after write: $Path" -ForegroundColor Red
-        return $false
-    }
+    Add-AuditEntry -Audit $Audit -File $Path -Key "webRemoteControlExternalRelayDevice.deviceSid" -Before "present" -After "verify-failed" -Ok $false
+    Write-Host "    [FAILED] deviceSid verification failed: $Path" -ForegroundColor Red
+    return $false
 }
 
 function Clear-ZcodeOAuthCredentials {
@@ -782,10 +775,7 @@ function Clear-ZcodeOAuthCredentials {
     }
 
     $backupLabel = Get-PathBackupLabel -Path $CredentialsPath
-    $backupPath = Backup-FileToTimestampDir -Source $CredentialsPath -BackupRoot $BackupRoot -Label $backupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $CredentialsPath -BackupPath $backupPath
-    }
+    $null = Backup-ViaCore -Source $CredentialsPath -BackupRoot $BackupRoot -Label $backupLabel -Actions $Actions
 
     try {
         $content = Get-Content -LiteralPath $CredentialsPath -Raw | ConvertFrom-Json
@@ -806,67 +796,33 @@ function Clear-ZcodeOAuthCredentials {
     # oauth:active_provider, oauth:login_attribution, etc.) plus the long-lived
     # zcodejwttoken. Preserve unrelated keys such as zcodefeedbackclientid and
     # web-remote-control:external-relay:pass_hash.
-    $keysToDelete = @()
-    foreach ($prop in $content.PSObject.Properties) {
-        if ($prop.Name.StartsWith("oauth:", [System.StringComparison]::OrdinalIgnoreCase)) {
-            $keysToDelete += $prop.Name
-        }
-        elseif ($prop.Name -ieq "zcodejwttoken") {
-            $keysToDelete += $prop.Name
-        }
-    }
-    $keysToDelete = $keysToDelete | Select-Object -Unique
-
-    foreach ($key in $keysToDelete) {
-        $null = $content.PSObject.Properties.Remove($key)
-    }
-
-    try {
-        $oauthJson = $content | ConvertTo-Json -Depth 20
-        [System.IO.File]::WriteAllText($CredentialsPath, $oauthJson, (New-Object System.Text.UTF8Encoding $false))
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $CredentialsPath -Key "oauth-credentials" -Before "present" -After "write-failed" -Ok $false
-        Write-Host "    [FAILED] could not write credentials.json: $CredentialsPath" -ForegroundColor Red
+    # Core: json-remove -- the oauth family is addressed by the TOP-LEVEL
+    # PREFIX "oauth:" (the M1 prefix mode; the names embed colons so dotted
+    # walking cannot address them) plus the zcodejwttoken exact key. The
+    # core's verify-after asserts BOTH the prefix family and the exact key
+    # are gone on re-read.
+    $removalConfig = @{ keys = @("zcodejwttoken"); prefixes = @("oauth:") }
+    $report = Invoke-GhostCore @("json-remove", $CredentialsPath, $BackupRoot, $backupLabel,
+        (_B64Payload $removalConfig))
+    if ($null -eq $report -or (-not $report.ok)) {
+        Add-AuditEntry -Audit $Audit -File $CredentialsPath -Key "oauth-credentials" -Before "present" -After "core-invoke-failed" -Ok $false
+        Write-Host "    [FAILED] oauth wipe core invocation failed: $CredentialsPath" -ForegroundColor Red
         return $false
     }
-
-    try {
-        $verified = Get-Content -LiteralPath $CredentialsPath -Raw | ConvertFrom-Json
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $CredentialsPath -Key "oauth-credentials" -Before "present" -After "verify-parse-failed" -Ok $false
-        Write-Host "    [FAILED] could not re-parse credentials.json after write: $CredentialsPath" -ForegroundColor Red
-        return $false
+    if ($report.backed_up_to) {
+        Add-ActionEntry -Actions $Actions -OriginalPath $CredentialsPath -BackupPath $report.backed_up_to
     }
 
-    $remainingBanned = @()
-    if ($null -ne $verified) {
-        foreach ($prop in $verified.PSObject.Properties) {
-            if ($prop.Name.StartsWith("oauth:", [System.StringComparison]::OrdinalIgnoreCase)) {
-                $remainingBanned += $prop.Name
-            }
-            elseif ($prop.Name -ieq "zcodejwttoken") {
-                $remainingBanned += $prop.Name
-            }
-        }
+    $removedCount = @($report.removed).Count
+    foreach ($prop in $report.removed_prefixes.PSObject.Properties) {
+        $removedCount += [int]$prop.Value
     }
 
-    $ok = ($remainingBanned.Count -eq 0)
-    $afterSummary = if ($ok) {
-        "deleted $($keysToDelete.Count) oauth keys"
-    }
-    else {
-        "remaining-banned: $($remainingBanned -join ',')"
-    }
+    $ok = $true
+    $afterSummary = "deleted $removedCount oauth keys"
     Add-AuditEntry -Audit $Audit -File $CredentialsPath -Key "oauth-credentials" -Before "present" -After $afterSummary -Ok $ok
 
-    if ($ok) {
-        Write-Host "    [OK] credentials.json OAuth tokens cleared: $($keysToDelete.Count) keys removed" -ForegroundColor Green
-    }
-    else {
-        Write-Host "    [FAILED] credentials.json still has banned keys: $afterSummary" -ForegroundColor Red
-    }
+    Write-Host "    [OK] credentials.json OAuth tokens cleared: $removedCount keys removed" -ForegroundColor Green
     return $ok
 }
 
@@ -892,10 +848,7 @@ function Clear-ZcodeProviderApiKeys {
     }
 
     $backupLabel = Get-UserProfileBackupLabel -TargetPath $ConfigPath
-    $backupPath = Backup-FileToTimestampDir -Source $ConfigPath -BackupRoot $BackupRoot -Label $backupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $ConfigPath -BackupPath $backupPath
-    }
+    $null = Backup-ViaCore -Source $ConfigPath -BackupRoot $BackupRoot -Label $backupLabel -Actions $Actions
 
     try {
         $content = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
@@ -912,23 +865,36 @@ function Clear-ZcodeProviderApiKeys {
         return $true
     }
 
+    # Core: ONE pre-backup, then per-provider json-set -- only providers whose
+    # options.apiKey ALREADY EXISTS get blanked (the v1.4 conditional; json-set
+    # would otherwise CREATE options.apiKey on providers that never had one).
+    # Each json-set is its own verified dotted-path write; the audit entry is
+    # the aggregated v1.4 shape.
     $clearedCount = 0
+    $patchFailures = 0
     foreach ($prop in $content.provider.PSObject.Properties) {
         if (($null -ne $prop.Value) -and ($null -ne $prop.Value.PSObject.Properties['options']) -and
             ($null -ne $prop.Value.options.PSObject.Properties['apiKey'])) {
-            if ($prop.Value.options.apiKey -ne '') {
-                $clearedCount++
+            $dottedKey = "provider." + $prop.Name + ".options.apiKey"
+            $keyReport = Invoke-GhostCore @("json-set", $ConfigPath, $BackupRoot, $backupLabel,
+                (_B64Payload @{ key = $dottedKey; value = "" }))
+            if ($null -ne $keyReport -and $keyReport.ok) {
+                if ($prop.Value.options.apiKey -ne '') {
+                    $clearedCount++
+                }
+                if ($keyReport.backed_up_to) {
+                    Add-ActionEntry -Actions $Actions -OriginalPath $ConfigPath -BackupPath $keyReport.backed_up_to
+                }
             }
-            $prop.Value.options.apiKey = ''
+            else {
+                $patchFailures++
+            }
         }
     }
 
-    try {
-        [System.IO.File]::WriteAllText($ConfigPath, ($content | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
-    }
-    catch {
-        Add-AuditEntry -Audit $Audit -File $ConfigPath -Key "provider-apikeys" -Before "present" -After "write-failed" -Ok $false
-        Write-Host "    [FAILED] could not write config.json: $ConfigPath" -ForegroundColor Red
+    if ($patchFailures -gt 0) {
+        Add-AuditEntry -Audit $Audit -File $ConfigPath -Key "provider-apikeys" -Before "present" -After ("json-set failures: " + $patchFailures) -Ok $false
+        Write-Host "    [FAILED] provider apiKey blanking had core invocation failures: $ConfigPath" -ForegroundColor Red
         return $false
     }
 
@@ -990,56 +956,24 @@ function Update-ArgvJsonCrashReporterId {
         return $true
     }
 
-    $raw = Get-Content -LiteralPath $Path -Raw
-    $before = $null
-    $beforeMatch = [regex]::Match($raw, '"crash-reporter-id"\s*:\s*"([^"]+)"')
-    if ($beforeMatch.Success) {
-        $before = $beforeMatch.Groups[1].Value
-    }
-
-    $backupPath = Backup-FileToTimestampDir -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel
-    if ($backupPath) {
-        Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $backupPath
-    }
-
-    $pattern = '"crash-reporter-id"\s*:\s*"[^"]+"'
-    $replacement = '"crash-reporter-id": "' + $NewCrashReporterId + '"'
-    if ([regex]::IsMatch($raw, $pattern)) {
-        $newRaw = [regex]::Replace($raw, $pattern, $replacement)
-    }
-    else {
-        $trimmed = $raw.TrimEnd()
-        if ($trimmed.EndsWith("}")) {
-            $newRaw = $trimmed.Substring(0, $trimmed.Length - 1).TrimEnd()
-            if ($newRaw.EndsWith("{")) {
-                $newRaw = $newRaw + "`n  " + $replacement + "`n}"
-            }
-            else {
-                $newRaw = $newRaw.TrimEnd(",") + ",`n  " + $replacement + "`n}"
-            }
+    # Core: patch-argv (winstore.patch_argv_json -- the same JSONC regex twin:
+    # comments + every other field survive verbatim, the crash-reporter-id
+    # value is regex-replaced or inserted before the final brace, verify-after
+    # by re-read).
+    $report = Invoke-GhostCore @("patch-argv", $Path, $BackupRoot, $BackupLabel,
+        (_B64Payload @{ new_id = $NewCrashReporterId }))
+    if ($null -ne $report -and $report.ok) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "crash-reporter-id" -Before $report.before -After $report.after -Ok $true
+        if ($report.backed_up_to) {
+            Add-ActionEntry -Actions $Actions -OriginalPath $Path -BackupPath $report.backed_up_to
         }
-        else {
-            Add-AuditEntry -Audit $Audit -File $Path -Key "crash-reporter-id" -Before $before -After "unparseable" -Ok $false
-            Write-Host "    [FAILED] argv.json has no JSON object to extend: $Path" -ForegroundColor Red
-            return $false
-        }
-    }
-
-    [System.IO.File]::WriteAllText($Path, $newRaw, (New-Object System.Text.UTF8Encoding $false))
-
-    $verifyRaw = Get-Content -LiteralPath $Path -Raw
-    $verifyMatch = [regex]::Match($verifyRaw, '"crash-reporter-id"\s*:\s*"([^"]+)"')
-    $verified = if ($verifyMatch.Success) { $verifyMatch.Groups[1].Value } else { $null }
-
-    $ok = ($verified -eq $NewCrashReporterId)
-    Add-AuditEntry -Audit $Audit -File $Path -Key "crash-reporter-id" -Before $before -After $verified -Ok $ok
-    if ($ok) {
         Write-Host "    [OK] argv.json crash-reporter-id updated" -ForegroundColor Green
+        return $true
     }
-    else {
-        Write-Host "    [FAILED] argv.json crash-reporter-id verification failed" -ForegroundColor Red
-    }
-    return $ok
+
+    Add-AuditEntry -Audit $Audit -File $Path -Key "crash-reporter-id" -Before "present" -After "verify-failed" -Ok $false
+    Write-Host "    [FAILED] argv.json crash-reporter-id verification failed" -ForegroundColor Red
+    return $false
 }
 
 # === v1.1 robustness helpers (ported from reset_qoder_windows-v0.3.ps1, kept in v1.2/v1.3) ========
@@ -1537,14 +1471,14 @@ $qoderRoaming = Join-Path $env:APPDATA "Qoder"
 $qoderUserProfile = Join-Path $env:USERPROFILE ".qoder"
 $qoderIdBackupsRoot = Join-Path $qoderRoaming "ID_Backups"
 
-# --- v1.4 target resolution ---------------------------------------------------
+# --- target resolution (v1.4 mechanism, unchanged) ---------------------------------------------------
 # Both/All modes orchestrate INDEPENDENT child runs (clones first with -SkipQoder
 # so Qoder steps execute exactly once, in the Primary child). Each child
 # generates its OWN fresh ID set -> per-instance identity rule holds.
 # 'Both' = Secondary + Primary (kept for backward compatibility with menus).
 # 'All'  = Third + Fourth + Fifth + Sixth + Secondary + Primary.
 if (($Target -eq 'Both') -or ($Target -eq 'All')) {
-    $v14Script = $MyInvocation.MyCommand.Path
+    $orchestratorScript = $MyInvocation.MyCommand.Path
     if ($Target -eq 'Both') {
         $children = @(
             @{ Label = 'Secondary'; SkipQoder = $true },
@@ -1561,7 +1495,7 @@ if (($Target -eq 'Both') -or ($Target -eq 'All')) {
         )
     }
     $childCount = $children.Count
-    Write-Host "=== ZCode Identity Reset v1.4 - $(Get-ZcodeTargetDisplay $Target) - independent IDs per instance ===" -ForegroundColor Cyan
+    Write-Host "=== ZCode Identity Reset v1.5 - $(Get-ZcodeTargetDisplay $Target) - independent IDs per instance ===" -ForegroundColor Cyan
     $exitCodes = @()
     for ($ci = 0; $ci -lt $childCount; $ci++) {
         $child = $children[$ci]
@@ -1600,6 +1534,14 @@ if (-not (Test-Path -LiteralPath $zcodeRoaming)) {
     exit 1
 }
 
+# v1.5: the core must be present and a functional Python 3 with it - fail
+# fast BEFORE touching anything (v1.4 needed Python only for the SQLite
+# steps; v1.5 routes every store mutation through the core).
+if ((-not (Get-GhostPythonCli)) -or (-not (Get-PythonCommandInfo))) {
+    Write-Host "[FAILED] GHOST Python core (src\python\ghost_cli.py) missing or no functional Python 3 found - every ZCode reset step needs it (winget install Python.Python.3.12)." -ForegroundColor Red
+    exit 1
+}
+
 $qoderPresent = Test-Path -LiteralPath $qoderRoaming
 $qoderProfiles = @()
 if ($qoderPresent) {
@@ -1613,7 +1555,7 @@ if ($SkipQoder) {
 
 New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
 
-Write-Host "=== ZCode / Qoder Identity Reset v1.4 - Target: $(Get-ZcodeTargetDisplay $Target) ===" -ForegroundColor Cyan
+Write-Host "=== ZCode / Qoder Identity Reset v1.5 - Target: $(Get-ZcodeTargetDisplay $Target) ===" -ForegroundColor Cyan
 Write-Host "ZCode $(Get-ZcodeTargetDisplay $Target): $zcodeRoaming" -ForegroundColor Gray
 Write-Host "ZCode data: $zcodeUserProfile" -ForegroundColor Gray
 if ($qoderPresent) {
@@ -1653,12 +1595,22 @@ $failCount = 0
 
 $newDeviceMid = ([guid]::NewGuid().ToString()).ToLowerInvariant()
 $newUpdaterId = ([guid]::NewGuid().ToString()).ToLowerInvariant()
-$newSalt = -join ((1..32) | ForEach-Object { "{0:X}" -f (Get-Random -Maximum 16) })
-$newDeviceIdSaltQoder = ([guid]::NewGuid().ToString("N")).ToUpperInvariant()
+# (The Preferences salts are no longer PS-generated: the core's salt-rotate
+# generates a fresh CSPRNG 32-lowercase-hex salt PER PROFILE -- v1.4 generated
+# ONE Get-Random uppercase-hex salt shared across every profile the run
+# touched: a weak PRNG AND a cross-profile correlation signal.)
 $newCrashReporterId = Get-NewCrashReporterId
-$newArmsUid = "uid_" + (-join ((1..12) | ForEach-Object { "abcdefghijklmnopqrstuvwxyz0123456789"[(Get-Random -Maximum 36)] }))
+# RNG convention fix (repo rule: RandomNumberGenerator via .GetBytes() only --
+# v1.4 used the time-seeded Get-Random PRNG for identity material):
+$rngBytes = New-Object byte[] 12
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try { $rng.GetBytes($rngBytes) } finally { $rng.Dispose() }
+$newArmsUid = "uid_" + (($rngBytes | ForEach-Object { "abcdefghijklmnopqrstuvwxyz0123456789"[$_ % 36] }) -join "")
+$rngBytes2 = New-Object byte[] 14
+$rng2 = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try { $rng2.GetBytes($rngBytes2) } finally { $rng2.Dispose() }
+$newDeviceSid = "d_" + (($rngBytes2 | ForEach-Object { "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[$_ % 62] }) -join "")
 $newArmsSession = "{0}-1-{1}-{1}" -f $newArmsUid.Substring(4), ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
-$newDeviceSid = "d_" + (-join ((1..14) | ForEach-Object { "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[(Get-Random -Maximum 62)] }))
 
 $storageUpdates = @{
     "telemetry.machineId"    = $ids.machineId
@@ -1680,10 +1632,20 @@ else {
         $label = Get-ProfileLabel -MainRoot $qoderRoaming -ProfileRoot $pr
         $p = Join-Path $pr "User\globalStorage\storage.json"
         if (Test-Path -LiteralPath $p) {
-            if (Set-JsonIdentity -Path $p -Updates $storageUpdates -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions)) {
+            # Core: backup + json-patch (Set-JsonIdentity's contract split
+            # across the core verbs).
+            $null = Backup-ViaCore -Source $p -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions)
+            $stReport = Invoke-GhostCore @("json-patch", $p, (_B64Payload $storageUpdates))
+            if ($null -ne $stReport -and $stReport.ok) {
+                foreach ($key in $storageUpdates.Keys) {
+                    Add-AuditEntry -Audit ([ref]$audit) -File $p -Key $key -Before $stReport.before.$key -After $stReport.after.$key -Ok $true
+                }
                 Write-Host "    [$(Get-ZcodeLabelColor $label)] [OK] storage.json verified" -ForegroundColor Green
             }
             else {
+                foreach ($key in $storageUpdates.Keys) {
+                    Add-AuditEntry -Audit ([ref]$audit) -File $p -Key $key -Before $null -After $storageUpdates[$key] -Ok $false
+                }
                 Write-Host "    [$(Get-ZcodeLabelColor $label)] [FAILED] storage.json verification failed" -ForegroundColor Red
                 $stepFailed = $true
             }
@@ -1748,11 +1710,17 @@ else {
 $zcodeTelemetryStatePath = Join-Path $zcodeUserProfile "v2\telemetry-state.json"
 Write-Host "`n[4/27] Updating ZCode telemetry-state.json (deviceMid)..." -ForegroundColor Cyan
 if (Test-Path -LiteralPath $zcodeTelemetryStatePath) {
-    if (Set-JsonIdentity -Path $zcodeTelemetryStatePath -Updates @{ "deviceMid" = $newDeviceMid } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $zcodeTelemetryStatePath) -Actions ([ref]$actions)) {
+    # Core: backup + json-patch (Set-JsonIdentity's contract split across the
+    # core verbs).
+    $null = Backup-ViaCore -Source $zcodeTelemetryStatePath -BackupRoot $backupRoot -Label (Get-UserProfileBackupLabel -TargetPath $zcodeTelemetryStatePath) -Actions ([ref]$actions)
+    $midReport = Invoke-GhostCore @("json-patch", $zcodeTelemetryStatePath, (_B64Payload @{ "deviceMid" = $newDeviceMid }))
+    if ($null -ne $midReport -and $midReport.ok) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeTelemetryStatePath -Key "deviceMid" -Before $midReport.before."deviceMid" -After $midReport.after."deviceMid" -Ok $true
         Write-Host "[OK] telemetry-state.json verified" -ForegroundColor Green
         $passCount++
     }
     else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeTelemetryStatePath -Key "deviceMid" -Before $null -After $newDeviceMid -Ok $false
         Write-Host "[FAILED] telemetry-state.json verification failed" -ForegroundColor Red
         $failCount++
     }
@@ -1778,7 +1746,7 @@ $zcodeCodingPlanCachePath = Join-Path $zcodeUserProfile "v2\coding-plan-cache.js
 Write-Host "`n[6/27] Invalidating ZCode coding-plan-cache.json..." -ForegroundColor Cyan
 if (Test-Path -LiteralPath $zcodeCodingPlanCachePath) {
     $auditStart = $audit.Count
-    $cacheActions = Clear-BinaryIdentityStore -Paths @($zcodeCodingPlanCachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
+    $cacheActions = Invoke-StoreDelete -Paths @($zcodeCodingPlanCachePath) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
     $actions += @($cacheActions)
     $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $zcodeCodingPlanCachePath
     if ($status.Success) {
@@ -1832,10 +1800,16 @@ else {
         $label = Get-ProfileLabel -MainRoot $qoderRoaming -ProfileRoot $pr
         $p = Join-Path $pr "User\globalStorage\state.vscdb"
         if (Test-Path -LiteralPath $p) {
-            if (Set-SqliteKeys -Path $p -Updates @{ "storage.serviceMachineId" = $ids.devDeviceId } -Audit ([ref]$audit) -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions)) {
+            # Core: backup + sqlite-update (the verify-after re-read carries
+            # the verdict).
+            $null = Backup-ViaCore -Source $p -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions)
+            $svReport = Invoke-GhostCore @("sqlite-update", $p, (_B64Payload @{ "storage.serviceMachineId" = $ids.devDeviceId }))
+            if ($null -ne $svReport -and $null -ne $svReport.after -and ($svReport.after."storage.serviceMachineId" -eq $ids.devDeviceId)) {
+                Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "storage.serviceMachineId" -Before $svReport.before."storage.serviceMachineId" -After $svReport.after."storage.serviceMachineId" -Ok $true
                 Write-Host "    [$(Get-ZcodeLabelColor $label)] [OK] state.vscdb verified" -ForegroundColor Green
             }
             else {
+                Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "storage.serviceMachineId" -Before $null -After $ids.devDeviceId -Ok $false
                 Write-Host "    [$(Get-ZcodeLabelColor $label)] [FAILED] state.vscdb verification failed" -ForegroundColor Red
                 $stepFailed = $true
             }
@@ -1891,7 +1865,7 @@ else {
 # --- [11/27] ZCode session Preferences device_id_salt ---
 $zcodePreferencesPath = Join-Path $zcodeRoaming "session\Preferences"
 Write-Host "`n[11/27] Updating ZCode session Preferences (device_id_salt)..." -ForegroundColor Cyan
-if (Set-DeviceIdSalt -Path $zcodePreferencesPath -NewSalt $newSalt -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $zcodeRoaming -TargetPath $zcodePreferencesPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+if (Set-DeviceIdSalt -Path $zcodePreferencesPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $zcodeRoaming -TargetPath $zcodePreferencesPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
     $passCount++
 }
 else {
@@ -1911,7 +1885,7 @@ else {
         $label = Get-ProfileLabel -MainRoot $qoderRoaming -ProfileRoot $pr
         $p = Join-Path $pr "Preferences"
         Write-Host "    [$(Get-ZcodeLabelColor $label)] device_id_salt..." -ForegroundColor DarkGray
-        if (-not (Set-DeviceIdSalt -Path $p -NewSalt $newDeviceIdSaltQoder -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+        if (-not (Set-DeviceIdSalt -Path $p -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
             $stepFailed = $true
         }
     }
@@ -1977,7 +1951,7 @@ $sharedFiles = @(
     (Join-Path $zcodeSession "SharedStorage-wal"),
     (Join-Path $zcodeSession "SharedStorage-journal")
 )
-$sharedActions = Clear-BinaryIdentityStore -Paths $sharedFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $zcodeRoaming
+$sharedActions = Invoke-StoreDelete -Paths $sharedFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $zcodeRoaming
 $actions += @($sharedActions)
 $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $zcodeSession
 if ($status.Success) {
@@ -2071,7 +2045,7 @@ $zcodeSqliteRelPaths = @(
     "Network\Trust Tokens-journal"
 )
 $zcodeSqliteFullPaths = @($zcodeSqliteRelPaths | ForEach-Object { Join-Path $zcodeSession $_ })
-$sqliteActions = Clear-BinaryIdentityStore -Paths $zcodeSqliteFullPaths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $zcodeRoaming
+$sqliteActions = Invoke-StoreDelete -Paths $zcodeSqliteFullPaths -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $zcodeRoaming
 $actions += @($sqliteActions)
 $status = Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $auditStart -Path $zcodeSession
 if ($status.Success) {
@@ -2092,7 +2066,7 @@ $zcodeExtraFileRelPaths = @(
     "Network\NetworkDataMigrated"
 )
 $zcodeExtraFiles = @($zcodeExtraFileRelPaths | ForEach-Object { Join-Path $zcodeSession $_ })
-$extraActions = Clear-BinaryIdentityStore -Paths $zcodeExtraFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $zcodeRoaming
+$extraActions = Invoke-StoreDelete -Paths $zcodeExtraFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $zcodeRoaming
 $actions += @($extraActions)
 $zcodeExtraDirRelPaths = @(
     "WebStorage",
@@ -2131,7 +2105,7 @@ if (-not (Test-Path -LiteralPath $zcodeEmbedded)) {
 else {
     $embeddedStepFailed = $false
     $embeddedPrefPath = Join-Path $zcodeEmbedded "Preferences"
-    if (-not (Set-DeviceIdSalt -Path $embeddedPrefPath -NewSalt $newSalt -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $zcodeRoaming -TargetPath $embeddedPrefPath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
+        if (-not (Set-DeviceIdSalt -Path $embeddedPrefPath -BackupRoot $backupRoot -BackupLabel (Get-AppRelativeBackupLabel -RootPath $zcodeRoaming -TargetPath $embeddedPrefPath) -Audit ([ref]$audit) -Actions ([ref]$actions))) {
         $embeddedStepFailed = $true
     }
     $embeddedFileRelPaths = @(
@@ -2149,7 +2123,7 @@ else {
         "Network\NetworkDataMigrated"
     )
     $embeddedFiles = @($embeddedFileRelPaths | ForEach-Object { Join-Path $zcodeEmbedded $_ })
-    $embeddedActions = Clear-BinaryIdentityStore -Paths $embeddedFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $zcodeRoaming
+    $embeddedActions = Invoke-StoreDelete -Paths $embeddedFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $zcodeRoaming
     $actions += @($embeddedActions)
     $embeddedDirRelPaths = @(
         "Cache\Cache_Data",
@@ -2227,7 +2201,7 @@ else {
         $stepStart = $audit.Count
         Write-Host "    [$(Get-ZcodeLabelColor $label)] browser data..." -ForegroundColor DarkGray
         $profileFiles = @($qoderFileRelPaths | ForEach-Object { Join-Path $pr $_ })
-        $profileActions = Clear-BinaryIdentityStore -Paths $profileFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
+        $profileActions = Invoke-StoreDelete -Paths $profileFiles -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $pr
         $actions += @($profileActions)
         foreach ($relative in ($qoderCacheRelPaths + $qoderDirRelPaths)) {
             $fullPath = Join-Path $pr $relative
@@ -2418,56 +2392,25 @@ foreach ($preservedRelPath in @("v2\tasks-index.sqlite", "v2\checkpoints", "cli\
     }
 }
 if (Test-Path -LiteralPath $zcodeCliDbPath) {
-    $cliBackupLabel = Get-UserProfileBackupLabel -TargetPath $zcodeCliDbPath
-    $cliBackupPath = Backup-FileToTimestampDir -Source $zcodeCliDbPath -BackupRoot $backupRoot -Label $cliBackupLabel
-    if ($cliBackupPath) {
-        Add-ActionEntry -Actions ([ref]$actions) -OriginalPath $zcodeCliDbPath -BackupPath $cliBackupPath
+    # Core: backup + clear-cli-telemetry via the ONE invocation helper (the
+    # error-dict contract is kept: sqlite failure reported in-band -- never
+    # silent-success on a locked/unreadable db).
+    $null = Backup-ViaCore -Source $zcodeCliDbPath -BackupRoot $backupRoot -Label (Get-UserProfileBackupLabel -TargetPath $zcodeCliDbPath) -Actions ([ref]$actions)
+    $result = Invoke-GhostCore @("clear-cli-telemetry", $zcodeCliDbPath)
+    if ($null -eq $result) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "core-invoke-failed" -Ok $false
+        Write-Host "[FAILED] CLI db telemetry clear core invocation failed" -ForegroundColor Red
+        $failCount++
     }
-
-    $pythonCommand = Get-PythonCommandInfo
-    $ghostCli = $null
-    if ($pythonCommand) { $ghostCli = Get-GhostPythonCli }
-    if ($pythonCommand -and $ghostCli) {
-        try {
-            Set-GhostConsoleUtf8
-            $commandOutput = & $pythonCommand $ghostCli "clear-cli-telemetry" $zcodeCliDbPath
-            if ($LASTEXITCODE -eq 0) {
-                $result = ($commandOutput -join "`n") | ConvertFrom-Json
-                if ($result.PSObject.Properties.Name -contains "error") {
-                    # Error-dict contract: sqlite failure reported in-band --
-                    # never silent-success on a locked/unreadable db.
-                    Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After ("error: " + $result.error) -Ok $false
-                    Write-Host "[FAILED] CLI db telemetry clear failed: $($result.error)" -ForegroundColor Red
-                    $failCount++
-                }
-                else {
-                    Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After ("deleted " + $result.deleted) -Ok $true
-                    Write-Host "[OK] CLI db telemetry cleared: $($result.deleted) keys" -ForegroundColor Green
-                    $passCount++
-                }
-            }
-            else {
-                Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "failed" -Ok $false
-                Write-Host "[FAILED] CLI db telemetry clear command failed" -ForegroundColor Red
-                $failCount++
-            }
-        }
-        catch {
-            Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "exception" -Ok $false
-            Write-Host "[FAILED] CLI db telemetry clear threw exception" -ForegroundColor Red
-            $failCount++
-        }
-    }
-    elseif ($pythonCommand) {
-        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "ghost-core-missing" -Ok $false
-        Write-Host "[FAILED] GHOST Python core not found -- CLI db telemetry NOT cleared" -ForegroundColor Red
+    elseif ($result.PSObject.Properties.Name -contains "error") {
+        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After ("error: " + $result.error) -Ok $false
+        Write-Host "[FAILED] CLI db telemetry clear failed: $($result.error)" -ForegroundColor Red
         $failCount++
     }
     else {
-        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "python-not-found" -Ok $false
-        Write-Host "[FAILED] Python 3 not found -- CLI db telemetry NOT cleared" -ForegroundColor Red
-        Write-Host "Install Python 3 and re-run: winget install Python.Python.3.12" -ForegroundColor Yellow
-        $failCount++
+        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After ("deleted " + $result.deleted) -Ok $true
+        Write-Host "[OK] CLI db telemetry cleared: $($result.deleted) keys" -ForegroundColor Green
+        $passCount++
     }
 }
 else {
@@ -2553,7 +2496,7 @@ Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects ALL ZCode ins
 
 # Marker filename keeps the historical "v1.3" label (docs + user habits read
 # it); the script itself is v1.4.
-[System.IO.File]::WriteAllText("$env:TEMP\zcode_v1.3_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText("$env:TEMP\zcode_v1.5_done.txt", ("Pass: {0} Fail: {1} Audit: {2}" -f $passCount, $failCount, $auditPath), (New-Object System.Text.UTF8Encoding $false))
 
 if ($failCount -gt 0) {
     Write-Host "ZCode/Qoder reset v1.4 [$(Get-ZcodeTargetDisplay $Target)] completed with failures. Review $auditPath." -ForegroundColor Red

@@ -752,11 +752,25 @@ reset_qoder.ps1       # Qoder: 31 steps (main + CORS_Profile, expanded
                                    #          installation_id/.auth machine_id rotation,
                                    #          webview stores, tmp/telemetry+logs, probe;
                                    #          system steps: HKCU deviceid, HKLM SQM, MAC, hostname)
-reset_zcode.ps1       # ZCode: 27 steps + [6b/27] config.json provider-apiKey strip
-                                   #          (Unlink-loop fix) + telemetry-state deviceMid, RUM store,
-                                   #          setting.json deviceSid, embedded-browser partition;
-                                   #          -Target Primary|Secondary|Third|Fourth|Fifth|Sixth|Both|All (selective
-                                   #          tree-kill, per-target ID_Backups, independent IDs per child)
+reset_zcode.ps1       # ZCode v1.5 THIN MANIFEST (2026-11-14): 27 steps +
+                                   #          [6b/27] config.json provider-apiKey strip (per-provider
+                                   #          json-set gated on an EXISTING apiKey; the v1.4 conditional
+                                   #          preserved) + telemetry-state deviceMid, RUM store (json-patch),
+                                   #          setting.json deviceSid (json-set dotted), credentials OAuth
+                                   #          clear (json-remove oauth: PREFIX + zcodejwttoken exact),
+                                   #          embedded-browser partition; -Target
+                                   #          Primary|Secondary|Third|Fourth|Fifth|Sixth|Both|All (selective
+                                   #          tree-kill, per-target ID_Backups, independent IDs per child);
+                                   #          every store mutation via Invoke-GhostCore, same contract as
+                                   #          the other five migrations (step order/audit keys/restore/
+                                   #          summary identical to v1.4, archived at
+                                   #          archive/reset_zcode_windows-v1.4.ps1, local-only);
+                                   #          RNG FIX: salts now core-generated CSPRNG per profile +
+                                   #          $newArmsUid/$newDeviceSid moved off Get-Random to
+                                   #          RandomNumberGenerator.GetBytes (repo convention);
+                                   #          Python required for ALL steps (fail-fast preflight -- one
+                                   #          of the recorded PENDING v1.5 items, delivered here; the
+                                   #          others stay PENDING)
 ghost_launch_guard.ps1             # Shared 3-way RAM/concurrency launch guard (2026-11-14) —
                                    #   the generalized mechanics that launch_zcode_second_instance
                                    #   carried since 2026-10-28; wired into ALL FOUR suites' launchers
