@@ -8,6 +8,31 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **QoderWork reset v0.2 — thin manifest over the Python core** (2026-11-14):
+  Phase 3 migration #4. The 26 steps, their order, audit keys, restore
+  actions and summary are identical to v0.1 (archived
+  `archive/reset_qoderwork_windows-v0.1.ps1`, local-only); every FILE-level
+  store mutation now runs through `Invoke-GhostCore` → `machineid-file` /
+  `json-patch` / `salt-rotate` / `store-delete` / `backup`. The v0.1
+  temp-.py heredoc (`qoderwork_scrub_agents_{guid}.py`) is gone, replaced by
+  the new shared core verb **`purge-tables`** (`sqlite_keys.purge_table_rows`:
+  DELETE every row from whitelisted tables + exact-key rows from one keyed
+  table; table names regex-whitelisted, schema evolution tolerated per table
+  AND per keyed table, verify-after = read-only reopen recount so the
+  caller's "after == 0" check IS the verification). Behavioral deltas,
+  both strictly safer: the external-commands registry empties the
+  `commands` key instead of rewriting the whole file (unknown top-level
+  keys survive schema evolution), and the Preferences salt is generated in
+  the core (32 lowercase hex vs v0.1's uppercase GUID-N — same length/
+  format class, case not significant to the app). FIXED a latent v0.1 gap:
+  the heredoc crashed when the `app_settings` table was absent while the
+  PS side already carried a schema-missing branch for it — the core
+  tolerates a missing keyed table per key, so that branch is finally
+  reachable. `-DryRun` still writes NOTHING (no core invocation, no TEMP
+  files) and runs without Python; the registry/MAC/hostname system steps
+  [22]-[26] stay PowerShell by contract. 177 unittests green (4 new:
+  purge-tables schema-tolerance + CLI contract). Live comparison run
+  pending user supervision.
 - **Trae reset v0.3 — thin manifest over the Python core** (2026-11-14):
   Phase 3 migration #3 (roadmap order trae → qoderwork → minimax → qoder →
   zcode). The 16 steps, their order, audit keys, restore actions and summary

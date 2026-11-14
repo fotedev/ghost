@@ -265,6 +265,84 @@ class ScrubIdentityRowsTests(unittest.TestCase):
         self.assertEqual(r["deleted"], 2, r)
 
 
+class PurgeTableRowsTests(unittest.TestCase):
+    """ghost.sqlite_keys.purge_table_rows — the QoderWork agents.db scrub
+    twin (v0.1's temp-.py heredoc): exact-table wipes + keyed-table exact
+    key deletions, schema-missing tolerated per table, read-only reopen
+    verify (after[] IS the verification)."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="ghost_purge_")
+
+    def _make_db(self, path):
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE mcp_oauth_tokens (id TEXT, blob TEXT)")
+        cursor.executemany(
+            "INSERT INTO mcp_oauth_tokens VALUES (?, ?)",
+            [("1", "enc"), ("2", "enc")])
+        cursor.execute("CREATE TABLE google_oauth_tokens (id TEXT)")
+        cursor.execute("INSERT INTO google_oauth_tokens VALUES ('g1')")
+        # CHAT PRESERVATION table: never in the purge list.
+        cursor.execute("CREATE TABLE chats (id TEXT, title TEXT)")
+        cursor.execute("INSERT INTO chats VALUES ('c1', 'keep')")
+        cursor.execute(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT)")
+        cursor.executemany(
+            "INSERT INTO app_settings VALUES (?, ?)",
+            [("asyncMigrationStatus", "done"), ("windowBounds", "{}"),
+             ("proxy", "keep-me"), ("futureKey", "also-kept")])
+        conn.commit()
+        conn.close()
+
+    def test_purges_tables_and_keys_preserves_chats_and_unlisted_keys(self):
+        path = os.path.join(self.base, "agents.db")
+        self._make_db(path)
+        r = sqlite_keys.purge_table_rows(
+            path,
+            ["mcp_oauth_tokens", "google_oauth_tokens", "gone_table"],
+            key_table="app_settings",
+            keys=["asyncMigrationStatus", "windowBounds"])
+        self.assertEqual(r["before"]["mcp_oauth_tokens"], 2)
+        self.assertEqual(r["after"]["mcp_oauth_tokens"], 0)
+        self.assertEqual(r["after"]["google_oauth_tokens"], 0)
+        self.assertEqual(r["before"]["gone_table"], "schema-missing")
+        self.assertEqual(r["after"]["gone_table"], "schema-missing")
+        self.assertEqual(r["before"]["asyncMigrationStatus"], 1)
+        self.assertEqual(r["after"]["asyncMigrationStatus"], 0)
+        self.assertEqual(r["after"]["windowBounds"], 0)
+        conn = sqlite3.connect(path)
+        try:
+            chats = conn.execute("SELECT COUNT(*) FROM chats").fetchone()[0]
+            proxy = conn.execute(
+                "SELECT COUNT(*) FROM app_settings WHERE key IN "
+                "('proxy', 'futureKey')").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(chats, 1)
+        self.assertEqual(proxy, 2)
+
+    def test_missing_keyed_table_reports_schema_missing(self):
+        # v0.1's heredoc crashed here (no existing-check on app_settings)
+        # while its PS side already carried the schema-missing branch.
+        path = os.path.join(self.base, "agents.db")
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE mcp_oauth_tokens (id TEXT)")
+        conn.commit()
+        conn.close()
+        r = sqlite_keys.purge_table_rows(
+            path, ["mcp_oauth_tokens"],
+            key_table="app_settings", keys=["windowBounds"])
+        self.assertEqual(r["after"]["mcp_oauth_tokens"], 0)
+        self.assertEqual(r["before"]["windowBounds"], "schema-missing")
+        self.assertEqual(r["after"]["windowBounds"], "schema-missing")
+
+    def test_rejects_unsafe_table_names(self):
+        path = os.path.join(self.base, "agents.db")
+        with self.assertRaises(ValueError):
+            sqlite_keys.purge_table_rows(path, ["bad; DROP TABLE x"])
+
+
 class ClearCliTelemetryTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -631,6 +709,26 @@ class CliSmokeTests(unittest.TestCase):
             self.assertTrue(report["ok"])
             self.assertEqual(report["deleted"], 1)
             self.assertEqual(report["remaining"], 0)
+
+    def test_purge_tables_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "agents.db")
+            conn = sqlite3.connect(db)
+            conn.execute("CREATE TABLE mcp_oauth_tokens (id TEXT)")
+            conn.execute("INSERT INTO mcp_oauth_tokens VALUES ('1')")
+            conn.execute("CREATE TABLE app_settings (key TEXT, value TEXT)")
+            conn.execute(
+                "INSERT INTO app_settings VALUES ('windowBounds', '{}')")
+            conn.commit()
+            conn.close()
+            cfg_b64 = _b64({"tables": ["mcp_oauth_tokens"],
+                            "key_table": "app_settings",
+                            "keys": ["windowBounds"]})
+            proc = self._run("purge-tables", db, cfg_b64)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["after"]["mcp_oauth_tokens"], 0)
+            self.assertEqual(result["after"]["windowBounds"], 0)
 
     def test_scrub_rows_command(self):
         with tempfile.TemporaryDirectory() as tmp:

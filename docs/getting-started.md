@@ -89,6 +89,7 @@ First launch of each clone copies history (`~\.zcode` → `~\ZCodeSecondHome\.zc
 ### 6. Reset QoderWork ID (`reset_qoderwork.ps1`)
 
 - 26 steps: `machine-id`, `installation_id`, `.status.json`, Chromium profile (`Preferences` salt, Cookies, Local/Session Storage, caches, SharedStorage, `Local State`), `agents.db` OAuth + `app_settings` scrub (**chats/messages/projects preserved**), `auth.dat`/`auth-v2.dat`, HKLM MachineGuid, HKCU deviceid, HKLM SQM MachineId, MAC + hostname, old-backup purge, watchdog re-verify
+- Thin manifest over the Python core — Python required for every file-level step (the registry/MAC/hostname system steps do not need it); `-DryRun` also runs without Python
 - Supports `-SkipMac`, `-SkipHostname`, and `-DryRun` (prints actions without writing)
 
 **Before running:** Close QoderWork. Run PowerShell as Administrator.

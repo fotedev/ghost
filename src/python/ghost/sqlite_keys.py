@@ -264,6 +264,93 @@ def scrub_identity_rows(db_path, like_patterns=None, key_priority=None,
             "skipped_tables": skipped_tables}
 
 
+def purge_table_rows(db_path, tables, key_table=None, keys=None):
+    """DELETE every row from each whitelisted table, plus (optionally) the
+    rows whose key column matches `keys` in one keyed table -- the
+    QoderWork agents.db scrub twin (v0.1's temp-.py heredoc: 15 exact
+    tables + 12 app_settings keys; chats/sub_chats/messages/projects are
+    NOT in the list and are never touched).
+
+    Table names (and key_table) are validated against the module whitelist
+    regex -- never interpolated otherwise. Schema evolution is tolerated
+    per table AND per keyed table: a missing table reports "schema-missing"
+    instead of failing, matching the PS WARN contract (v0.1's heredoc
+    crashed on a missing app_settings table while its PS side already had
+    the schema-missing branch -- that gap is closed here). Every deletion
+    is verified by a READ-ONLY REOPEN recount (module invariant): the
+    after[] values are the post-commit survivor counts, so the caller's
+    "after == 0" check IS the verification.
+
+    Returns {"before": {name: count | "schema-missing"},
+             "after":  {name: count | "schema-missing"}} where name is a
+    table name from `tables`, or a key from `keys` for the keyed-table
+    deletions. Raises on any sqlite error (caller contract: non-zero exit
+    -> PowerShell FAILED).
+    """
+    if key_table is not None and not _TABLE_NAME_RE.match(key_table or ""):
+        raise ValueError("Unsafe SQLite table name: {0!r}".format(key_table))
+    for table in tables:
+        _validate_table_name(table)
+
+    conn = sqlite3.connect(db_path, timeout=10)
+    before = {}
+    after = {}
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        existing = {row[0] for row in cursor.fetchall()}
+        for table in tables:
+            if table not in existing:
+                before[table] = "schema-missing"
+                after[table] = "schema-missing"
+                continue
+            cursor.execute("SELECT COUNT(*) FROM " + table)
+            before[table] = cursor.fetchone()[0]
+            cursor.execute("DELETE FROM " + table)
+        if keys:
+            if key_table not in existing:
+                for key in keys:
+                    before[key] = "schema-missing"
+                    after[key] = "schema-missing"
+            else:
+                for key in keys:
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM " + key_table + " WHERE key = ?",
+                        (key,))
+                    before[key] = cursor.fetchone()[0]
+                    cursor.execute(
+                        "DELETE FROM " + key_table + " WHERE key = ?", (key,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Verify-after (module invariant): read-only reopen, recount survivors.
+    # The after[] values ARE the verification the caller checks.
+    verify_conn = _ro_connect(db_path)
+    try:
+        verify_cursor = verify_conn.cursor()
+        verify_cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")
+        verify_existing = {row[0] for row in verify_cursor.fetchall()}
+        for table in tables:
+            if before[table] == "schema-missing":
+                continue
+            verify_cursor.execute("SELECT COUNT(*) FROM " + table)
+            after[table] = verify_cursor.fetchone()[0]
+        if keys and (key_table in verify_existing):
+            for key in keys:
+                if before[key] == "schema-missing":
+                    continue
+                verify_cursor.execute(
+                    "SELECT COUNT(*) FROM " + key_table + " WHERE key = ?",
+                    (key,))
+                after[key] = verify_cursor.fetchone()[0]
+    finally:
+        verify_conn.close()
+
+    return {"before": before, "after": after}
+
+
 def clear_cli_telemetry(db_path):
     """DELETE telemetry-like keys from the ZCode CLI db.sqlite ItemTable.
 
