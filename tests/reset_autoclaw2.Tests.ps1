@@ -108,3 +108,29 @@ Describe 'reset_autoclaw2 helpers' {
         }
     }
 }
+
+Describe 'subtree-walk tripwire (repo-wide)' {
+
+    # 2026-11-14: an array-slice "pop" ($stack = $stack[1..($stack.Count-1)])
+    # does NOT shrink a 1-element array in PowerShell - @('A')[1..0] == @('A')
+    # (out-of-range indices clamp) - so a slice-based subtree walk SPINS
+    # FOREVER on leaf nodes while its seen-map makes the spin invisible.
+    # Caught live by the very first run of tools/status_zcode_instances.ps1
+    # with real ZCode processes running; the same latent pattern was sitting
+    # in the three new reset scripts' stop steps (a real reset with a running
+    # instance would have hung forever). All walks now use Queue semantics
+    # (Dequeue REMOVES). This tripwire forbids the pattern from ever
+    # returning.
+    It 'no subtree walk uses the 1..Count-1 slice-pop pattern' {
+        $offenders = @()
+        foreach ($dir in @('src\windows', 'tools')) {
+            foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot ('..\' + $dir)) -Filter '*.ps1' -ErrorAction SilentlyContinue)) {
+                $t = Get-Content -LiteralPath $f.FullName -Raw
+                if ($t -match '\$\w+\s*=\s*\$\w+\[1\.\.\(\$\w+\.Count\s*-\s*1\)\]') {
+                    $offenders += $f.Name
+                }
+            }
+        }
+        $offenders | Should -BeNullOrEmpty -Because ('slice-pop walks hang forever on leaf nodes; offenders: ' + ($offenders -join ', '))
+    }
+}

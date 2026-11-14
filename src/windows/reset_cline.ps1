@@ -346,17 +346,22 @@ function Get-ClineTargetPids {
         }
     }
 
-    # 4) expand every root to its full subtree
+    # 4) expand every root to its full subtree. Queue semantics (Dequeue
+    #    REMOVES): an array-slice "pop" does NOT shrink a 1-element array in
+    #    PowerShell (@('A')[1..0] == @('A')), so a slice-based walk spins
+    #    forever on leaf nodes (latent hang, caught 2026-11-14).
     $kill = @{}
     foreach ($r in $roots) {
-        $stack = @($r)
-        while ($stack.Count -gt 0) {
-            $cur = $stack[0]
-            $stack = $stack[1..($stack.Count - 1)]
+        $queue = New-Object System.Collections.Queue
+        $queue.Enqueue($r)
+        while ($queue.Count -gt 0) {
+            $cur = $queue.Dequeue()
             if ($null -eq $cur -or $kill.ContainsKey([int]$cur.ProcessId)) { continue }
             $kill[[int]$cur.ProcessId] = $true
             $kids = $byParent[[int]$cur.ProcessId]
-            if ($kids) { $stack = @($kids) + $stack }
+            if ($kids) {
+                foreach ($k in $kids) { $queue.Enqueue($k) }
+            }
         }
     }
     return @($kill.Keys)

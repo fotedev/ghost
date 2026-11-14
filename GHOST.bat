@@ -151,6 +151,7 @@ call :Opt 28 "Re-apply app patch" "- v9, icons + bidi auto (after app update)"
 call :Opt 29 "Login clone account" "- one-time plan setup (light workers + T3 bridge)"
 call :Opt 30 "Remove clone shortcuts" "- Desktop + Start menu"
 call :Opt 31 "Rebuild clone Task Manager icons" "- colored rows in Task Manager - run after app updates"
+call :Opt 32 "Clone status" "- all 6 - running, profiles, device-id, pressure"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -431,6 +432,7 @@ if "%~1"=="28" set "RESOLVED=13"
 if "%~1"=="29" set "RESOLVED=71"
 if "%~1"=="30" set "RESOLVED=72"
 if "%~1"=="31" set "RESOLVED=83"
+if "%~1"=="32" set "RESOLVED=108"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -554,14 +556,14 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-107; 63 unused; 74 = the AutoClaw2 MCP sync
+rem Runs one task by global id (1-108; 63 unused; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
 rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
 rem identity; 84-90 = the AutoClaw2 identity resets; 91-97 = the Cline
 rem identity resets; 98-104 = the OpenCode identity resets; 105-107 = the
-rem AutoClaw2/Cline/OpenCode Task-Manager exe-identity rebuilds,
-rem repo-only + opt-in, appended 2026-11-14).
+rem AutoClaw2/Cline/OpenCode Task-Manager exe-identity rebuilds; 108 = the
+rem ZCode clone status row, appended 2026-11-14).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -709,6 +711,7 @@ if "%~1"=="80" (call :Detached "OpenCode Clone Login" "-NoProfile" "src\windows\
 if "%~1"=="66" (call :ConfirmRun "Spoof WMI hardware serials - BIOS, motherboard, disk, RAM + Bluetooth MAC" "src\windows\spoof_wmi_serials.ps1" "This changes system-wide hardware identity data. A WMI repository backup + restore script are generated first." & exit /b)
 if "%~1"=="82" (call :Detached "ZCode Primary" "-NoProfile" "src\windows\launch_zcode_primary.ps1" "" "Launcher opened in a separate window - it closes automatically when done." "Launches the Primary non-elevated - drag-drop breaks into elevated instances." & exit /b)
 if "%~1"=="83" (call :Run "tools\patch_zcode_exe_identity.ps1" -Target All & exit /b)
+if "%~1"=="108" (call :Run "tools\status_zcode_instances.ps1" & exit /b)
 call :UnknownTask "%~1"
 exit /b
 

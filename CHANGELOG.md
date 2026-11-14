@@ -109,6 +109,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   earlier same-day session, markers fresh — left untouched; Cline has
   none). Suite maps + branding ICOs + no-cross-suite-drift tripwires
   unit-tested (`tests/exe_identity_suites.Tests.ps1`, 11).
+- **ZCode clone status row** (2026-11-14): `tools/status_zcode_instances.ps1`
+  (ZCode Maintenance [32] / gid 108) — ZCode's parity for the `-Status`
+  probe the three newer suites' launchers already carry. Read-only:
+  per-instance running state (copy-family + marker classified), roaming +
+  clone-home presence, the `v2\telemetry-state.json` `deviceMid` prefix and
+  per-instance commit pressure. Live-verified on 4 running instances.
+  **Latent hang fixed on the way**: the fresh subtree walks in the three
+  2026-11-14 reset scripts used an array-slice "pop"
+  (`$stack = $stack[1..($stack.Count-1)]`) that does NOT shrink a
+  1-element PowerShell array (`@('A')[1..0] == @('A')` — out-of-range
+  indices clamp), so any walk spun forever on leaf nodes — a real reset
+  with a running instance would have hung at the stop step. All walks now
+  use Queue semantics (Dequeue REMOVES; the same pattern the ZCode launcher
+  always used) and a repo-wide tripwire test forbids the slice-pop pattern
+  from returning.
 - **AutoClaw2 chat sync: `-Account` source hint + source-account
   provenance** (2026-11-11): `tools/sync_autoclaw2_chats.ps1 -Account
   <sha-prefix>` pins the multi-account Primary's account dir for the
