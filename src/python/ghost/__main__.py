@@ -90,6 +90,19 @@ def _cmd_delete_secrets(args):
     return 0
 
 
+def _cmd_scrub_rows(args):
+    if args.config_b64:
+        cfg = _decode_updates(args.config_b64)
+        result = sqlite_keys.scrub_identity_rows(
+            args.db, like_patterns=cfg.get("like_patterns"),
+            key_priority=cfg.get("key_priority"),
+            escape=cfg.get("escape", "\\"))
+    else:
+        result = sqlite_keys.scrub_identity_rows(args.db)
+    print(json.dumps(result))
+    return 0
+
+
 def _cmd_clear_cli_telemetry(args):
     result = sqlite_keys.clear_cli_telemetry(args.db)
     print(json.dumps(result))
@@ -174,7 +187,8 @@ def _cmd_salt_rotate(args):
 def _cmd_json_remove(args):
     payload = _decode_updates(args.payload_b64)
     report = winstore.remove_json_keys(
-        args.path, payload["keys"], args.backup_root, args.label)
+        args.path, payload["keys"], args.backup_root, args.label,
+        prefixes=payload.get("prefixes"))
     print(json.dumps(report))
     return 0 if report["ok"] else 1
 
@@ -258,6 +272,18 @@ def build_parser():
     p.set_defaults(func=_cmd_clear_cli_telemetry)
 
     p = sub.add_parser(
+        "scrub-rows",
+        help="DELETE identity key-rows from EVERY key-like table + "
+             "survivor verify (Trae ai-agent scrub twin; key NAMES only, "
+             "values never inspected)")
+    p.add_argument("db")
+    p.add_argument("config_b64", nargs="?", default=None,
+                   help='base64 of {"like_patterns": [...], "key_priority": '
+                        '[...], "escape": "\\\\"} (default: Trae identity '
+                        "patterns)")
+    p.set_defaults(func=_cmd_scrub_rows)
+
+    p = sub.add_parser(
         "chat-check",
         help="cross-instance chat visibility / hot-activity probe")
     p.add_argument("mode", choices=["missing", "hot"])
@@ -328,7 +354,9 @@ def build_parser():
     p.add_argument("path")
     p.add_argument("backup_root")
     p.add_argument("label")
-    p.add_argument("payload_b64", help="base64 of {\"keys\": [\"a.b\", ...]}")
+    p.add_argument("payload_b64",
+                   help='base64 of {"keys": ["a.b", ...], "prefixes": '
+                        '["top-level prefix", ...]} (prefixes optional)')
     p.set_defaults(func=_cmd_json_remove)
 
     p = sub.add_parser(

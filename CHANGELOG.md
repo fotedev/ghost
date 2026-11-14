@@ -8,6 +8,31 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Trae reset v0.3 — thin manifest over the Python core** (2026-11-14):
+  Phase 3 migration #3 (roadmap order trae → qoderwork → minimax → qoder →
+  zcode). The 16 steps, their order, audit keys, restore actions and summary
+  are identical to v0.2 (archived `archive/reset_trae_windows-v0.2.ps1`,
+  local-only); every store mutation now runs through `Invoke-GhostCore` →
+  `machineid-file` / `json-patch` / `json-remove` / `json-set` /
+  `sqlite-update` / `sweep-file` / `sweep-tree` / `store-delete` /
+  `salt-rotate` / `backup`. The v0.2 temp-.py heredoc
+  (`trae_scrub_aiagent_{guid}.py`) is gone, replaced by the new shared core
+  verb **`scrub-rows`** (`sqlite_keys.scrub_identity_rows`: key-NAME
+  matching in EVERY key-like table of a database — typed and untyped
+  columns, `key > itemkey > k > id > name` priority, ESCAPE'd
+  single-token-adjacency patterns so spaced human text can never match;
+  values/chat content never inspected; verify-after survivor recount +
+  `skipped_tables` reported). `json-remove` gained optional top-level
+  **prefix removal** (`removed_prefixes` in the report) for the
+  `iCubeAuthInfo://*` auth keys whose names embed URLs and can never be
+  addressed as dotted paths (the dotted walk silently no-ops on them).
+  Also fixed a latent v0.2 bug: `$traeDoneMarker` was never assigned (8
+  bare references), so every elevated run crashed at the final marker write
+  and non-admin self-elevation broke before relaunching — v0.3 uses the
+  fixed cursor-style marker (`%TEMP%\trae_v0.3_done.txt`, the reset_cursor
+  v0.3 pattern). Python now required for EVERY step (fail-fast preflight).
+  173 unittests green (6 new: scrub-rows multi-table/escape semantics +
+  json-remove prefix). Live comparison run pending user supervision.
 - **Linux resets for the remaining agents** (2026-11-14): new
   `reset_qoder.sh`, `reset_qoderwork.sh`, `reset_zcode.sh` (default
   profile; the shared CLI session store deliberately untouched — matches
@@ -1448,7 +1473,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   scrubbed), `winstore.replace_text` (raw-text scrub + absence verify) and
   `winstore.set_json_path` (dotted-path set with the absent-or-empty SKIP
   contract) + the `patch-argv` / `replace-text` / `json-set` subcommands.
-  **The repo's last inline temp-.py heredoc is gone.** Also fixed in both
+  **No temp-.py heredoc remains in the cursor/devin thin manifests** (the
+  repo's last heredoc — trae's ai-agent scrub — ships with the trae v0.3
+  migration, 2026-11-14; this sentence was overbroad until then). Also fixed in both
   manifests: `delete-secrets` `survivors` is a per-pattern LIST â€” PS
   `array -eq 0` filters elements instead of answering "all zero", so
   non-zero survivors could pass the step (reset_zcode already used

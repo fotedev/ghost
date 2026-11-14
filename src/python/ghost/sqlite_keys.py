@@ -26,6 +26,23 @@ SECRETS_TARGET_KEYS = ("gituser",)
 
 CLI_TELEMETRY_PATTERNS = ("%telemetry%", "%machineId%", "%deviceId%")
 
+# Identity-row scrub defaults (the Trae ai-agent contract; reset_trae.ps1
+# v0.2's temp-.py heredoc). Tightened matching: single-token adjacency only.
+# "_" is ESCAPE'd to its literal self, so spaced human text ("how to auth
+# token refresh") can never match; a no-separator variant keeps camelCase
+# identity keys (deviceId) covered. Matching stays on key NAMES only --
+# values (chat content) are never inspected.
+IDENTITY_ROW_PATTERNS = (
+    "%device\\_id%", "%deviceid%",
+    "%machine\\_id%", "%machineid%",
+    "%auth\\_token%", "%authtoken%",
+    "%telemetry%",
+)
+# Prefer a column literally named "key" over name/id when several key-like
+# columns exist (identity keys may live in "key" while "id" holds row
+# numbers or human labels).
+IDENTITY_ROW_KEY_PRIORITY = ("key", "itemkey", "k", "id", "name")
+
 
 def _validate_table_name(table):
     if not _TABLE_NAME_RE.match(table or ""):
@@ -140,6 +157,111 @@ def delete_secrets(db_path, exact_keys=None, like_patterns=None, escape=None):
         verify_conn.close()
 
     return {"deleted": deleted, "survivors": survivors}
+
+
+def _pick_key_column(cursor, table, key_priority):
+    """Choose the key-like column of `table` for identity-row scrubbing.
+
+    Prefer a column named per key_priority over other key-like columns;
+    untyped columns (declared type "") are scanned too: the common SQLite KV
+    shape CREATE TABLE kv(key, value) declares no column types, and identity
+    rows in such tables previously survived the scrub. Returns None when no
+    key-like column exists.
+    """
+    cursor.execute("PRAGMA table_info(" + table + ")")
+    cols = cursor.fetchall()
+    text_cols = [c[1] for c in cols
+                 if (c[2].upper() == "TEXT" or c[2] == "")
+                 and c[1].replace("_", "").isalnum()]
+    key_cols = [c for c in text_cols if c.lower() in key_priority]
+    if len(key_cols) == 0 or len(text_cols) < 1:
+        return None
+    key_cols.sort(key=lambda c: key_priority.index(c.lower())
+                  if c.lower() in key_priority else len(key_priority))
+    return key_cols[0]
+
+
+def scrub_identity_rows(db_path, like_patterns=None, key_priority=None,
+                        escape="\\"):
+    """DELETE identity key-rows from EVERY scrub-able table in a database
+    and verify zero survivors via read-only reopen.
+
+    Port of the reset_trae.ps1 ModularData\\ai-agent scrub (v0.2's temp-.py
+    heredoc): in every table with a key-like TEXT/untyped column, delete
+    rows whose KEY NAME matches the identity patterns -- matching stays on
+    key NAMES only, values (chat content) are never inspected or modified.
+    Tables whose names fail the module's whitelist regex, or without a
+    key-like column, are skipped and reported in skipped_tables (never
+    silently ignored).
+
+    like_patterns default to IDENTITY_ROW_PATTERNS, key_priority to
+    IDENTITY_ROW_KEY_PRIORITY; escape defaults to "\\" for the escaped
+    underscores. Returns {"deleted": N, "survivors": S, "skipped_tables":
+    [...]}. Raises on any sqlite error (caller contract: non-zero exit ->
+    PowerShell FAILED).
+    """
+    if like_patterns is None:
+        like_patterns = IDENTITY_ROW_PATTERNS
+    if key_priority is None:
+        key_priority = IDENTITY_ROW_KEY_PRIORITY
+    escape_clause = " ESCAPE '\\'" if escape else ""
+
+    conn = sqlite3.connect(db_path, timeout=10)
+    deleted = 0
+    skipped_tables = []
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        for table in tables:
+            if not _TABLE_NAME_RE.match(table):
+                skipped_tables.append(table)
+                continue
+            key_col = _pick_key_column(cursor, table, key_priority)
+            if key_col is None:
+                skipped_tables.append(table)
+                continue
+            for pattern in like_patterns:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM " + table + " WHERE " + key_col
+                    + " LIKE ?" + escape_clause, (pattern,))
+                n = cursor.fetchone()[0]
+                if n > 0:
+                    cursor.execute(
+                        "DELETE FROM " + table + " WHERE " + key_col
+                        + " LIKE ?" + escape_clause, (pattern,))
+                    deleted += n
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Verify-after (module invariant): read-only reopen and recount every
+    # matching row post-commit. Any survivor fails the step (never-silent-
+    # success); an incomplete and a verified-clean scrub are no longer
+    # indistinguishable.
+    verify_conn = _ro_connect(db_path)
+    survivors = 0
+    try:
+        verify_cursor = verify_conn.cursor()
+        verify_cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")
+        verify_tables = [row[0] for row in verify_cursor.fetchall()]
+        for table in verify_tables:
+            if not _TABLE_NAME_RE.match(table):
+                continue
+            key_col = _pick_key_column(verify_cursor, table, key_priority)
+            if key_col is None:
+                continue
+            for pattern in like_patterns:
+                verify_cursor.execute(
+                    "SELECT COUNT(*) FROM " + table + " WHERE " + key_col
+                    + " LIKE ?" + escape_clause, (pattern,))
+                survivors += verify_cursor.fetchone()[0]
+    finally:
+        verify_conn.close()
+
+    return {"deleted": deleted, "survivors": survivors,
+            "skipped_tables": skipped_tables}
 
 
 def clear_cli_telemetry(db_path):

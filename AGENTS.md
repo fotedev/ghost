@@ -734,11 +734,18 @@ reset_devin.ps1       # Windsurf/Devin Desktop (rebranded 2026-06): 17 steps
                                    #            json-set cover the app-specific steps; v0.3 archived at
                                    #            archive/reset_devin_windows-v0.3.ps1 (local-only);
                                    #            Python required for ALL steps
-reset_trae.ps1      # Trae: 16 steps (above + aha delete,
-                                   #         ModularData\ckg_server\local_env.json device_id+host_map,
-                                   #         ai-agent identity-rows-only scrub (chat preserved), SharedStorage,
-                                   #         Partitions\trae-webview, iCubeAuthInfo://* removal,
-                                   #         has_device_id_updated_to_aha=false)
+reset_trae.ps1      # Trae v0.3 THIN MANIFEST (2026-11-14): 16 steps (aha
+                                   #         delete, ModularData\ckg_server\local_env.json device_id+host_map,
+                                   #         ai-agent identity-rows-only scrub (chat preserved) via the
+                                   #         core scrub-rows verb, SharedStorage, Partitions\trae-webview,
+                                   #         iCubeAuthInfo://* removal via the json-remove top-level-prefix
+                                   #         mode, has_device_id_updated_to_aha=false); every mutation via
+                                   #         Invoke-GhostCore, same contract as cursor v0.3 / devin v0.4
+                                   #         (step order/audit keys/restore/summary identical to v0.2,
+                                   #         archived at archive/reset_trae_windows-v0.2.ps1, local-only);
+                                   #         FIXED v0.2's never-assigned $traeDoneMarker (crashed every
+                                   #         final marker write + non-admin self-elevation);
+                                   #         Python required for ALL steps
 reset_qoder.ps1       # Qoder: 31 steps (main + CORS_Profile, expanded
                                    #          state.vscdb scrub incl. loginBroadcast +
                                    #          secret.local.machine.variables, .qoder
