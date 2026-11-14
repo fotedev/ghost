@@ -93,7 +93,8 @@
 #   - Aggressive multi-process kill (ZCode/Qoder + extension helpers, 2 clean checks)
 #   - Watchdog re-verify (slow-shutdown helpers can recreate files post-wipe)
 #   - Missing-target coverage (SharedStorage, CORS_Profile, embedded-browser extras)
-#   - Old ID_Backups purge (keep current run only)
+#   - Old ID_Backups purge (current run kept, same-day runs protected,
+#     audit/restore manifests of purged runs preserved at the root)
 #   - Reparse-point-safe .qoder subdir cleanup (never follow symlinks)
 #   - Account unlink (config.json provider apiKeys blanked; originals in backup)
 #
@@ -1116,7 +1117,19 @@ function Test-WatchdogRecreation {
 }
 
 # Old ID_Backups directories preserve complete snapshots of every identity file
-# with the OLD IDs still embedded. Keep the current run only; delete the rest.
+# with the OLD IDs still embedded. Purge policy (2026-11-15, BS-5 / W1-5):
+#   - the CURRENT run's dir is never deleted;
+#   - only dirs OLDER than 24h are purgeable - a same-day dir may be the only
+#     undo copy of an earlier chained run (e.g. reset_qoder.ps1 minutes ago;
+#     the old unconditional name-filter wiped those, and the Qoder keep-dir
+#     Join-Path never exists because reset_zcode writes its Qoder-profile
+#     backups under the ZCode backup root);
+#   - before deleting an old dir, its audit_*.json + restore_*.ps1 move up to
+#     the ID_Backups root (each carries its run's timestamp in the filename),
+#     so every earlier run's undo evidence survives even after its identity-
+#     bearing backup data is purged (the edge-cases plan's D3 policy);
+#   - every delete is VERIFIED (Remove-Item then Test-Path) - "deleted" is
+#     never audited for a dir that is still there.
 function Invoke-OldIdBackupsPurge {
     param(
         [Parameter(Mandatory = $true)][string]$BackupRoot,
@@ -1133,18 +1146,28 @@ function Invoke-OldIdBackupsPurge {
 
     $allBackups = @(Get-ChildItem -LiteralPath $IdBackupsRoot -Directory -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending)
-    $toDelete = @($allBackups | Where-Object { $_.Name -ne $currentTimestamp })
+    $recentFloor = (Get-Date).AddHours(-24)
+    $toDelete = @($allBackups | Where-Object { $_.Name -ne $currentTimestamp -and $_.LastWriteTime -lt $recentFloor })
 
     if ($toDelete.Count -eq 0) {
         Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "none" -After "none" -Ok $true
-        Write-Host "    no older ID_Backups to purge (only current run present)" -ForegroundColor DarkGray
+        Write-Host "    no older ID_Backups to purge (current run kept; same-day runs protected)" -ForegroundColor DarkGray
         return
     }
 
     foreach ($dir in $toDelete) {
-        Write-Host "    [PURGE] $($dir.Name) (preserved old fingerprint; deleting)" -ForegroundColor DarkGray
+        Write-Host "    [PURGE] $($dir.Name) (older than 24h; deleting)" -ForegroundColor DarkGray
+        foreach ($manifest in @(Get-ChildItem -LiteralPath $dir.FullName -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'audit_*.json' -or $_.Name -like 'restore_*.ps1' })) {
+            Move-Item -LiteralPath $manifest.FullName -Destination (Join-Path $IdBackupsRoot $manifest.Name) -Force -ErrorAction SilentlyContinue
+            Add-AuditEntry -Audit $Audit -File $manifest.FullName -Key "restore-manifest-preserved" -Before "present" -After "preserved" -Ok $true
+        }
         Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        $gone = -not (Test-Path -LiteralPath $dir.FullName)
+        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After $(if ($gone) { "deleted" } else { "still-present" }) -Ok $gone
+        if (-not $gone) {
+            Write-Host "    [FAILED] could not delete (locked?): $($dir.FullName)" -ForegroundColor Red
+        }
     }
 }
 
@@ -2432,7 +2455,10 @@ $watchdogCoreFiles = @(
     $zcodeCodingPlanCachePath
 )
 Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit ([ref]$audit)
-$passCount++
+# BS-5: the watchdog records ok=$false audit entries when a re-delete fails;
+# the old unconditional passCount++ turned those into a green exit 0.
+$watchdogFailures = @($audit | Where-Object { $_.key -eq 'watchdog-recreate' -and -not $_.ok }).Count
+if ($watchdogFailures -gt 0) { $failCount++ } else { $passCount++ }
 
 # --- Audit + Restore ---
 $auditPath = Join-Path $backupRoot ("audit_{0}.json" -f $timestamp)
