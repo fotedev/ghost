@@ -312,6 +312,15 @@ call :Opt 10 "Apply clone-home patch" "- required once - waits until OpenCode cl
 call :Opt 11 "Clone status" "- all 5 - locks, identity, sign-in state"
 call :Opt 12 "Remove clone shortcuts" "- Desktop + Start menu"
 echo.
+call :Div "Identity Resets"
+call :Opt 13 "Reset Blue clone" "- chats + repos kept"
+call :Opt 14 "Reset Yellow clone" "- chats + repos kept"
+call :Opt 15 "Reset Green clone" "- chats + repos kept"
+call :Opt 16 "Reset Red clone" "- chats + repos kept"
+call :Opt 17 "Reset Orange clone" "- chats + repos kept"
+call :Opt 18 "Reset Primary" "- stock profile - chats + repos kept"
+call :Opt 19 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto OPENCODE_PROMPT
@@ -505,6 +514,8 @@ rem Resolves an OpenCode submenu-local id to its global task id and runs it.
 rem 2026-11-07: light worker [7] (gid 79) + login [8] (gid 80) added to Launch
 rem Clones on the ZCode LIGHT pattern; shortcuts/patch/status/remove shifted
 rem to [9]-[12]. Local ids renumbered, gids 53-62 unchanged (gids NEVER move).
+rem 2026-11-14: locals 13-19 = the Identity Resets section (gids 98-104;
+rem reset_opencode.ps1 -Target c1..c5|Primary|All; the ALL row is gated).
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=53"
 if "%~1"=="2" set "RESOLVED=54"
@@ -518,18 +529,25 @@ if "%~1"=="9" set "RESOLVED=60"
 if "%~1"=="10" set "RESOLVED=59"
 if "%~1"=="11" set "RESOLVED=61"
 if "%~1"=="12" set "RESOLVED=62"
+if "%~1"=="13" set "RESOLVED=98"
+if "%~1"=="14" set "RESOLVED=99"
+if "%~1"=="15" set "RESOLVED=100"
+if "%~1"=="16" set "RESOLVED=101"
+if "%~1"=="17" set "RESOLVED=102"
+if "%~1"=="18" set "RESOLVED=103"
+if "%~1"=="19" set "RESOLVED=104"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-97; 63 unused; 74 reserved for the deferred
+rem Runs one task by global id (1-104; 63 unused; 74 reserved for the deferred
 rem AutoClaw2 MCP watcher; 78 = the AutoClaw2 identity patch; 79/80 = the
 rem OpenCode light worker + clone login; 81 = the desktop-app builder;
 rem 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe identity;
-rem 84-90 = the AutoClaw2 identity resets; 91-97 = the Cline identity resets,
-rem appended 2026-11-14).
+rem 84-90 = the AutoClaw2 identity resets; 91-97 = the Cline identity resets;
+rem 98-104 = the OpenCode identity resets, appended 2026-11-14).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -625,6 +643,13 @@ if "%~1"=="94" (call :RunClineReset "src\windows\reset_cline.ps1" -Target c4 & e
 if "%~1"=="95" (call :RunClineReset "src\windows\reset_cline.ps1" -Target c5 & exit /b)
 if "%~1"=="96" (call :RunClineReset "src\windows\reset_cline.ps1" -Target Primary & exit /b)
 if "%~1"=="97" (call :ConfirmClineReset "Reset ALL profiles" "src\windows\reset_cline.ps1" "-Target All" & exit /b)
+if "%~1"=="98" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target c1 & exit /b)
+if "%~1"=="99" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target c2 & exit /b)
+if "%~1"=="100" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target c3 & exit /b)
+if "%~1"=="101" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target c4 & exit /b)
+if "%~1"=="102" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target c5 & exit /b)
+if "%~1"=="103" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target Primary & exit /b)
+if "%~1"=="104" (call :ConfirmOpenCodeReset "Reset ALL profiles" "src\windows\reset_opencode.ps1" "-Target All" & exit /b)
 if "%~1"=="81" (call :RunWith "tools\build_ghost_exe.ps1" "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or after moving this repo folder." & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
@@ -813,6 +838,33 @@ if errorlevel 2 goto ConfirmClineResetNo
 call :RunClineReset "%~2" %~3
 exit /b
 :ConfirmClineResetNo
+echo Cancelled - nothing was run.
+pause
+exit /b
+
+:RunOpenCodeReset
+rem OpenCode reset wrapper (gids 98-103): runs reset_opencode.ps1 with args,
+rem then prints the relaunch-safety note. Same shape as :RunZcodeReset.
+rem Usage: call :RunOpenCodeReset <script> [args...]
+echo Tip: don't press Ctrl+Break during the reset - if a console ever shows [DBG]:, type q then Enter and re-run the menu item.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~1" %2 %3 %4
+echo.
+echo NOTE: relaunch via the OpenCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare OpenCode.exe opens the PRIMARY profile.
+pause
+exit /b
+
+:ConfirmOpenCodeReset
+rem Confirmation gate for the destructive OpenCode all-profiles reset (gid 104).
+rem choice reads the CONSOLE - not stdin - so menu chains and the .bat harness
+rem stay unaffected.
+rem Usage: call :ConfirmOpenCodeReset <label> <script> <args>
+echo About to run: %~1
+echo This tree-kills the affected profiles and rewrites their identity stores.
+choice /C YN /N /M "Continue with the reset? Y = run, N = cancel: "
+if errorlevel 2 goto ConfirmOpenCodeResetNo
+call :RunOpenCodeReset "%~2" %~3
+exit /b
+:ConfirmOpenCodeResetNo
 echo Cancelled - nothing was run.
 pause
 exit /b

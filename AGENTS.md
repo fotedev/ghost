@@ -799,6 +799,23 @@ reset_cline.ps1                   # Cline (Primary ~\.cline + clones c1..c5): 11
                                    #          --user-data-dir=<clone>\webview) + fixed-port owners;
                                    #          Pester: tests/reset_cline.Tests.ps1 via the dot-source
                                    #          guard; live acceptance = user-supervised)
+reset_opencode.ps1                # OpenCode desktop (Primary + clones c1..c5): 10 steps/target
+                                   #          (2026-11-14, OpenCode [13]-[19] = gids 98-104, ALL row
+                                   #          [19] = gid 104 behind :ConfirmOpenCodeReset): ONE target
+                                   #          spans TWO profile surfaces — userData (desktop\ per clone;
+                                   #          %APPDATA%\ai.opencode.desktop Primary) + XDG data home
+                                   #          (data\opencode per clone; ~\.local\share\opencode Primary).
+                                   #          Deletes auth.json + mcp-auth.json (CLI OAuth), gh\device-id,
+                                   #          desktop\.updaterId, the session profile's Local State +
+                                   #          network session stores, caches, Crashpad/logs/compile-cache.
+                                   #          opencode.db (sessions), repos, shell, snapshot, tool-output,
+                                   #          drafts.sqlite, opencode.settings, window state, CLI cache and
+                                   #          config\opencode\*.json (MCP defs) PRESERVED. -Target
+                                   #          Primary|c1..c5|All (clones first), -KeepLogin, -DryRun; thin
+                                   #          manifest over the Python core; clone mains carry the
+                                   #          --opencode-clone-home ARGV marker (deterministic);
+                                   #          Pester: tests/reset_opencode.Tests.ps1 via the dot-source
+                                   #          guard; live acceptance = user-supervised)
 change_device_id.ps1              # System-level: Fingerprint (self-test) / LegacyReset (registry GUIDs)
                                    #   / RepairProfiles (ProfileList .bak keys). Windows-only.
                                    #   IDE Resets [1] = LegacyReset behind :ConfirmRun (2026-11-10 — the old
@@ -920,7 +937,9 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   account gid 80 — 2026-11-07, ZCode LIGHT pattern; shortcuts shifted to
   [9]) / Maintenance [10]-[12] (patch, status, remove — 2026-10-31: shortcuts
   moved into Launch and the patch row into Maintenance, locals [7]/[8]
-  swapped, gids unchanged). **Gids NEVER
+  swapped, gids unchanged) / Identity Resets [13]-[19] (gids 98-104,
+  appended 2026-11-14 — reset_opencode.ps1 c1..c5/Primary, [19] gid 104 =
+  ALL behind :ConfirmOpenCodeReset; :RunOpenCodeReset wrapper). **Gids NEVER
   renumber** — specs, wiring history and repo-integrity cite them; a
   renumber touches only the submenu echo block + its resolver ladder. Add
   future rows in display order inside their section — never a higher id out

@@ -128,14 +128,16 @@ if ($out -match 'Unknown task')            { $failures += 'C: Unknown task on to
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'C: ZCode submenu not shown' }
 
 # D) invalid main-menu id -> exactly one legit Unknown task "99"
-$out = Invoke-Scenario 'D_invalid_main' @('99', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "99"')).Count
+$out = Invoke-Scenario 'D_invalid_main' @('105', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "105"')).Count
 if ($hits -ne 1)                           { $failures += "D: expected 1 legit Unknown task, got $hits" }
 
-# E) main sub-path "2 99" -> chain reaches ZCodeOne, exactly one legit
+# E) main sub-path "2 105" -> chain reaches ZCodeOne, exactly one legit
 #    Unknown task, and the PENDING_CHAIN literal never appears
-$out = Invoke-Scenario 'E_subpath_chain' @('2 99', '0', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "99"')).Count
+#    (105 = the next unassigned gid; 99 became REAL when the OpenCode
+#    identity resets landed 2026-11-14)
+$out = Invoke-Scenario 'E_subpath_chain' @('2 105', '0', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "105"')).Count
 if ($hits -ne 1)                           { $failures += "E: expected 1 Unknown task from chain, got $hits" }
 if ($out -match '%PENDING_CHAIN%')         { $failures += 'E: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'E: ZCode submenu not reached via sub-path' }
@@ -169,6 +171,14 @@ if ($out -notmatch '\[10\].*Reset Blue clone')  { $failures += 'H2: Cline [10] B
 if ($out -notmatch '\[14\].*Reset Orange clone') { $failures += 'H2: Cline [14] Orange reset not rendered' }
 if ($out -notmatch '\[15\].*Reset Primary')     { $failures += 'H2: Cline [15] Primary reset not rendered' }
 if ($out -notmatch '\[16\].*Reset ALL profiles') { $failures += 'H2: Cline [16] all-profiles reset not rendered' }
+
+# H3) OpenCode submenu render incl. the new Identity Resets rows
+$out = Invoke-Scenario 'H3_opencode_render' @('6', '0', '0')
+if ($out -match 'Unknown task')                  { $failures += 'H3: Unknown task on OpenCode submenu render' }
+if ($out -notmatch '\[13\].*Reset Blue clone')   { $failures += 'H3: OpenCode [13] Blue reset not rendered' }
+if ($out -notmatch '\[17\].*Reset Orange clone') { $failures += 'H3: OpenCode [17] Orange reset not rendered' }
+if ($out -notmatch '\[18\].*Reset Primary')      { $failures += 'H3: OpenCode [18] Primary reset not rendered' }
+if ($out -notmatch '\[19\].*Reset ALL profiles') { $failures += 'H3: OpenCode [19] all-profiles reset not rendered' }
 
 # I) invalid AutoClaw chain id "4 42" -> exactly one legit Unknown task "42"
 $out = Invoke-Scenario 'I_invalid_autoclaw' @('4 42', '0', '0')
