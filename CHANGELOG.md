@@ -8,6 +8,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode reset v1.5 backup-purge hardening (BS-5 / W1-5)** (2026-11-15):
+  the `_bug_sweep\fixes\BLOCKED_FIXES.md` §2 staged diffs applied to
+  `reset_zcode.ps1` [27/27] and adapted to the v1.5 thin manifest. The old
+  unconditional name-filter purge wiped every same-day `ID_Backups` dir —
+  including the only undo copy of an earlier chained run (e.g.
+  `reset_qoder.ps1` minutes earlier; the Qoder keep-dir Join-Path never
+  exists because reset_zcode writes its Qoder-profile backups under the
+  ZCode backup root). New policy: the current run's dir is never deleted,
+  only dirs OLDER than 24 h are purgeable, and before deleting an old dir
+  its `audit_*.json` + `restore_*.ps1` move up to the `ID_Backups` root
+  (each carries its run's timestamp) so every earlier run's undo evidence
+  survives its data purge — the edge-cases plan's D3 retention policy.
+  Every delete is now VERIFIED (`Remove-Item` then `Test-Path`; a locked
+  dir is audited `still-present` with `ok=$false` + a red FAILED line
+  instead of a green "deleted"), and the [27] watchdog step stops claiming
+  a green pass when a re-delete failed: `watchdog-recreate` audit entries
+  with `ok=$false` now count into `$failCount` (the old unconditional
+  `passCount++` turned those into exit 0). Verified with a 7-check
+  functional probe of the extracted purge function (old dir deleted +
+  manifests preserved at root + same-day run protected + current run kept
+  + verified audit entries). Pester 238/238, harness PASS, unittest 182
+  OK, PSSA unchanged (21 baseline = 21 new), parse clean. Live comparison
+  run pending user supervision.
 - **ZCode clone launcher bug-sweep hardening (BS-4)** (2026-11-15): the
   `_bug_sweep\fixes\10-fixes.md` staged designs (2026-10-24, then blocked by a
   workspace write-guard false positive) applied to
