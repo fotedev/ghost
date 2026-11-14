@@ -156,6 +156,95 @@ class DeleteSecretsTests(unittest.TestCase):
         self.assertEqual(remaining, ["innocent.key"])
 
 
+class SqliteCoreHardeningTests(unittest.TestCase):
+    """BS-6 fixes: URI-quoted read-only verify re-open, sqlite_update "ok"
+    verdict, rowcount-gated exact-key deletes."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        # A directory with a SPACE in its name: the unquoted file: URI cut
+        # the path at the space, so the verify re-open targeted the wrong
+        # (nonexistent) location and every after[] came back None.
+        spaced = os.path.join(self._tmp.name, "My Profile Dir")
+        os.makedirs(spaced, exist_ok=True)
+        self.db = os.path.join(spaced, "state.vscdb")
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)")
+        conn.commit()
+        conn.close()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_ro_verify_survives_spaced_profile_path(self):
+        result = sqlite_keys.sqlite_update(self.db, {"k": "v"})
+        self.assertEqual(result["after"]["k"], "v")
+
+    def test_ro_connect_quotes_specials(self):
+        # Direct pin of the quote() fix: the read-only reopen must resolve
+        # the spaced path (and round-trip the row).
+        sqlite_keys.sqlite_update(self.db, {"k": "v2"})
+        conn = sqlite_keys._ro_connect(self.db)
+        try:
+            value = conn.execute(
+                "SELECT value FROM ItemTable WHERE key = 'k'").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(value, "v2")
+
+    def test_ok_true_after_write(self):
+        result = sqlite_keys.sqlite_update(self.db, {"k": "v"})
+        self.assertTrue(result["ok"])
+
+    def test_ok_true_when_text_affinity_rescopes_int(self):
+        # The value column has TEXT affinity: an int written as 5 reads back
+        # as "5" -- the str() comparison branch keeps ok True.
+        result = sqlite_keys.sqlite_update(self.db, {"n": 5})
+        self.assertEqual(result["after"]["n"], "5")
+        self.assertTrue(result["ok"])
+
+    def test_ok_false_when_verify_reads_a_different_store(self):
+        # Force the verify re-open onto an EMPTY database: every after[]
+        # comes back None, so ok must be False (the PS caller treats it as
+        # FAILED). Simulates the torn/redirected-write failure mode.
+        empty_db = os.path.join(self._tmp.name, "empty.vscdb")
+        conn = sqlite3.connect(empty_db)
+        conn.execute(
+            "CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)")
+        conn.commit()
+        conn.close()
+        original = sqlite_keys._ro_connect
+        try:
+            sqlite_keys._ro_connect = lambda path: sqlite3.connect(
+                "file:" + empty_db.replace("\\", "/") + "?mode=ro", uri=True)
+            result = sqlite_keys.sqlite_update(self.db, {"k": "v"})
+        finally:
+            sqlite_keys._ro_connect = original
+        self.assertIsNone(result["after"]["k"])
+        self.assertFalse(result["ok"])
+
+    def test_absent_exact_key_not_reported_deleted(self):
+        # rowcount gate: a key that matched no row is not "deleted" -- the
+        # old unconditional append reported phantom removals.
+        result = sqlite_keys.delete_secrets(
+            self.db, exact_keys=("never-present.key",),
+            like_patterns=())
+        self.assertEqual(result["deleted"], [])
+        self.assertEqual(result["survivors"], [0])
+
+    def test_present_exact_key_still_reported_deleted(self):
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "INSERT INTO ItemTable (key, value) VALUES ('gituser', 'x')")
+        conn.commit()
+        conn.close()
+        result = sqlite_keys.delete_secrets(
+            self.db, exact_keys=("gituser",), like_patterns=())
+        self.assertEqual(result["deleted"], ["gituser"])
+        self.assertEqual(result["survivors"], [0])
+
+
 class ScrubIdentityRowsTests(unittest.TestCase):
     """ghost.sqlite_keys.scrub_identity_rows — the Trae ai-agent scrub twin
     (v0.2's temp-.py heredoc): key-NAME matching across every scrub-able

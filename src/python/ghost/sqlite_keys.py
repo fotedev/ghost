@@ -18,6 +18,7 @@ import json
 import re
 import sqlite3
 import time
+from urllib.parse import quote
 
 _TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -51,16 +52,23 @@ def _validate_table_name(table):
 
 def _ro_connect(path):
     """Read-only re-open for verify-after writes. Backslashes are normalized
-    for the URI form (same technique as the chat-sync bridge)."""
-    uri = "file:" + path.replace("\\", "/") + "?mode=ro"
+    for the URI form (same technique as the chat-sync bridge) and the path is
+    URI-quoted so spaces and other special characters survive the file:
+    scheme (a profile dir like "C:\\Users\\My Name\\..." would otherwise be
+    cut off at the space and the verify re-open would target the wrong
+    path)."""
+    uri = "file:" + quote(path.replace("\\", "/"), safe="/:") + "?mode=ro"
     return sqlite3.connect(uri, uri=True, timeout=10)
 
 
 def sqlite_update(db_path, updates, table="ItemTable"):
     """UPSERT key/value rows + verify-after re-read.
 
-    Returns {"before": {key: old|None}, "after": {key: new|None}}. Raises on
-    any sqlite error (caller contract: non-zero exit -> PowerShell FAILED).
+    Returns {"before": {key: old|None}, "after": {key: new|None},
+    "ok": bool} where ok compares every after[] value against the requested
+    update (an exact match OR the same value as text -- the value column has
+    TEXT affinity, so an int written as 5 reads back as "5"). Raises on any
+    sqlite error (caller contract: non-zero exit -> PowerShell FAILED).
     """
     _validate_table_name(table)
 
@@ -99,14 +107,20 @@ def sqlite_update(db_path, updates, table="ItemTable"):
     finally:
         verify_conn.close()
 
-    return {"before": before, "after": after}
+    return {
+        "before": before,
+        "after": after,
+        "ok": all(after[k] == v or str(after[k]) == str(v)
+                  for k, v in updates.items()),
+    }
 
 
 def delete_secrets(db_path, exact_keys=None, like_patterns=None, escape=None):
     """DELETE auth-secret keys from ItemTable and verify zero survivors via
     read-only reopen. Returns {"deleted": [...], "survivors": [...]} where
     survivors is the per-pattern/per-key COUNT(*) list (all zeros on
-    success).
+    success) and deleted lists only keys that actually matched rows (the
+    exact-key loop records a key only when the DELETE affected >= 1 row).
 
     exact_keys / like_patterns default to the module's Cursor constants.
     escape: an ESCAPE character for the LIKE patterns (e.g. "\\") — needed
@@ -135,7 +149,11 @@ def delete_secrets(db_path, exact_keys=None, like_patterns=None, escape=None):
                 deleted.append(key)
         for key in exact_keys:
             cursor.execute("DELETE FROM ItemTable WHERE key = ?", (key,))
-            deleted.append(key)
+            # rowcount-gated: a key that matched no row is not "deleted" --
+            # the old unconditional append reported phantom removals for
+            # keys that were never in the table (PS callers counted them).
+            if cursor.rowcount > 0:
+                deleted.append(key)
         conn.commit()
     finally:
         conn.close()

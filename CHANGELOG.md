@@ -8,6 +8,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Python core hardening (BS-6)** (2026-11-15): three
+  `_bug_sweep\fixes\BLOCKED_FIXES.md` §5 fixes in
+  `src/python/ghost/sqlite_keys.py`. (a) `_ro_connect` now URI-quotes the
+  normalized path (`quote(..., safe="/:")`) — a profile dir with a SPACE
+  ("C:\Users\My Name\...") previously truncated the `file:` URI at the
+  space, so every verify-after re-open targeted a nonexistent location and
+  returned `after` values of `None`; (b) `sqlite_update` returns an `ok`
+  verdict (`after` matches the update exactly OR as text — the TEXT-affinity
+  value column reads an int written as `5` back as `"5"`), letting PS
+  callers treat a redirected/torn write as FAILED instead of trusting the
+  green success line; (c) `delete_secrets` records an exact key as deleted
+  only when `cursor.rowcount > 0` — the old unconditional append reported
+  phantom removals for keys that were never in the table. The fourth §5
+  item (the backup-uniquify test rename) had already landed
+  (`test_existing_destination_is_uniquified_not_clobbered`). +7 unittests
+  (spaced-path verify, direct quote pin, ok true / text-affinity true /
+  forced-false via a redirected verify store, absent exact key not
+  reported, present key still reported) — unittest 189 OK. Pester 238/238,
+  harness PASS.
 - **ZCode reset v1.5 backup-purge hardening (BS-5 / W1-5)** (2026-11-15):
   the `_bug_sweep\fixes\BLOCKED_FIXES.md` §2 staged diffs applied to
   `reset_zcode.ps1` [27/27] and adapted to the v1.5 thin manifest. The old
