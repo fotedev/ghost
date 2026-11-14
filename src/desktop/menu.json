@@ -153,7 +153,7 @@
         ] },
         { "gid": 73, "label": "Import MCPs to clones", "tail": "- from the central master manifest", "mode": "inline", "script": "tools/sync_autoclaw2_mcp.ps1", "args": ["-Target", "All"], "notes": [] },
         { "gid": 75, "label": "Chat inventory", "tail": "- read-only cross-profile report", "mode": "inline", "script": "tools/sync_autoclaw2_chats.ps1", "args": ["-Mode", "Inventory", "-Target", "All"], "notes": [] },
-        { "gid": 76, "label": "Import chats to clones", "tail": "- one-way Primary to clones - DB backed up first", "mode": "inline", "script": "tools/sync_autoclaw2_chats.ps1", "args": ["-Mode", "Import", "-Apply", "-Target", "All"], "notes": [] },
+        { "gid": 76, "label": "Import chats to clones", "tail": "- one-way Primary to clones - DB backed up first", "mode": "inline", "script": "tools/sync_autoclaw2_chats.ps1", "args": ["-Mode", "Import", "-Apply", "-AllMissing", "-Target", "All"], "notes": [] },
         { "gid": 35, "label": "Clone status", "tail": "- all 5 - locks, device-id, sign-in state", "mode": "chain-pause", "steps": [
           { "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c1", "-Status"] },
           { "script": "src/windows/launch_autoclaw2_clone.ps1", "args": ["-Instance", "c2", "-Status"] },
