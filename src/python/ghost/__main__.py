@@ -193,7 +193,8 @@ def _cmd_audit_log(args):
 
 def _cmd_backup(args):
     report = backup.backup_to_timestamped_dir(
-        args.source, args.backup_root, args.label)
+        args.source, args.backup_root, args.label,
+        sqlite_wal=getattr(args, "sqlite_wal", False))
     print(json.dumps(report))
     return 0 if (report["ok"] or report["skipped"]) else 1
 
@@ -386,6 +387,9 @@ def build_parser():
     p.add_argument("source")
     p.add_argument("backup_root")
     p.add_argument("label")
+    p.add_argument("--sqlite-wal", action="store_true",
+                   help="source is a SQLite db: best-effort wal_checkpoint "
+                        "first, then copy -wal/-shm siblings alongside")
     p.set_defaults(func=_cmd_backup)
 
     p = sub.add_parser(

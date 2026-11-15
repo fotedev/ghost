@@ -16,7 +16,41 @@ implementation today.
 
 import os
 import shutil
+import sqlite3
 import time
+
+
+def _sqlite_wal_prepare(source, report):
+    """Best-effort `PRAGMA wal_checkpoint(TRUNCATE)` on a SQLite source so
+    the plain-file copy of the main db is self-consistent. Busy/locked/
+    not-sqlite sources are tolerated (the -wal/-shm siblings are copied
+    alongside instead); never fails the backup. W1-3's sqlite arm."""
+    try:
+        conn = sqlite3.connect(source, timeout=2)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            report["detail"] = (report["detail"] + "; wal checkpointed").lstrip("; ")
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+def _copy_wal_siblings(source, destination):
+    """Copy the -wal/-shm siblings next to the backed-up db file (best
+    effort: a sibling that vanished between the checks or is momentarily
+    locked is skipped and reported, never fatal). Returns the copied list."""
+    copied = []
+    for suffix in ("-wal", "-shm"):
+        sibling = source + suffix
+        if os.path.exists(sibling):
+            dest_sibling = destination + suffix
+            try:
+                _copy_once(sibling, dest_sibling)
+                copied.append(dest_sibling)
+            except OSError:
+                pass
+    return copied
 
 
 def _tree_stats(path):
@@ -43,7 +77,8 @@ def _copy_once(source, destination):
         shutil.copy2(source, destination)
 
 
-def backup_to_timestamped_dir(source, backup_root, label, attempts=6, backoff_ms=500):
+def backup_to_timestamped_dir(source, backup_root, label, attempts=6,
+                              backoff_ms=500, sqlite_wal=False):
     """Copy `source` (file or tree) to backup_root/label with lock retries.
 
     The backup root and label mirror the PS contract: the CALLER owns the
@@ -52,6 +87,12 @@ def backup_to_timestamped_dir(source, backup_root, label, attempts=6, backoff_ms
     overwritten: the label is uniquified with a -2/-3... suffix, so a
     same-label re-backup can no longer destroy the pristine pre-run copy
     (the Copy-Item -Force clobber class the sweep found in every resetter).
+
+    sqlite_wal=True (W1-3): the source is a SQLite db — best-effort
+    `PRAGMA wal_checkpoint(TRUNCATE)` first, then the -wal/-shm siblings are
+    copied alongside the destination so the undo copy can be reopened even
+    when the checkpoint could not run (live writers). Sibling copy failures
+    are reported in `detail` and never fail the backup.
 
     Returns a report dict:
       {"ok": bool, "skipped": bool, "destination": str|None,
@@ -68,6 +109,9 @@ def backup_to_timestamped_dir(source, backup_root, label, attempts=6, backoff_ms
         report["skipped"] = True
         report["detail"] = "source not present"
         return report
+
+    if sqlite_wal and os.path.isfile(source):
+        _sqlite_wal_prepare(source, report)
 
     destination = os.path.join(backup_root, label)
     if os.path.exists(destination):
@@ -105,6 +149,12 @@ def backup_to_timestamped_dir(source, backup_root, label, attempts=6, backoff_ms
                 return report
             report["ok"] = True
             report["destination"] = destination
+            if sqlite_wal and os.path.isfile(source):
+                wal_copied = _copy_wal_siblings(source, destination)
+                if wal_copied:
+                    report["detail"] = (report["detail"] +
+                                        "; copied {0} wal sibling(s)"
+                                        .format(len(wal_copied))).lstrip("; ")
             return report
         except OSError as exc:
             last_error = str(exc)

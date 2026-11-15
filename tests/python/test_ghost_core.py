@@ -1052,6 +1052,72 @@ class BackupToTimestampedDirTests(unittest.TestCase):
         with open(self.src_file, "rb") as a, open(dst, "rb") as b:
             self.assertEqual(a.read(), b.read())
 
+    def _make_wal_db(self):
+        db = os.path.join(self._tmp.name, "wal-state.vscdb")
+        conn = sqlite3.connect(db)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO ItemTable VALUES ('k', 'v')")
+        conn.commit()
+        conn.close()
+        # Reopen and leave the connection open so -wal/-shm exist on disk.
+        conn = sqlite3.connect(db)
+        conn.execute("INSERT INTO ItemTable VALUES ('k2', 'v2')")
+        conn.commit()
+        return db, conn
+
+    def test_sqlite_wal_locked_writers_copy_siblings(self):
+        # W1-3, the live-writers case: another connection holds BEGIN
+        # EXCLUSIVE, so the checkpoint cannot TRUNCATE and the -wal sibling
+        # stays on disk -- the backup must copy the main file AND the sibling
+        # so the undo copy can be reopened later. (File-level copies are
+        # unaffected by SQLite's logical locks.)
+        db, holder = self._make_wal_db()
+        try:
+            holder.execute("BEGIN EXCLUSIVE")
+            holder.execute("INSERT INTO ItemTable VALUES ('k3', 'v3')")
+            r = backup.backup_to_timestamped_dir(
+                db, self.backup_root, "wal-state.vscdb", sqlite_wal=True)
+            self.assertTrue(r["ok"], r)
+            self.assertIsNone(r["error"])
+            self.assertTrue(os.path.exists(r["destination"] + "-wal"), r)
+            # The destination reopens as the same db (main + sibling copy).
+            chk = sqlite3.connect(r["destination"])
+            try:
+                keys = [row[0] for row in chk.execute(
+                    "SELECT key FROM ItemTable")]
+            finally:
+                chk.close()
+            self.assertIn("k", keys)
+        finally:
+            holder.rollback()
+            holder.close()
+
+    def test_sqlite_wal_quiet_db_backs_up_cleanly(self):
+        # The no-other-connection case: the checkpoint runs (or the clean
+        # close removes the -wal), the main-file copy is self-consistent.
+        db, conn = self._make_wal_db()
+        conn.close()
+        r = backup.backup_to_timestamped_dir(
+            db, self.backup_root, "wal-state.vscdb", sqlite_wal=True)
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(r["error"])
+        chk = sqlite3.connect(r["destination"])
+        try:
+            keys = [row[0] for row in chk.execute("SELECT key FROM ItemTable")]
+        finally:
+            chk.close()
+        self.assertEqual(keys, ["k", "k2"])
+
+    def test_wal_flag_survives_a_non_sqlite_source(self):
+        # The best-effort checkpoint must never fail the backup when the
+        # flagged source is not actually a SQLite db.
+        r = backup.backup_to_timestamped_dir(
+            self.src_file, self.backup_root, "state.vscdb", sqlite_wal=True)
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(r["error"])
+
     def test_tree_backup_ok_and_entries_match(self):
         r = backup.backup_to_timestamped_dir(
             self.src_dir, self.backup_root, "store")
