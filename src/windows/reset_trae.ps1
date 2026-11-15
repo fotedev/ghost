@@ -405,16 +405,26 @@ function Invoke-OldIdBackupsPurge {
 
     $allBackups = @(Get-ChildItem -LiteralPath $IdBackupsRoot -Directory -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending)
-    $toDelete = @($allBackups | Where-Object { $_.Name -ne $currentTimestamp })
+    # 2026-11-15 (the #73 zcode policy shape): only dirs OLDER than 24h are
+    # purgeable - a same-day dir may be the only undo copy of an earlier
+    # chained run - and the old runs' audit/restore manifests move up to the
+    # ID_Backups root so their undo evidence survives the data purge.
+    $recentFloor = (Get-Date).AddHours(-24)
+    $toDelete = @($allBackups | Where-Object { $_.Name -ne $currentTimestamp -and $_.LastWriteTime -lt $recentFloor })
 
     if ($toDelete.Count -eq 0) {
         Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "none" -After "none" -Ok $true
-        Write-Host "    no older ID_Backups to purge (only current run present)" -ForegroundColor DarkGray
+        Write-Host "    no older ID_Backups to purge (current run kept; same-day runs protected)" -ForegroundColor DarkGray
         return
     }
 
     foreach ($dir in $toDelete) {
-        Write-Host "    [PURGE] $($dir.Name) (preserved old fingerprint; deleting)" -ForegroundColor DarkGray
+        Write-Host "    [PURGE] $($dir.Name) (older than 24h; deleting)" -ForegroundColor DarkGray
+        foreach ($manifest in @(Get-ChildItem -LiteralPath $dir.FullName -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'audit_*.json' -or $_.Name -like 'restore_*.ps1' })) {
+            Move-Item -LiteralPath $manifest.FullName -Destination (Join-Path $IdBackupsRoot $manifest.Name) -Force -ErrorAction SilentlyContinue
+            Add-AuditEntry -Audit $Audit -File $manifest.FullName -Key "restore-manifest-preserved" -Before "present" -After "preserved" -Ok $true
+        }
         Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $dir.FullName) {
             Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "delete-failed" -Ok $false

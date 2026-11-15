@@ -8,6 +8,46 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Qoder reset v0.5 bug-sweep hardening (BS-7) + purge-policy alignment**
+  (2026-11-15): report 05 walked item-by-item against the v0.5 thin
+  manifest — the two HIGHs the migration had already closed are recorded
+  (ANSI decode: zero direct app-store reads left; argv.json missing key:
+  the core `patch_argv_json` INSERTS when absent), and the genuine
+  remainders are fixed. Step [30] now routes the `.qoder` run-state trees
+  through the sweep-tree core twin (`Clear-TreeFilesIndividually` — defined
+  since v0.5 but NEVER called; the header promised it) so one locked log
+  no longer leaves 99% of the tree on disk; steps [13]–[18] keep the
+  whole-path store-delete by documented choice. The [21] purge gets the
+  #73 policy shape: 24 h floor + never the current run, old runs'
+  `audit_*.json`/`restore_*.ps1` preserved at the `ID_Backups` root, and
+  VERIFIED deletes (`still-present` audited `ok=$false` — the old code
+  audited a green "deleted" for a locked dir with the complete old
+  fingerprint snapshot still on disk). Self-elevation deletes the stale
+  done-marker and relays the child exit code via `-PassThru` (a failing
+  reset no longer exits 0). The taskkill stderr race (native stderr under
+  `EAP=Stop` aborts the run pre-audit) is caught and logged. The MAC
+  ledger/restore is now a true inversion: the manifest records
+  `previousValue`/`previousExisted`/`ifIndex`/`writeOk` per adapter (only
+  when the write landed), the restore REMOVES invented overrides (the old
+  script pinned the reset-time MAC over the burned-in address on adapters
+  that never had one), skips adapters whose write never landed, and
+  addresses by `-InterfaceIndex` (the `-Name` parameter accepts
+  wildcards). `Remove-QoderPathSafely` returns an honest
+  `deleted`/`delete-failed` verdict and steps [20]/[21]/[22] count
+  failures (the watchdog probe returns the trae/zcode `allOk` contract).
+  The final state.vscdb probe RE-ASSERTS the written value via the core
+  `sqlite-update` verb (idempotent, heals a post-run recreation) instead
+  of replaying step-[3] audit entries, and a missing DB file fails
+  honestly. The stale "WIN-<8hex>" header line corrected (the code
+  produces the DESKTOP-XXXXXXX factory-default pattern). One finding
+  stays OPEN and recorded: no top-level guard before the end-of-run
+  audit/restore write (the W1-4 incremental-audit class). `reset_trae.ps1`
+  gets the same 24 h purge floor + manifest preservation (its deletes
+  were already verified), closing the recorded candidate follow-up.
+  Verified with a 7-check functional probe of the extracted qoder purge
+  function. Pester 238/238, harness PASS, unittest 189 OK, PSSA 18=18 /
+  4=4 baselines, parse clean. Live comparison run pending user
+  supervision.
 - **Bug-sweep backlog re-status + trae hardening remainder (BS-9 walk)
   (2026-11-15)**: `reset_trae.ps1` v0.3 walked item-by-item against the
   bug-sweep report (04) — 9 of 11 findings CLOSED with evidence (the
