@@ -54,7 +54,10 @@
 # The fail-fast Python preflight (one of the v1.5 items recorded PENDING in
 # the CHANGELOG) lands with this migration; the remaining recorded v1.5
 # items (shared-db scrub [26b], strict backups, abort checkpoint, -DryRun,
-# purge salvage) stay PENDING -- separate debt, not part of the migration.
+# purge salvage) land in the 2026-11-15 W1 remainder pass (edge-cases plan
+# F-01/F-04/F-05): step [26b] extends the 27-step contract for clone targets
+# (the LIVE shared CLI db) and the backups went STRICT (no backup, no
+# mutation).
 #
 # v1.4 adds multi-instance targeting (Primary / Secondary / Third / Fourth /
 # Both / All) on top of v1.3:
@@ -317,9 +320,11 @@ function Invoke-GhostCore {
 
 function Backup-ViaCore {
     # Backup-FileToTimestampDir via the core, plus the restore-manifest
-    # action. A locked/failed backup is reported but NOT fatal - the v1.4
-    # contract verbatim (a file whose copy could not be read may still be
-    # deletable, and the caller proceeds).
+    # action. W1-3 (F-04): the STRICT contract - the caller must check the
+    # return and SKIP the mutation when $false (no backup, no mutation: a
+    # locked credentials.json used to be modified unrestorable). SQLite
+    # sources get the core's --sqlite-wal flag (best-effort wal_checkpoint
+    # + -wal/-shm sibling copies) so the undo copy can be reopened.
     param(
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][string]$BackupRoot,
@@ -327,17 +332,19 @@ function Backup-ViaCore {
         [Parameter(Mandatory = $true)][ref]$Actions
     )
 
-    $report = Invoke-GhostCore @("backup", $Source, $BackupRoot, $Label)
+    $backupArgs = @("backup", $Source, $BackupRoot, $Label)
+    if ($Source.ToLowerInvariant().EndsWith(".sqlite")) { $backupArgs += "--sqlite-wal" }
+    $report = Invoke-GhostCore $backupArgs
     if ($null -eq $report) {
-        Write-Host "    [WARN] backup FAILED - proceeding WITHOUT backup: $Source" -ForegroundColor Yellow
+        Write-Host "    [FAILED] backup core invocation failed: $Source" -ForegroundColor Red
         return $false
     }
-    if ($report.skipped) { return $false }
+    if ($report.skipped) { return $true }   # source absent: nothing to protect
     if ($report.ok -and $report.destination) {
         Add-ActionEntry -Actions $Actions -OriginalPath $Source -BackupPath $report.destination
         return $true
     }
-    Write-Host "    [WARN] backup did not complete ($($report.error)) - proceeding" -ForegroundColor Yellow
+    Write-Host "    [FAILED] backup did not complete ($($report.error)): $Source" -ForegroundColor Red
     return $false
 }
 
@@ -448,7 +455,12 @@ function Invoke-WorkspaceSqliteUpdate {
     # UPSERT ONLY -- never delete workspace tables/files (chat preservation).
     # Core: backup + sqlite-update (Set-SqliteKeys' contract split across the
     # core verbs; the verify-after re-read carries the [OK]/[FAILED] verdict).
-    $null = Backup-ViaCore -Source $WorkspaceDbPath -BackupRoot $BackupRoot -Label (Get-AppRelativeBackupLabel -RootPath $RootPath -TargetPath $WorkspaceDbPath) -Actions $Actions
+    # W1-3 strict mode: no backup, no mutation.
+    if (-not (Backup-ViaCore -Source $WorkspaceDbPath -BackupRoot $BackupRoot -Label (Get-AppRelativeBackupLabel -RootPath $RootPath -TargetPath $WorkspaceDbPath) -Actions $Actions)) {
+        Add-AuditEntry -Audit $Audit -File $WorkspaceDbPath -Key "storage.serviceMachineId" -Before "present" -After "backup-failed" -Ok $false
+        Write-Host "    [FAILED] workspace DB backup failed - update skipped: $WorkspaceDbPath" -ForegroundColor Red
+        return $false
+    }
     $wsReport = Invoke-GhostCore @("sqlite-update", $WorkspaceDbPath, (_B64Payload @{ "storage.serviceMachineId" = $DeviceId }))
     $ok = $false
     if ($null -ne $wsReport -and $null -ne $wsReport.after -and ($wsReport.after."storage.serviceMachineId" -eq $DeviceId)) {
@@ -486,7 +498,12 @@ function Clear-SecretsFromSqlite {
         return $true
     }
 
-    $null = Backup-ViaCore -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel -Actions $Actions
+    # W1-3 strict mode: no backup, no mutation.
+    if (-not (Backup-ViaCore -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel -Actions $Actions)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "secrets-delete" -Before "present" -After "backup-failed" -Ok $false
+        Write-Host "    [FAILED] secrets DB backup failed - deletion skipped: $Path" -ForegroundColor Red
+        return $false
+    }
 
     # Core: delete-secrets via the ONE invocation helper (the logic has lived
     # in the shared core since the Phase 3 pilot -- v1.4 called it directly;
@@ -710,7 +727,12 @@ function Set-RumElectronStore {
 
     # Core: backup + json-patch (both keys in ONE verified write; the create-
     # when-missing behavior matches the v1.4 Add-Member branches).
-    $null = Backup-ViaCore -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel -Actions $Actions
+    # W1-3 strict mode: no backup, no mutation.
+    if (-not (Backup-ViaCore -Source $Path -BackupRoot $BackupRoot -Label $BackupLabel -Actions $Actions)) {
+        Add-AuditEntry -Audit $Audit -File $Path -Key "_arms_uid" -Before "present" -After "backup-failed" -Ok $false
+        Write-Host "    [FAILED] RUM store backup failed - update skipped: $Path" -ForegroundColor Red
+        return $false
+    }
     $patchUpdates = @{ "_arms_uid" = $NewUid; "_arms_session" = $NewSession }
     $report = Invoke-GhostCore @("json-patch", $Path, (_B64Payload $patchUpdates))
     if ($null -ne $report -and $report.ok) {
@@ -776,7 +798,13 @@ function Clear-ZcodeOAuthCredentials {
     }
 
     $backupLabel = Get-PathBackupLabel -Path $CredentialsPath
-    $null = Backup-ViaCore -Source $CredentialsPath -BackupRoot $BackupRoot -Label $backupLabel -Actions $Actions
+    # W1-3 strict mode: no backup, no mutation (the F-04 class - a locked
+    # credentials.json used to be modified unrestorable).
+    if (-not (Backup-ViaCore -Source $CredentialsPath -BackupRoot $BackupRoot -Label $backupLabel -Actions $Actions)) {
+        Add-AuditEntry -Audit $Audit -File $CredentialsPath -Key "oauth-credentials" -Before "present" -After "backup-failed" -Ok $false
+        Write-Host "    [FAILED] credentials.json backup failed - OAuth clear skipped: $CredentialsPath" -ForegroundColor Red
+        return $false
+    }
 
     try {
         $content = Get-Content -LiteralPath $CredentialsPath -Raw | ConvertFrom-Json
@@ -849,7 +877,12 @@ function Clear-ZcodeProviderApiKeys {
     }
 
     $backupLabel = Get-UserProfileBackupLabel -TargetPath $ConfigPath
-    $null = Backup-ViaCore -Source $ConfigPath -BackupRoot $BackupRoot -Label $backupLabel -Actions $Actions
+    # W1-3 strict mode: no backup, no mutation.
+    if (-not (Backup-ViaCore -Source $ConfigPath -BackupRoot $BackupRoot -Label $backupLabel -Actions $Actions)) {
+        Add-AuditEntry -Audit $Audit -File $ConfigPath -Key "provider-apikeys" -Before "present" -After "backup-failed" -Ok $false
+        Write-Host "    [FAILED] config.json backup failed - apiKey strip skipped: $ConfigPath" -ForegroundColor Red
+        return $false
+    }
 
     try {
         $content = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
@@ -1670,8 +1703,13 @@ else {
         $p = Join-Path $pr "User\globalStorage\storage.json"
         if (Test-Path -LiteralPath $p) {
             # Core: backup + json-patch (Set-JsonIdentity's contract split
-            # across the core verbs).
-            $null = Backup-ViaCore -Source $p -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions)
+            # across the core verbs). W1-3 strict mode: no backup, no mutation.
+            if (-not (Backup-ViaCore -Source $p -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions))) {
+                Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "telemetry.machineId" -Before "present" -After "backup-failed" -Ok $false
+                Write-Host "    [$(Get-ZcodeLabelColor $label)] [FAILED] storage.json backup failed - update skipped" -ForegroundColor Red
+                $stepFailed = $true
+                continue
+            }
             $stReport = Invoke-GhostCore @("json-patch", $p, (_B64Payload $storageUpdates))
             if ($null -ne $stReport -and $stReport.ok) {
                 foreach ($key in $storageUpdates.Keys) {
@@ -1748,8 +1786,13 @@ $zcodeTelemetryStatePath = Join-Path $zcodeUserProfile "v2\telemetry-state.json"
 Write-Host "`n[4/27] Updating ZCode telemetry-state.json (deviceMid)..." -ForegroundColor Cyan
 if (Test-Path -LiteralPath $zcodeTelemetryStatePath) {
     # Core: backup + json-patch (Set-JsonIdentity's contract split across the
-    # core verbs).
-    $null = Backup-ViaCore -Source $zcodeTelemetryStatePath -BackupRoot $backupRoot -Label (Get-UserProfileBackupLabel -TargetPath $zcodeTelemetryStatePath) -Actions ([ref]$actions)
+    # core verbs). W1-3 strict mode: no backup, no mutation.
+    if (-not (Backup-ViaCore -Source $zcodeTelemetryStatePath -BackupRoot $backupRoot -Label (Get-UserProfileBackupLabel -TargetPath $zcodeTelemetryStatePath) -Actions ([ref]$actions))) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeTelemetryStatePath -Key "deviceMid" -Before "present" -After "backup-failed" -Ok $false
+        Write-Host "[FAILED] telemetry-state.json backup failed - update skipped" -ForegroundColor Red
+        $failCount++
+    }
+    else {
     $midReport = Invoke-GhostCore @("json-patch", $zcodeTelemetryStatePath, (_B64Payload @{ "deviceMid" = $newDeviceMid }))
     if ($null -ne $midReport -and $midReport.ok) {
         Add-AuditEntry -Audit ([ref]$audit) -File $zcodeTelemetryStatePath -Key "deviceMid" -Before $midReport.before."deviceMid" -After $midReport.after."deviceMid" -Ok $true
@@ -1760,6 +1803,7 @@ if (Test-Path -LiteralPath $zcodeTelemetryStatePath) {
         Add-AuditEntry -Audit ([ref]$audit) -File $zcodeTelemetryStatePath -Key "deviceMid" -Before $null -After $newDeviceMid -Ok $false
         Write-Host "[FAILED] telemetry-state.json verification failed" -ForegroundColor Red
         $failCount++
+    }
     }
 }
 else {
@@ -1838,8 +1882,13 @@ else {
         $p = Join-Path $pr "User\globalStorage\state.vscdb"
         if (Test-Path -LiteralPath $p) {
             # Core: backup + sqlite-update (the verify-after re-read carries
-            # the verdict).
-            $null = Backup-ViaCore -Source $p -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions)
+            # the verdict). W1-3 strict mode: no backup, no mutation.
+            if (-not (Backup-ViaCore -Source $p -BackupRoot $backupRoot -Label (Get-AppRelativeBackupLabel -RootPath $pr -TargetPath $p) -Actions ([ref]$actions))) {
+                Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "storage.serviceMachineId" -Before "present" -After "backup-failed" -Ok $false
+                Write-Host "    [$(Get-ZcodeLabelColor $label)] [FAILED] state.vscdb backup failed - update skipped" -ForegroundColor Red
+                $stepFailed = $true
+                continue
+            }
             $svReport = Invoke-GhostCore @("sqlite-update", $p, (_B64Payload @{ "storage.serviceMachineId" = $ids.devDeviceId }))
             if ($null -ne $svReport -and $null -ne $svReport.after -and ($svReport.after."storage.serviceMachineId" -eq $ids.devDeviceId)) {
                 Add-AuditEntry -Audit ([ref]$audit) -File $p -Key "storage.serviceMachineId" -Before $svReport.before."storage.serviceMachineId" -After $svReport.after."storage.serviceMachineId" -Ok $true
@@ -2431,8 +2480,13 @@ foreach ($preservedRelPath in @("v2\tasks-index.sqlite", "v2\checkpoints", "cli\
 if (Test-Path -LiteralPath $zcodeCliDbPath) {
     # Core: backup + clear-cli-telemetry via the ONE invocation helper (the
     # error-dict contract is kept: sqlite failure reported in-band -- never
-    # silent-success on a locked/unreadable db).
-    $null = Backup-ViaCore -Source $zcodeCliDbPath -BackupRoot $backupRoot -Label (Get-UserProfileBackupLabel -TargetPath $zcodeCliDbPath) -Actions ([ref]$actions)
+    # silent-success on a locked/unreadable db). W1-3 strict mode.
+    if (-not (Backup-ViaCore -Source $zcodeCliDbPath -BackupRoot $backupRoot -Label (Get-UserProfileBackupLabel -TargetPath $zcodeCliDbPath) -Actions ([ref]$actions))) {
+        Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "backup-failed" -Ok $false
+        Write-Host "[FAILED] CLI db backup failed - scrub skipped" -ForegroundColor Red
+        $failCount++
+    }
+    else {
     $result = Invoke-GhostCore @("clear-cli-telemetry", $zcodeCliDbPath)
     if ($null -eq $result) {
         Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "present" -After "core-invoke-failed" -Ok $false
@@ -2449,10 +2503,66 @@ if (Test-Path -LiteralPath $zcodeCliDbPath) {
         Write-Host "[OK] CLI db telemetry cleared: $($result.deleted) keys" -ForegroundColor Green
         $passCount++
     }
+    }
 }
 else {
     Add-AuditEntry -Audit ([ref]$audit) -File $zcodeCliDbPath -Key "cli-telemetry" -Before "missing" -After "skipped" -Ok $true
     Write-Host "[SKIP] CLI db.sqlite not found" -ForegroundColor Yellow
+    $passCount++
+}
+
+# --- [26b/27] SHARED CLI db.sqlite telemetry scrub (W1-1 / F-01) ---
+# The live shared CLI store (~\.zcode\cli\db\db.sqlite) is read by EVERY
+# instance (verified ground truth); step [26] above only reaches it when the
+# TARGET's user profile IS the shared one (Primary). A clone-only reset used
+# to leave its telemetry/machineId/deviceId rows intact - the cross-instance
+# correlation trail F-01 was filed for. Best-effort by design: the scrub is
+# lock-tolerant (10 s busy timeout) and reports failures via its error dict,
+# so a survivor holding the db yields an honest FAILED entry + WARN, never a
+# silent skip.
+if ($Target -ne 'Primary') {
+    $sharedCliDbPath = Join-Path $env:USERPROFILE ".zcode\cli\db\db.sqlite"
+    Write-Host "`n[26b/27] Scrubbing the SHARED CLI db.sqlite telemetry keys (all instances read this store)..." -ForegroundColor Cyan
+    if (Test-Path -LiteralPath $sharedCliDbPath) {
+        if (-not (Backup-ViaCore -Source $sharedCliDbPath -BackupRoot $backupRoot -Label "cli-db-shared" -Actions ([ref]$actions))) {
+            Add-AuditEntry -Audit ([ref]$audit) -File $sharedCliDbPath -Key "cli-telemetry-shared" -Before "present" -After "backup-failed" -Ok $false
+            Write-Host "[FAILED] shared CLI db backup failed - scrub skipped" -ForegroundColor Red
+            $failCount++
+        }
+        else {
+            $sharedResult = Invoke-GhostCore @("clear-cli-telemetry", $sharedCliDbPath)
+            if ($null -eq $sharedResult) {
+                Add-AuditEntry -Audit ([ref]$audit) -File $sharedCliDbPath -Key "cli-telemetry-shared" -Before "present" -After "core-invoke-failed" -Ok $false
+                Write-Host "[FAILED] shared CLI db telemetry clear core invocation failed" -ForegroundColor Red
+                $failCount++
+            }
+            elseif ($sharedResult.PSObject.Properties.Name -contains "error") {
+                Add-AuditEntry -Audit ([ref]$audit) -File $sharedCliDbPath -Key "cli-telemetry-shared" -Before "present" -After ("error: " + $sharedResult.error) -Ok $false
+                Write-Host "[WARN] shared CLI db not scrubbed ($($sharedResult.error)) - re-run with every instance closed" -ForegroundColor Yellow
+                $failCount++
+            }
+            else {
+                Add-AuditEntry -Audit ([ref]$audit) -File $sharedCliDbPath -Key "cli-telemetry-shared" -Before "present" -After ("deleted " + $sharedResult.deleted) -Ok ($sharedResult.remaining -eq 0)
+                if ($sharedResult.remaining -eq 0) {
+                    Write-Host "[OK] shared CLI db telemetry cleared: $($sharedResult.deleted) keys" -ForegroundColor Green
+                    $passCount++
+                }
+                else {
+                    Write-Host "[FAILED] shared CLI db telemetry survivors remain: $($sharedResult.remaining)" -ForegroundColor Red
+                    $failCount++
+                }
+            }
+        }
+    }
+    else {
+        Add-AuditEntry -Audit ([ref]$audit) -File $sharedCliDbPath -Key "cli-telemetry-shared" -Before "missing" -After "skipped" -Ok $true
+        Write-Host "[SKIP] shared CLI db.sqlite not found" -ForegroundColor Yellow
+        $passCount++
+    }
+}
+else {
+    Add-AuditEntry -Audit ([ref]$audit) -File (Join-Path $env:USERPROFILE ".zcode\cli\db\db.sqlite") -Key "cli-telemetry-shared" -Before "primary-step-26" -After "skipped" -Ok $true
+    Write-Host "[SKIP] shared CLI db covered by step [26] (Primary target)" -ForegroundColor DarkGray
     $passCount++
 }
 

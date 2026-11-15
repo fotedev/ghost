@@ -8,6 +8,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode reset W1-1 shared-db scrub [26b] + W1-3 strict backups** (2026-11-15):
+  the first two items of the ZCode W1 remainder (edge-cases plan F-01
+  severity H / F-04 severity H). **Step [26b/27]** (a deliberate extension
+  of the 27-step contract): the LIVE shared CLI store
+  `~\.zcode\cli\db\db.sqlite` is read by EVERY instance, and step [26]
+  only reaches it when the target's user profile IS the shared one
+  (Primary) — a clone-only reset left its telemetry/machineId/deviceId
+  rows intact (the cross-instance correlation trail F-01 was filed for).
+  Clone targets now scrub the shared db too: WAL-aware strict backup then
+  `clear-cli-telemetry`, whose 10 s busy timeout makes a survivor-held db
+  an honest FAILED entry + WARN (never a silent skip); survivors are
+  verified zero. **Strict backups**: all 9 `Backup-ViaCore` call sites
+  now check the result — backup FAILED ⇒ audit `backup-failed` +
+  `failCount++` + the mutation is SKIPPED (the v1.4 warn-and-proceed
+  contract let a locked `credentials.json` be modified unrestorable). The
+  core `backup` verb gains `--sqlite-wal` (best-effort
+  `PRAGMA wal_checkpoint(TRUNCATE)` then `-wal`/`-shm` sibling copies)
+  so the undo copy of a WAL-mode db can be reopened even when live
+  writers held it (+3 unittests: locked-writers sibling copy, quiet-db
+  clean path, non-sqlite source tolerated) — unittest 194 OK. Pester
+  238/238, harness PASS, PSSA 21=21, parse clean. Live comparison run
+  pending user supervision.
 - **ZCode reset clone-target Qoder gate (W1-2) + BS-8 verification closure
   + clear-cli-telemetry tests (W4-3)** (2026-11-15): single-target CLONE
   resets no longer run the Qoder steps — the edge-cases plan's F-02

@@ -797,7 +797,18 @@ reset_zcode.ps1       # ZCode v1.5 THIN MANIFEST (2026-11-14): 27 steps +
                                    #          silently revert the scrub and a hard file lock aborted
                                    #          the run pre-audit; Both/All already routed Qoder to the
                                    #          Primary child via -SkipQoder; the v1.4 "clone targets
-                                   #          never touch Qoder" comment is finally true)
+                                   #          never touch Qoder" comment is finally true);
+                                   #          W1-1+W1-3 (2026-11-15, F-01/F-04): new step [26b/27]
+                                   #          scrubs the LIVE SHARED CLI db (~\.zcode\cli\db\db.sqlite,
+                                   #          read by every instance) for clone targets - step [26]
+                                   #          only reaches it on Primary, so clone-only resets left
+                                   #          the cross-instance correlation trail; lock-tolerant
+                                   #          honest WARN when a survivor holds it; ALL Backup-ViaCore
+                                   #          call sites now STRICT (backup failed = audit +
+                                   #          failCount + mutation SKIPPED - the v1.4 warn-and-proceed
+                                   #          let a locked credentials.json be modified unrestorable);
+                                   #          the core backup verb gained --sqlite-wal (best-effort
+                                   #          wal_checkpoint + -wal/-shm sibling copies)
 ghost_launch_guard.ps1             # Shared 3-way RAM/concurrency launch guard (2026-11-14) —
                                    #   the generalized mechanics that launch_zcode_second_instance
                                    #   carried since 2026-10-28; wired into ALL FOUR suites' launchers
