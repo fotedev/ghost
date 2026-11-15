@@ -24,6 +24,13 @@ $count = ([regex]::Matches($src, [regex]::Escape('set /p choice=%PROMPT_TEXT%'))
 # rewrite below covers every occurrence, so the check guards the floor only.
 if ($count -lt 7) { throw "expected at least 7 set /p sites in GHOST.bat (main + 6 submenus), found $count" }
 $copy = $src.Replace('set /p choice=%PROMPT_TEXT%', 'call :TestNextInput choice')
+# The REAL GHOST.bat self-normalizes its working directory via
+# `cd /d "%~dp0"` (line 5 - it lives in the repo root, and every dispatched
+# script row uses repo-relative paths). The test copy lives in $work, so
+# that line must resolve to the REPO root instead - without this, the first
+# scenario that actually DISPATCHES a script row (V: the gid 109 dry-run
+# planner, 2026-11-15) fails on -File not finding the relative path.
+$copy = $copy.Replace('cd /d "%~dp0"', ('cd /d "{0}"' -f $repo))
 $sub = @'
 
 :TestNextInput
@@ -127,17 +134,19 @@ $out = Invoke-Scenario 'C_space_submenu' @('2', ' ', '0', '0')
 if ($out -match 'Unknown task')            { $failures += 'C: Unknown task on tokenless submenu input' }
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'C: ZCode submenu not shown' }
 
-# D) invalid main-menu id -> exactly one legit Unknown task "99"
-$out = Invoke-Scenario 'D_invalid_main' @('109', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "109"')).Count
+# D) invalid main-menu id -> exactly one legit Unknown task "110"
+#    (110 = the next unassigned gid; 109 became REAL when the ZCode dry-run
+#    planner row landed 2026-11-15)
+$out = Invoke-Scenario 'D_invalid_main' @('110', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "110"')).Count
 if ($hits -ne 1)                           { $failures += "D: expected 1 legit Unknown task, got $hits" }
 
-# E) main sub-path "2 109" -> chain reaches ZCodeOne, exactly one legit
+# E) main sub-path "2 110" -> chain reaches ZCodeOne, exactly one legit
 #    Unknown task, and the PENDING_CHAIN literal never appears
-#    (109 = the next unassigned gid; 108 became REAL when the ZCode clone
-#    status row landed 2026-11-14)
-$out = Invoke-Scenario 'E_subpath_chain' @('2 109', '0', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "109"')).Count
+#    (110 = the next unassigned gid; 109 became REAL when the ZCode dry-run
+#    planner row landed 2026-11-15)
+$out = Invoke-Scenario 'E_subpath_chain' @('2 110', '0', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "110"')).Count
 if ($hits -ne 1)                           { $failures += "E: expected 1 Unknown task from chain, got $hits" }
 if ($out -match '%PENDING_CHAIN%')         { $failures += 'E: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'E: ZCode submenu not reached via sub-path' }
@@ -308,6 +317,27 @@ if ($out -notmatch '\[ 5\].*Build GHOST desktop app') { $failures += 'T: Mainten
 $out = Invoke-Scenario 'T_maint_invalid' @('3 99', '0', '0')
 $hits = ([regex]::Matches($out, 'Unknown task "99"')).Count
 if ($hits -ne 1)                                { $failures += "T: expected 1 Unknown task from Maintenance chain, got $hits" }
+
+# V) W4-2: a two-token ZCode chain END-TO-END through the dispatcher into the
+#    real script - "2 33" runs the DRY-RUN reset planner (gid 109, added
+#    2026-11-15): report-only by contract, so it is the one reset-family row
+#    the harness can execute for real. Asserts the [33] row renders, the
+#    orchestrator plan prints, and the run completed without writing.
+$out = Invoke-Scenario 'V_zcode_dryrun_chain' @('2 33', '0', '0')
+if ($out -notmatch '\[33\].*Dry-run reset planner')  { $failures += 'V: ZCode [33] dry-run planner row not rendered' }
+if ($out -notmatch 'DRY-RUN PLAN - ZCode reset orchestrator') { $failures += 'V: orchestrator dry-run plan not printed' }
+if ($out -notmatch 'child reset -Target Third')      { $failures += 'V: All-mode child sequence not printed' }
+if ($out -notmatch 'DRY-RUN complete - nothing was written or killed\.') { $failures += 'V: dry-run did not complete cleanly' }
+if ($out -match 'Unknown task')                      { $failures += 'V: Unknown task on the dry-run planner chain' }
+
+# W) W4-2: ZCode unknown-token continuation - "2 99" inside a chain hits the
+#    ZCode resolver's Unknown task exactly once and the chain continues to
+#    the exit (mirrors E/I/T for the ZCode submenu itself).
+$out = Invoke-Scenario 'W_zcode_unknown_chain' @('2 99', '0', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "99"')).Count
+if ($hits -ne 1)                                { $failures += "W: expected 1 Unknown task from ZCode chain, got $hits" }
+if ($out -notmatch 'ZCode Multi-Instance')      { $failures += 'W: ZCode submenu not reached via chain' }
+if ($out -match '%PENDING_CHAIN%')              { $failures += 'W: literal %PENDING_CHAIN% leaked' }
 
 if ($failures.Count -gt 0) {
     Write-Output 'HARNESS FAIL:'

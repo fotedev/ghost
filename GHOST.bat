@@ -152,6 +152,7 @@ call :Opt 29 "Login clone account" "- one-time plan setup (light workers + T3 br
 call :Opt 30 "Remove clone shortcuts" "- Desktop + Start menu"
 call :Opt 31 "Rebuild clone Task Manager icons" "- colored rows in Task Manager - run after app updates"
 call :Opt 32 "Clone status" "- all 6 - running, profiles, device-id, pressure"
+call :Opt 33 "Dry-run reset planner" "- All instances - report only"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -433,6 +434,7 @@ if "%~1"=="29" set "RESOLVED=71"
 if "%~1"=="30" set "RESOLVED=72"
 if "%~1"=="31" set "RESOLVED=83"
 if "%~1"=="32" set "RESOLVED=108"
+if "%~1"=="33" set "RESOLVED=109"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -556,7 +558,7 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-108; 63 unused; 74 = the AutoClaw2 MCP sync
+rem Runs one task by global id (1-109; 63 unused; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
 rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
@@ -712,6 +714,7 @@ if "%~1"=="66" (call :ConfirmRun "Spoof WMI hardware serials - BIOS, motherboard
 if "%~1"=="82" (call :Detached "ZCode Primary" "-NoProfile" "src\windows\launch_zcode_primary.ps1" "" "Launcher opened in a separate window - it closes automatically when done." "Launches the Primary non-elevated - drag-drop breaks into elevated instances." & exit /b)
 if "%~1"=="83" (call :Run "tools\patch_zcode_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="108" (call :Run "tools\status_zcode_instances.ps1" & exit /b)
+if "%~1"=="109" (call :RunWith "src\windows\reset_zcode.ps1" "Report only - nothing was written or killed. Close the window when done." "-Target All -DryRun" & exit /b)
 call :UnknownTask "%~1"
 exit /b
 

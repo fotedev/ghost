@@ -138,7 +138,11 @@
 
 param(
     [ValidateSet('Primary', 'Secondary', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Both', 'All')][string]$Target = 'Both',
-    [switch]$SkipQoder
+    [switch]$SkipQoder,
+    # W1-9 (F-11): report-only planner - prints the target roots, presence
+    # checks and the would-kill process set, then the step plan; takes no
+    # locks, kills nothing, writes nothing, needs no elevation and no Python.
+    [switch]$DryRun
 )
 
 . "$PSScriptRoot\identity_utils.ps1"
@@ -204,38 +208,10 @@ function Get-ZcodeTargetDisplay([string]$Key) {
     }
 }
 
-# --- Self-elevation -----------------------------------------------------------
-# Re-launch elevated with the same script path when not already admin.
-# Forwards -Target / -SkipQoder so child runs keep their scope after UAC.
-$zcodeIsAdmin = [Security.Principal.WindowsPrincipal]::new(
-    [Security.Principal.WindowsIdentity]::GetCurrent()
-).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $zcodeIsAdmin) {
-    $zcodeScript = $MyInvocation.MyCommand.Path
-    $zcodeFwd = " -Target $Target"
-    if ($SkipQoder) { $zcodeFwd += " -SkipQoder" }
-    # -File passes only declared switches; a redirect operator after -File is
-    # just swallowed as an undeclared argument. The *_done.txt marker file
-    # (not a log) is the persisted result channel - the elevated console shows
-    # the full live output while the run progresses.
-    $zcodeArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$zcodeScript`"$zcodeFwd"
-    # W1-7 (F-08): a stale done-marker from a PREVIOUS run must never be
-    # shown as this run's result - delete it before launching (an early
-    # child exit then surfaces as no result). -PassThru + .ExitCode relays
-    # the elevated child's exit code (a bare -Wait always exited 0, so a
-    # failing reset looked green to $LASTEXITCODE callers; the child exits 1
-    # when failCount > 0).
-    Remove-Item -LiteralPath "$env:TEMP\zcode_v1.5_done.txt" -Force -ErrorAction SilentlyContinue
-    $zcodeChild = Start-Process powershell -Verb RunAs -ArgumentList $zcodeArgs -WindowStyle Normal -Wait -PassThru
-    if (Test-Path -LiteralPath "$env:TEMP\zcode_v1.5_done.txt") {
-        Get-Content -LiteralPath "$env:TEMP\zcode_v1.5_done.txt"
-    }
-    $zcodeChildCode = $zcodeChild.ExitCode
-    if ($null -eq $zcodeChildCode) { $zcodeChildCode = 1 }
-    exit $zcodeChildCode
-}
-
-Write-GhostBanner -Target "ZCode/Qoder Identity Reset [$(Get-ZcodeTargetDisplay $Target)]" -Version "1.5"
+# --- Self-elevation (moved below the W1-9 DryRun gate, 2026-11-15) ------------
+# The elevation block lives right after the DryRun planner: a -DryRun run
+# must never trigger a UAC prompt (report-only needs no admin), so the gate
+# exits before elevation is even considered. See the block's new home.
 
 # === Local helpers (mirroring the Cursor reference pattern) ===================
 
@@ -1538,7 +1514,8 @@ function Stop-QoderProcessesOnly {
 
 # === Main =====================================================================
 
-Assert-Administrator
+# (Assert-Administrator moved below the W1-9 DryRun gate, 2026-11-15: a
+# report-only run must work without elevation.)
 
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $qoderRoaming = Join-Path $env:APPDATA "Qoder"
@@ -1552,6 +1529,36 @@ $qoderIdBackupsRoot = Join-Path $qoderRoaming "ID_Backups"
 # 'Both' = Secondary + Primary (kept for backward compatibility with menus).
 # 'All'  = Third + Fourth + Fifth + Sixth + Secondary + Primary.
 if (($Target -eq 'Both') -or ($Target -eq 'All')) {
+    # W1-9: a DryRun of the orchestrator prints the child sequence and exits -
+    # no child is spawned (each child would run its own real reset).
+    if ($DryRun) {
+        Write-Host "=== DRY-RUN PLAN - ZCode reset orchestrator, Target $Target ===" -ForegroundColor Cyan
+        Write-Host "Would run these independent children IN ORDER (each with its own fresh ID set; no child is spawned in a dry run):"
+        $children = @()
+        if ($Target -eq 'Both') {
+            $children = @(
+                @{ Label = 'Secondary'; SkipQoder = $true },
+                @{ Label = 'Primary';   SkipQoder = $false }
+            )
+        } else {
+            $children = @(
+                @{ Label = 'Third';     SkipQoder = $true },
+                @{ Label = 'Fourth';    SkipQoder = $true },
+                @{ Label = 'Fifth';     SkipQoder = $true },
+                @{ Label = 'Sixth';     SkipQoder = $true },
+                @{ Label = 'Secondary'; SkipQoder = $true },
+                @{ Label = 'Primary';   SkipQoder = $false }
+            )
+        }
+        foreach ($child in $children) {
+            $qoderNote = ''
+            if (-not $child.SkipQoder) { $qoderNote = ' (incl. Qoder steps)' }
+            Write-Host ("  child reset -Target {0}{1}" -f $child.Label, $qoderNote)
+        }
+        Write-Host "Per-child step plan: run this script with -DryRun -Target <child label>."
+        Write-Host "DRY-RUN complete - nothing was written or killed." -ForegroundColor Green
+        exit 0
+    }
     $orchestratorScript = $MyInvocation.MyCommand.Path
     if ($Target -eq 'Both') {
         $children = @(
@@ -1620,6 +1627,128 @@ if (($Target -ne 'Primary') -and (-not (Test-Path -LiteralPath (Join-Path $zcode
     Add-AuditEntry -Audit ([ref]$audit) -File $zcodeUserProfile -Key "profile-completeness" -Before "partial" -After "warned" -Ok $true
 }
 
+# W3-2 (F-03): the captcha watchdog's blanket taskkill voids the survivor
+# guarantee if it fires during the reset - WARN when it is running (mutex
+# probe; works across elevation). Shared by the DryRun planner below and the
+# real pre-kill path.
+function Test-CaptchaWatchdogRunning {
+    $created = $false
+    $probe = New-Object System.Threading.Mutex($false, 'ZcodeCaptchaWatchdog', [ref]$created)
+    $probe.Close()
+    return (-not $created)
+}
+
+# W1-9 (F-11): report-only planner. Reached ONLY in single-target mode (the
+# Both/All orchestrator handled its own DryRun above); prints the target
+# roots, presence checks, the would-kill process set and the step plan, then
+# exits BEFORE the Python preflight (a plan needs no Python), before any
+# kill, before any write. Zero side effects by construction.
+if ($DryRun) {
+    Write-Host "=== DRY-RUN PLAN - ZCode/Qoder reset, Target $(Get-ZcodeTargetDisplay $Target) ===" -ForegroundColor Cyan
+    Write-Host "ZCode roaming : $zcodeRoaming"
+    Write-Host "ZCode data    : $zcodeUserProfile"
+    $sharedCliDbPlanPath = Join-Path $env:USERPROFILE ".zcode\cli\db\db.sqlite"
+    Write-Host ("Shared CLI db : {0} ({1})" -f $sharedCliDbPlanPath, $(if (Test-Path -LiteralPath $sharedCliDbPlanPath) { "present" } else { "not found" }))
+    $qoderPlanPresent = Test-Path -LiteralPath $qoderRoaming
+    Write-Host ("Qoder roaming : {0} ({1})" -f $qoderRoaming, $(if ($qoderPlanPresent) { "present" } else { "not installed - Qoder steps will SKIP" }))
+    if (($Target -ne 'Primary') -and (-not (Test-Path -LiteralPath (Join-Path $zcodeUserProfile "v2\setting.json")))) {
+        Write-Host "Profile       : PARTIAL (no v2\setting.json) - relaunch the clone once to reseed" -ForegroundColor Yellow
+    }
+    if (Test-CaptchaWatchdogRunning) {
+        Write-Host "Watchdog      : the ZCode captcha watchdog is RUNNING - its blanket taskkill can void the survivor guarantee if it fires mid-reset." -ForegroundColor Yellow
+    }
+    $planMap = Get-ZcodeTargetMains
+    Write-Host ""
+    Write-Host "Would kill (target tree only, survivors preserved):"
+    $planTargets = @($planMap[$Target])
+    if ($planTargets.Count -eq 0) {
+        Write-Host "  none running for this target (on-disk reset only)"
+    }
+    else {
+        foreach ($planPid in $planTargets) { Write-Host ("  ZCode main pid {0}" -f $planPid) }
+    }
+    $planSurvivors = 0
+    foreach ($planLabel in $script:ZcodeAllLabels) {
+        if ($planLabel -ne $Target) { $planSurvivors += @($planMap[$planLabel]).Count }
+    }
+    Write-Host ("Survivor mains that must keep running: {0}" -f $planSurvivors)
+    if ($qoderPlanPresent) { Write-Host "Qoder processes would be killed (Primary target only)." }
+    Write-Host ""
+    Write-Host "Step plan (single-target run):"
+    foreach ($planStep in @(
+        "[1/27]  Qoder storage.json telemetry IDs (per profile)",
+        "[2/27]  Qoder machineid (per profile)",
+        "[3/27]  ZCode .updaterId",
+        "[4/27]  ZCode telemetry-state.json (deviceMid)",
+        "[5/27]  ZCode credentials.json OAuth clear (oauth:* + zcodejwttoken)",
+        "[6/27]  ZCode coding-plan-cache.json invalidation",
+        "[6b/27] ZCode config.json provider apiKeys strip",
+        "[7/27]  Qoder argv.json crash-reporter-id",
+        "[8/27]  Qoder state.vscdb serviceMachineId (per profile)",
+        "[9/27]  Qoder state.vscdb auth secrets (per profile)",
+        "[10/27] Qoder stale state.vscdb.backup files (per profile)",
+        "[11/27] ZCode session Preferences (device_id_salt)",
+        "[12/27] Qoder Preferences (device_id_salt, per profile)",
+        "[13/27] ZCode session os_crypt.encrypted_key rotation",
+        "[14/27] Qoder os_crypt.encrypted_key rotation (per profile)",
+        "[15/27] ZCode RUM telemetry store",
+        "[16/27] ZCode setting.json (deviceSid)",
+        "[17/27] ZCode session SharedStorage clear",
+        "[18/27] ZCode session cache directories",
+        "[19/27] ZCode session LevelDB (Session Storage only)",
+        "[20/27] ZCode session browser SQLite files",
+        "[21/27] ZCode session Chromium extras",
+        "[22/27] ZCode embedded browser partition",
+        "[23/27] Qoder browser data (per profile)",
+        "[24/27] Qoder additional dirs + .qoder cache subdirs",
+        "[25/27] Qoder workspace state.vscdb UPSERT (per profile)",
+        "[26/27] ZCode CLI db.sqlite telemetry scrub",
+        "[26b/27] SHARED CLI db.sqlite telemetry scrub (clone targets)",
+        "[27/27] Old ID_Backups purge + watchdog re-verify"
+    )) {
+        Write-Host ("  {0}" -f $planStep)
+    }
+    Write-Host ""
+    Write-Host "DRY-RUN complete - nothing was written or killed." -ForegroundColor Green
+    exit 0
+}
+
+# --- Self-elevation (moved here from the top, W1-9 2026-11-15) -----------------
+# Re-launch elevated with the same script path when not already admin.
+# Forwards -Target / -SkipQoder so child runs keep their scope after UAC.
+# Placed AFTER the W1-9 DryRun gate so a report-only run never triggers UAC,
+# and after the helpers/presence checks it reads.
+$zcodeIsAdmin = [Security.Principal.WindowsPrincipal]::new(
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $zcodeIsAdmin) {
+    $zcodeScript = $MyInvocation.MyCommand.Path
+    $zcodeFwd = " -Target $Target"
+    if ($SkipQoder) { $zcodeFwd += " -SkipQoder" }
+    # -File passes only declared switches; a redirect operator after -File is
+    # just swallowed as an undeclared argument. The *_done.txt marker file
+    # (not a log) is the persisted result channel - the elevated console shows
+    # the full live output while the run progresses.
+    $zcodeArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$zcodeScript`"$zcodeFwd"
+    # W1-7 (F-08): a stale done-marker from a PREVIOUS run must never be
+    # shown as this run's result - delete it before launching (an early
+    # child exit then surfaces as no result). -PassThru + .ExitCode relays
+    # the elevated child's exit code (a bare -Wait always exited 0, so a
+    # failing reset looked green to $LASTEXITCODE callers; the child exits 1
+    # when failCount > 0).
+    Remove-Item -LiteralPath "$env:TEMP\zcode_v1.5_done.txt" -Force -ErrorAction SilentlyContinue
+    $zcodeChild = Start-Process powershell -Verb RunAs -ArgumentList $zcodeArgs -WindowStyle Normal -Wait -PassThru
+    if (Test-Path -LiteralPath "$env:TEMP\zcode_v1.5_done.txt") {
+        Get-Content -LiteralPath "$env:TEMP\zcode_v1.5_done.txt"
+    }
+    $zcodeChildCode = $zcodeChild.ExitCode
+    if ($null -eq $zcodeChildCode) { $zcodeChildCode = 1 }
+    exit $zcodeChildCode
+}
+# Belt-and-braces re-verify for the paths that reach here unelevated (the
+# admin check also guards the pre-DryRun re-ordering above).
+Assert-Administrator
+
 # v1.5: the core must be present and a functional Python 3 with it - fail
 # fast BEFORE touching anything (v1.4 needed Python only for the SQLite
 # steps; v1.5 routes every store mutation through the core).
@@ -1674,6 +1803,15 @@ Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects ALL ZCode ins
 # Primary target needs its Qoder steps (via Qoder-only kill that never touches
 # ZCode); clone targets never touch Qoder. The aggressive kill-all helper is
 # intentionally NOT used here (it closes ALL ZCode windows).
+if (Test-CaptchaWatchdogRunning) {
+    # W3-2 (F-03): a running captcha watchdog kills ALL ZCode.exe instances
+    # if it fires during the reset - every "survivors kept running" claim
+    # would be void and the Primary repopulated. Warn loudly; the run
+    # continues (the operator decides whether to stop the watchdog first).
+    Write-Host "[WARN] the ZCode captcha watchdog is RUNNING - if it fires during this reset, its blanket taskkill voids the survivor guarantee and repopulates the Primary profile." -ForegroundColor Yellow
+    Write-Host "    Consider stopping it first (watch_zcode_captcha.ps1 resident console / Task Manager) before this reset." -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File "watchdog-preflight" -Key "captcha-watchdog" -Before "running" -After "warned" -Ok $true
+}
 if ($Target -eq 'Primary') {
     if (-not (Stop-ZcodeTargetTree -Label Primary -RequireSurvivor)) {
         exit 1
