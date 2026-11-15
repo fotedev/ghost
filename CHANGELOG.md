@@ -8,6 +8,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode reset W1-4 abort checkpoint + W1-6/W1-7/W1-10 UX hardening**
+  (2026-11-15): the second slice of the W1 remainder. **W1-4 (F-05)**: the
+  whole 27-step pipeline now runs inside `try/finally` whose flush re-writes
+  the audit log + regenerates the restore script EVEN on a hard abort — the
+  old write-only-at-the-tail layout left a mid-run abort with mutations
+  applied but NO audit and NO restore script (the flush is idempotent with
+  the tail write; flush failures are loud). **W1-6 (F-07)**: a clone target
+  with instances running but ZERO mains classifying as it (the classic
+  bare-launched clone that owns the Primary profile) now emits the loud
+  WARN instead of silently "OK-ing in ~3 s having killed nothing"; Primary
+  keeps its ambiguity abort. **W1-7 (F-08)**: the self-elevation deletes
+  the stale `zcode_v1.5_done.txt` before relaunch and relays the child's
+  exit code via `-PassThru` (a failing reset no longer exits 0). **W1-10
+  (F-13)**: a clone home whose profile is PARTIAL (no `v2\setting.json`)
+  warns explicitly with the reseed hint (the launcher's `.zcode-seeded`/
+  `.zcode-seeding` markers auto-heal partials) and audits the warning.
+  Pester 238/238, harness PASS, unittest 194 OK, PSSA 21=21, parse clean.
+  Live comparison run pending user supervision.
 - **ZCode reset W1-1 shared-db scrub [26b] + W1-3 strict backups** (2026-11-15):
   the first two items of the ZCode W1 remainder (edge-cases plan F-01
   severity H / F-04 severity H). **Step [26b/27]** (a deliberate extension

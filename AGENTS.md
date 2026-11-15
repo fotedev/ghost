@@ -808,7 +808,16 @@ reset_zcode.ps1       # ZCode v1.5 THIN MANIFEST (2026-11-14): 27 steps +
                                    #          failCount + mutation SKIPPED - the v1.4 warn-and-proceed
                                    #          let a locked credentials.json be modified unrestorable);
                                    #          the core backup verb gained --sqlite-wal (best-effort
-                                   #          wal_checkpoint + -wal/-shm sibling copies)
+                                   #          wal_checkpoint + -wal/-shm sibling copies);
+                                   #          W1-4+W1-6+W1-7+W1-10 (2026-11-15, F-05/F-07/F-08/F-13):
+                                   #          the 27-step pipeline runs inside try/finally whose
+                                   #          flush re-writes audit + restore script EVEN on a hard
+                                   #          abort (idempotent with the tail write); clone targets
+                                   #          with instances running but ZERO matching mains WARN
+                                   #          (bare-launched clone owns Primary); self-elevation
+                                   #          deletes the stale done-marker + relays the child exit
+                                   #          code via -PassThru; a PARTIAL clone profile (no
+                                   #          v2\setting.json) warns with the reseed hint
 ghost_launch_guard.ps1             # Shared 3-way RAM/concurrency launch guard (2026-11-14) —
                                    #   the generalized mechanics that launch_zcode_second_instance
                                    #   carried since 2026-10-28; wired into ALL FOUR suites' launchers
