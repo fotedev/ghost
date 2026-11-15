@@ -751,7 +751,27 @@ reset_qoder.ps1       # Qoder: 31 steps (main + CORS_Profile, expanded
                                    #          secret.local.machine.variables, .qoder
                                    #          installation_id/.auth machine_id rotation,
                                    #          webview stores, tmp/telemetry+logs, probe;
-                                   #          system steps: HKCU deviceid, HKLM SQM, MAC, hostname)
+                                   #          system steps: HKCU deviceid, HKLM SQM, MAC, hostname;
+                                   #          2026-11-15 BUG-SWEEP HARDENING (BS-7, report 05
+                                   #          walked vs the v0.5 thin manifest): step [30] now uses
+                                   #          the sweep-tree core twin (per-file retry - one locked
+                                   #          log no longer leaves 99% of the run-state tree on
+                                   #          disk; steps [13]-[18] keep whole-path store-delete by
+                                   #          choice); the [21] purge got the #73 policy shape (24h
+                                   #          floor + never the current run + audit/restore manifests
+                                   #          preserved at the ID_Backups root + VERIFIED deletes);
+                                   #          self-elevation deletes the stale done-marker + relays
+                                   #          the child exit code via -PassThru; the taskkill stderr
+                                   #          race is caught instead of aborting the run pre-audit;
+                                   #          the MAC ledger records previousValue/previousExisted/
+                                   #          ifIndex/writeOk and the restore script is a true
+                                   #          inversion (removes invented overrides, skips adapters
+                                   #          whose write never landed, addresses by -InterfaceIndex);
+                                   #          Remove-QoderPathSafely returns an honest
+                                   #          deleted/delete-failed verdict and steps [20]/[21]/[22]
+                                   #          count failures; the final state.vscdb probe RE-ASSERTS
+                                   #          the written value (idempotent, heals a recreation)
+                                   #          instead of replaying step-[3] audit entries)
 reset_zcode.ps1       # ZCode v1.5 THIN MANIFEST (2026-11-14): 27 steps +
                                    #          [6b/27] config.json provider-apiKey strip (per-provider
                                    #          json-set gated on an EXISTING apiKey; the v1.4 conditional

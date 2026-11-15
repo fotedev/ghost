@@ -30,11 +30,20 @@ if (-not $qoderIsAdmin) {
     # only declared switches; a redirect operator here would be swallowed as an
     # undeclared argument (the *_done.txt marker file is the persisted result).
     $qoderArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$qoderScript`"$qoderSwitchString"
-    Start-Process powershell -Verb RunAs -ArgumentList $qoderArgs -WindowStyle Normal -Wait
+    # A stale done-marker from a PREVIOUS run must never be shown as this
+    # run's result: delete it before launching (an early child exit then
+    # surfaces as no result, never as the old Pass/Fail lines). -PassThru +
+    # .ExitCode relays the elevated child's exit code (the old bare -Wait
+    # always exited 0, so a failing reset looked green to callers that check
+    # $LASTEXITCODE; the child exits 1 when failCount > 0).
+    Remove-Item -LiteralPath "$env:TEMP\qoder_v0.5_done.txt" -Force -ErrorAction SilentlyContinue
+    $qoderChild = Start-Process powershell -Verb RunAs -ArgumentList $qoderArgs -WindowStyle Normal -Wait -PassThru
     if (Test-Path "$env:TEMP\qoder_v0.5_done.txt") {
         Get-Content "$env:TEMP\qoder_v0.5_done.txt"
     }
-    exit
+    $qoderChildCode = $qoderChild.ExitCode
+    if ($null -eq $qoderChildCode) { $qoderChildCode = 1 }
+    exit $qoderChildCode
 }
 
 Write-GhostBanner -Target "Qoder Identity Reset" -Version "0.5"
@@ -122,7 +131,7 @@ Write-GhostBanner -Target "Qoder Identity Reset" -Version "0.5"
 #
 #   [27/31] Hostname change
 #     - Backs up $env:COMPUTERNAME to system_manifest.json
-#     - Calls Rename-Computer -NewName "WIN-<8hex>" -Force (no -Restart, so the script
+#     - Calls Rename-Computer -NewName "DESKTOP-XXXXXXX" -Force (no -Restart, so the script
 #       keeps running). Rename-Computer atomically updates FOUR registry locations:
 #         HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName
 #         HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName
@@ -493,7 +502,17 @@ function Stop-QoderProcessesAggressive {
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         foreach ($processName in $processesToKill) {
             if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
-                $null = & taskkill /F /T /IM "$processName.exe" 2>&1
+                # try/catch: under EAP=Stop a native stderr line (the race where
+                # the process exits between the check and taskkill) becomes a
+                # terminating NativeCommandError that would abort the whole run
+                # before audit/restore exist.
+                try {
+                    $null = & taskkill /F /T /IM "$processName.exe" 2>&1
+                } catch {
+                    # The losing race (process exited between check and kill):
+                    # harmless - the clean-check loop below re-verifies.
+                    Write-Host "    taskkill race on ${processName}: $($_.Exception.Message)" -ForegroundColor DarkGray
+                }
             }
         }
 
@@ -610,7 +629,10 @@ function Clear-QoderSecrets {
 }
 
 # Post-reset watchdog probe: if a slow-shutdown helper recreated core auth files
-# within 2s, re-delete. WARN (not FAIL) because the reset itself already succeeded.
+# within 2s, re-delete. Returns $true only when nothing was recreated or every
+# re-delete succeeded; a FAILED re-delete now counts into the step verdict
+# (2026-11-15, aligned with the zcode/trae convention - the recreate itself
+# stays a WARN, the un-removable store is the failure).
 function Test-QoderWatchdogRecreation {
     param(
         [Parameter(Mandatory = $true)][string[]]$CoreFiles,
@@ -631,18 +653,21 @@ function Test-QoderWatchdogRecreation {
     if ($recreated.Count -eq 0) {
         Write-Host "[OK] no identity files were recreated by a watchdog" -ForegroundColor Green
         Add-AuditEntry -Audit $Audit -File "watchdog-probe" -Key "recreation-check" -Before "none" -After "none" -Ok $true
-        return
+        return $true
     }
 
+    $allOk = $true
     foreach ($path in $recreated) {
         Write-Host "    [WARN] watchdog recreated file, re-deleting: $path" -ForegroundColor Yellow
         Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
         $afterValue = if (Test-Path -LiteralPath $path) { "re-delete-failed" } else { "re-deleted" }
         if ($afterValue -eq "re-delete-failed") {
             Write-Host "    [FAILED] could not re-delete (file locked?): $path" -ForegroundColor Red
+            $allOk = $false
         }
         Add-AuditEntry -Audit $Audit -File $path -Key "watchdog-recreate" -Before "recreated" -After $afterValue -Ok ($afterValue -eq "re-deleted")
     }
+    return $allOk
 }
 
 # Qoder keeps a second Chromium-style profile under <root>\CORS_Profile\. Resetting
@@ -708,9 +733,13 @@ function Update-QoderArgvJson {
 }
 
 # Old ID_Backups directories (from previous reset runs) preserve complete snapshots
-# of every identity file with the OLD ID still embedded. Six prior runs = six
-# fingerprint snapshots on disk. Keep the newest run only; delete the rest. The
-# newest backup is still safe to use for restore from this run.
+# of every identity file with the OLD ID still embedded. Purge policy (2026-11-15,
+# BS-7 / the #73 zcode policy shape): the CURRENT run's dir is never deleted; only
+# dirs OLDER than 24h are purgeable (a same-day dir may be the only undo copy of
+# an earlier chained run); before deleting an old dir, its audit_*.json +
+# restore_*.ps1 move up to the ID_Backups root so every earlier run's undo
+# evidence survives its data purge; every delete is VERIFIED (Remove-Item then
+# Test-Path) - "deleted" is never audited for a dir that is still there.
 function Invoke-OldIdBackupsPurge {
     param(
         [Parameter(Mandatory = $true)][string]$BackupRoot,
@@ -728,18 +757,28 @@ function Invoke-OldIdBackupsPurge {
 
     $allBackups = @(Get-ChildItem -LiteralPath $IdBackupsRoot -Directory -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending)
-    $toDelete = @($allBackups | Where-Object { $_.Name -ne $currentTimestamp })
+    $recentFloor = (Get-Date).AddHours(-24)
+    $toDelete = @($allBackups | Where-Object { $_.Name -ne $currentTimestamp -and $_.LastWriteTime -lt $recentFloor })
 
     if ($toDelete.Count -eq 0) {
         Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "none" -After "none" -Ok $true
-        Write-Host "    no older ID_Backups to purge (only current run present)" -ForegroundColor DarkGray
+        Write-Host "    no older ID_Backups to purge (current run kept; same-day runs protected)" -ForegroundColor DarkGray
         return
     }
 
     foreach ($dir in $toDelete) {
-        Write-Host "    [PURGE] $($dir.Name) (preserved old fingerprint; deleting)" -ForegroundColor DarkGray
+        Write-Host "    [PURGE] $($dir.Name) (older than 24h; deleting)" -ForegroundColor DarkGray
+        foreach ($manifest in @(Get-ChildItem -LiteralPath $dir.FullName -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'audit_*.json' -or $_.Name -like 'restore_*.ps1' })) {
+            Move-Item -LiteralPath $manifest.FullName -Destination (Join-Path $IdBackupsRoot $manifest.Name) -Force -ErrorAction SilentlyContinue
+            Add-AuditEntry -Audit $Audit -File $manifest.FullName -Key "restore-manifest-preserved" -Before "present" -After "preserved" -Ok $true
+        }
         Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After "deleted" -Ok $true
+        $gone = -not (Test-Path -LiteralPath $dir.FullName)
+        Add-AuditEntry -Audit $Audit -File $dir.FullName -Key "id-backups-purge" -Before "present" -After $(if ($gone) { "deleted" } else { "still-present" }) -Ok $gone
+        if (-not $gone) {
+            Write-Host "    [FAILED] could not delete (locked?): $($dir.FullName)" -ForegroundColor Red
+        }
     }
 }
 
@@ -784,8 +823,14 @@ function Remove-QoderPathSafely {
         return "link-removed"
     }
 
+    $storeAuditStart = $Audit.Value.Count
     $binaryActions = Invoke-StoreDelete -Paths @($Path) -Action "delete" -BackupRoot $BackupRoot -Audit $Audit -RootPath $env:USERPROFILE
     $Actions.Value += @($binaryActions)
+    # BS-7: an honest verdict - "deleted" is only claimed when no audit entry
+    # for this path failed (a locked store previously still returned
+    # "deleted" and step [20] counted a green pass).
+    $storeFailures = @($Audit.Value | Select-Object -Skip $storeAuditStart | Where-Object { -not $_.ok }).Count
+    if ($storeFailures -gt 0) { return "delete-failed" }
     return "deleted"
 }
 
@@ -806,13 +851,13 @@ function Clear-TreeFilesIndividually {
 
     if (-not (Test-Path -LiteralPath $Path)) {
         Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "missing" -After "skipped" -Ok $true
-        return @{ Deleted = 0; Failed = 0; FailedPaths = @() }
+        return @{ Deleted = 0; Failed = 0; FailedPaths = @(); BackedUpTo = $null }
     }
 
     $sweepReport = Invoke-GhostCore @("sweep-tree", $Path, $BackupRoot, $BackupLabel)
     if ($null -eq $sweepReport) {
         Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After "core-invoke-failed" -Ok $false
-        return @{ Deleted = 0; Failed = 0; FailedPaths = @() }
+        return @{ Deleted = 0; Failed = 0; FailedPaths = @(); BackedUpTo = $null }
     }
 
     foreach ($failedPath in @($sweepReport.failed_paths)) {
@@ -823,7 +868,7 @@ function Clear-TreeFilesIndividually {
     $ok = ($sweepReport.failed -eq 0)
     Add-AuditEntry -Audit $Audit -File $Path -Key "binary-store" -Before "present" -After $summary -Ok $ok
 
-    return @{ Deleted = $sweepReport.deleted; Failed = $sweepReport.failed; FailedPaths = @($sweepReport.failed_paths) }
+    return @{ Deleted = $sweepReport.deleted; Failed = $sweepReport.failed; FailedPaths = @($sweepReport.failed_paths); BackedUpTo = $sweepReport.backed_up_to }
 }
 
 # Look at audit entries added since $StartIndex. If any of them pertain to
@@ -1028,11 +1073,15 @@ function Set-AdapterMacAddress {
     if (-not $classKey) {
         Add-AuditEntry -Audit $Audit -File $auditFile -Key $auditKey -Before $oldMac -After $NewMac -Ok $false
         Write-Host "    [FAILED] no class key found for adapter $name (guid=$interfaceGuid)" -ForegroundColor Red
-        return @{ Success = $false; OldMac = $oldMac; NewMac = $NewMac }
+        return @{ Success = $false; WriteOk = $false; OldMac = $oldMac; NewMac = $NewMac; PreviousValue = $null; PreviousExisted = $false; IfIndex = $Adapter.ifIndex }
     }
 
-    # Save whatever was there before (could be empty/missing).
+    # Save whatever was there before (could be empty/missing). The restore
+    # script needs BOTH the value and whether it existed: inventing an
+    # override for an adapter that never had one leaves a pinned MAC shadowing
+    # the burned-in address (BS-7).
     $previousValue = (Get-ItemProperty -LiteralPath $classKey.PSPath -Name "NetworkAddress" -ErrorAction SilentlyContinue).NetworkAddress
+    $previousExisted = ($null -ne $previousValue)
 
     try {
         # 1) Write the new MAC into the registry. NetworkAddress expects 12 hex
@@ -1042,31 +1091,33 @@ function Set-AdapterMacAddress {
     catch {
         Add-AuditEntry -Audit $Audit -File $auditFile -Key $auditKey -Before $oldMac -After ("registry-write-failed: " + $_.Exception.Message) -Ok $false
         Write-Host "    [FAILED] could not write NetworkAddress to registry for $name" -ForegroundColor Red
-        return @{ Success = $false; OldMac = $oldMac; NewMac = $NewMac }
+        # Nothing was written: there is nothing to restore for this adapter.
+        return @{ Success = $false; WriteOk = $false; OldMac = $oldMac; NewMac = $NewMac; PreviousValue = $previousValue; PreviousExisted = $previousExisted; IfIndex = $Adapter.ifIndex }
     }
 
     # 2) Cycle the adapter so the driver re-reads the registry value. Sleep
-    #    gives the PnP manager time to actually down/up the link.
+    #    gives the PnP manager time to actually down/up the link. -InterfaceIndex
+    #    addressing: -Name accepts wildcards and could match the wrong adapter.
     try {
-        Disable-NetAdapter -Name $name -Confirm:$false -ErrorAction Stop | Out-Null
+        Disable-NetAdapter -InterfaceIndex $Adapter.ifIndex -Confirm:$false -ErrorAction Stop | Out-Null
     }
     catch {
         # Some drivers refuse to disable if the adapter is in use. The
         # registry value is already written; flag partial success.
         Add-AuditEntry -Audit $Audit -File $auditFile -Key $auditKey -Before $oldMac -After ("registry-written-disable-failed: " + $_.Exception.Message) -Ok $false
         Write-Host "    [WARN] registry written but disable failed for $name -- reboot may be required" -ForegroundColor Yellow
-        return @{ Success = $false; OldMac = $oldMac; NewMac = $NewMac; PreviousValue = $previousValue }
+        return @{ Success = $false; WriteOk = $true; OldMac = $oldMac; NewMac = $NewMac; PreviousValue = $previousValue; PreviousExisted = $previousExisted; IfIndex = $Adapter.ifIndex }
     }
 
     Start-Sleep -Seconds 3
 
     try {
-        Enable-NetAdapter -Name $name -Confirm:$false -ErrorAction Stop | Out-Null
+        Enable-NetAdapter -InterfaceIndex $Adapter.ifIndex -Confirm:$false -ErrorAction Stop | Out-Null
     }
     catch {
         Add-AuditEntry -Audit $Audit -File $auditFile -Key $auditKey -Before $oldMac -After ("enable-failed: " + $_.Exception.Message) -Ok $false
         Write-Host "    [FAILED] enable failed for $name -- network may be down, manual intervention required" -ForegroundColor Red
-        return @{ Success = $false; OldMac = $oldMac; NewMac = $NewMac; PreviousValue = $previousValue }
+        return @{ Success = $false; WriteOk = $true; OldMac = $oldMac; NewMac = $NewMac; PreviousValue = $previousValue; PreviousExisted = $previousExisted; IfIndex = $Adapter.ifIndex }
     }
 
     Start-Sleep -Seconds 5
@@ -1074,13 +1125,13 @@ function Set-AdapterMacAddress {
     # 3) Verify by re-reading the live MAC.
     $verified = $null
     try {
-        $verified = (Get-NetAdapter -Name $name -ErrorAction Stop).MacAddress
+        $verified = (Get-NetAdapter -InterfaceIndex $Adapter.ifIndex -ErrorAction Stop).MacAddress
     }
     catch {
         # Adapter may be initializing; one more retry.
         Start-Sleep -Seconds 5
         try {
-            $verified = (Get-NetAdapter -Name $name -ErrorAction Stop).MacAddress
+            $verified = (Get-NetAdapter -InterfaceIndex $Adapter.ifIndex -ErrorAction Stop).MacAddress
         }
         catch {
             $verified = $null
@@ -1103,7 +1154,7 @@ function Set-AdapterMacAddress {
         Write-Host "    [FAILED] $name MAC verify failed: got $verified, expected $expected" -ForegroundColor Red
     }
 
-    return @{ Success = $ok; OldMac = $oldMac; NewMac = $NewMac; PreviousRegistryValue = $previousValue }
+    return @{ Success = $ok; WriteOk = $true; OldMac = $oldMac; NewMac = $NewMac; PreviousValue = $previousValue; PreviousExisted = $previousExisted; IfIndex = $Adapter.ifIndex }
 }
 
 # Apply a new hostname via Rename-Computer (no -Restart, so the script
@@ -1267,39 +1318,53 @@ if (Test-Path -LiteralPath `$classRoot) {
 }
 
 foreach (`$adapter in `$manifest.adapters) {
-    Write-Host "[RESTORE] NIC `$(`$adapter.name): -> `$(`$adapter.oldMac)" -ForegroundColor Cyan
+    Write-Host "[RESTORE] NIC `$(`$adapter.name) (ifIndex `$(`$adapter.ifIndex))" -ForegroundColor Cyan
+    if (-not `$adapter.writeOk) {
+        Write-Host "    [SKIP] the reset-time write never landed - nothing to undo" -ForegroundColor DarkGray
+        continue
+    }
     `$psPath = `$interfaceGuidMap[`$adapter.interfaceGuid.ToLower()]
     if (-not `$psPath) {
         Write-Host "    [FAILED] could not find registry class key for `$(`$adapter.name) (interfaceGuid=`$(`$adapter.interfaceGuid))" -ForegroundColor Red
         continue
     }
 
-    # oldMac from Get-NetAdapter is "AA-BB-CC-DD-EE-FF" -- convert to 12 hex chars
-    `$oldMacNoSep = (`$adapter.oldMac -replace '-', '').ToUpper()
-
+    # Restore is an INVERSION of what the reset did (BS-7): an adapter that had
+    # NO NetworkAddress override gets the invented one REMOVED (leaving it
+    # would pin the reset-time MAC over the burned-in address); an adapter
+    # that had one gets exactly its previous value back.
     try {
-        Set-ItemProperty -LiteralPath `$psPath -Name "NetworkAddress" -Value `$oldMacNoSep -Type String -Force -ErrorAction Stop
+        if (`$adapter.previousExisted) {
+            Set-ItemProperty -LiteralPath `$psPath -Name "NetworkAddress" -Value `$adapter.previousValue -Type String -Force -ErrorAction Stop
+        } else {
+            Remove-ItemProperty -LiteralPath `$psPath -Name "NetworkAddress" -ErrorAction Stop
+        }
     } catch {
-        Write-Host "    [FAILED] registry write failed: `$(`$_.Exception.Message)" -ForegroundColor Red
+        Write-Host "    [FAILED] registry restore failed: `$(`$_.Exception.Message)" -ForegroundColor Red
         continue
     }
 
     try {
-        Disable-NetAdapter -Name `$adapter.name -Confirm:`$false -ErrorAction Stop | Out-Null
+        Disable-NetAdapter -InterfaceIndex `$adapter.ifIndex -Confirm:`$false -ErrorAction Stop | Out-Null
         Start-Sleep -Seconds 3
-        Enable-NetAdapter -Name `$adapter.name -Confirm:`$false -ErrorAction Stop | Out-Null
+        Enable-NetAdapter -InterfaceIndex `$adapter.ifIndex -Confirm:`$false -ErrorAction Stop | Out-Null
         Start-Sleep -Seconds 5
     } catch {
         Write-Host "    [WARN] adapter cycle failed (registry may still be correct): `$(`$_.Exception.Message)" -ForegroundColor Yellow
     }
 
     try {
-        `$verified = (Get-NetAdapter -Name `$adapter.name -ErrorAction Stop).MacAddress
+        `$verified = (Get-NetAdapter -InterfaceIndex `$adapter.ifIndex -ErrorAction Stop).MacAddress
         `$normalized = (`$verified -replace '-', '').ToUpper()
-        if (`$normalized -eq `$oldMacNoSep) {
-            Write-Host "    [OK] `$(`$adapter.name) MAC restored: `$verified" -ForegroundColor Green
+        if (`$adapter.previousExisted) {
+            `$expected = (([string]`$adapter.previousValue) -replace '-', '').ToUpper()
         } else {
-            Write-Host "    [WARN] `$(`$adapter.name) verify mismatch: got=`$verified expected=`$oldMacNoSep (reboot may be required)" -ForegroundColor Yellow
+            `$expected = (([string]`$adapter.oldMac) -replace '-', '').ToUpper()
+        }
+        if (`$normalized -eq `$expected) {
+            Write-Host "    [OK] `$(`$adapter.name) MAC restore verified: `$verified" -ForegroundColor Green
+        } else {
+            Write-Host "    [WARN] `$(`$adapter.name) verify mismatch: got=`$verified expected=`$expected (reboot may be required)" -ForegroundColor Yellow
         }
     } catch {
         Write-Host "    [WARN] could not verify `$(`$adapter.name): `$(`$_.Exception.Message)" -ForegroundColor Yellow
@@ -1885,6 +1950,7 @@ if (Update-QoderArgvJson -Path $argvPath -NewCrashReporterId $newCrashReporterId
 # otherwise, so VS Code's extensions folder is NOT touched.
 Write-Host "`n[20/31] Deleting %USERPROFILE%\.qoder\ subdirs (memories/canvas/knowledges/cache/session-env/extensions/plugins)..." -ForegroundColor Cyan
 $userSubdirs = @("memories", "canvas", "knowledges", "cache", "session-env", "extensions", "plugins")
+$step20Failed = $false
 foreach ($subdir in $userSubdirs) {
     $path = Join-Path $userQoderRoot $subdir
     $result = Remove-QoderPathSafely -Path $path -BackupRoot $backupRoot -Audit ([ref]$audit) -Actions ([ref]$actions)
@@ -1892,22 +1958,35 @@ foreach ($subdir in $userSubdirs) {
         Write-Host "    [SKIP] $subdir (not present)" -ForegroundColor DarkGray
     } elseif ($result -eq "link-removed") {
         Write-Host "    [OK] $subdir (symlink removed; target untouched)" -ForegroundColor Green
+    } elseif ($result -eq "delete-failed") {
+        Write-Host "    [FAILED] $subdir (locked? see audit)" -ForegroundColor Red
+        $step20Failed = $true
     } else {
         Write-Host "    [OK] $subdir" -ForegroundColor Green
     }
 }
-$passCount++
+if ($step20Failed) { $failCount++ } else { $passCount++ }
 
-# --- [21/31] Old ID_Backups purge (keep newest only) ---
-Write-Host "`n[21/31] Purging old ID_Backups directories (keep current run only)..." -ForegroundColor Cyan
+# --- [21/31] Old ID_Backups purge (current run kept, same-day runs protected) ---
+Write-Host "`n[21/31] Purging old ID_Backups directories (older than 24h only)..." -ForegroundColor Cyan
+$purgeAuditStart = $audit.Count
 Invoke-OldIdBackupsPurge -BackupRoot $backupRoot -IdBackupsRoot $idBackupsRoot -Audit ([ref]$audit) -Actions ([ref]$actions)
-$passCount++
+# BS-7: the purge audits every delete with ok=$false when a dir survived; the
+# old unconditional passCount++ turned those into a green step.
+$purgeFailures = @($audit | Select-Object -Skip $purgeAuditStart |
+    Where-Object { ($_.key -eq "id-backups-purge") -and (-not $_.ok) }).Count
+if ($purgeFailures -gt 0) {
+    Write-Host "[FAILED] purge had $purgeFailures failure(s) (locked dirs stay on disk)" -ForegroundColor Red
+    $failCount++
+} else {
+    $passCount++
+}
 
 # --- [22/31] Post-write watchdog re-verify ---
 Write-Host "`n[22/31] Post-write watchdog re-verify..." -ForegroundColor Cyan
 $watchdogCoreFiles = @($machineTokenPath, $statusPath, $localDbPath)
-Test-QoderWatchdogRecreation -CoreFiles $watchdogCoreFiles -BackupRoot $backupRoot -Audit ([ref]$audit)
-$passCount++
+$watchdogOk = Test-QoderWatchdogRecreation -CoreFiles $watchdogCoreFiles -BackupRoot $backupRoot -Audit ([ref]$audit)
+if ($watchdogOk) { $passCount++ } else { $failCount++ }
 
 # === v0.3 NEW: REGISTRY SOURCE + SYSTEM-LEVEL STEPS ==========================
 # These steps run AFTER the Qoder file reset completes, so Qoder is already
@@ -2006,11 +2085,21 @@ else {
             if (-not $result.Success) {
                 $step26Failed = $true
             }
-            $systemManifest.adapters += @{
-                name          = $adapter.Name
-                interfaceGuid = $adapter.InterfaceGuid
-                oldMac        = $result.OldMac
-                newMac        = $result.NewMac
+            # Record the entry ONLY when the registry write actually landed: a
+            # failed write has nothing to undo, and the restore script used to
+            # invent an override for it. The previous NetworkAddress state
+            # (value + whether it existed) makes the restore a true inversion.
+            if ($result.WriteOk) {
+                $systemManifest.adapters += @{
+                    name             = $adapter.Name
+                    interfaceGuid    = $adapter.InterfaceGuid
+                    ifIndex          = $result.IfIndex
+                    oldMac           = $result.OldMac
+                    newMac           = $result.NewMac
+                    previousValue    = $result.PreviousValue
+                    previousExisted  = $result.PreviousExisted
+                    writeOk          = $result.WriteOk
+                }
             }
         }
         if ($step26Failed) { $failCount++ } else { $passCount++ }
@@ -2123,21 +2212,35 @@ if ($step29Failed) { $failCount++ } else { $passCount++ }
 
 # --- [30/31] .qoder CLI run state (tmp/telemetry + logs) ---
 # .qoder\tmp\telemetry\active-runs + .qoder\logs\runs embed host/run IDs per
-# CLI invocation. Whole-tree backup-first delete (mirrors steps [13-15/31]).
+# CLI invocation. Per-FILE backup-first delete via the sweep-tree core twin
+# (Clear-TreeFilesIndividually) - one locked log must not leave 99% of the
+# tree on disk (the header promise is now real; steps [13]-[18] keep the
+# whole-path store-delete by choice: small cache dirs, honest unit failures).
 # Chat-bearing stores (SharedClientCache\db\local.db chat tables, memories/,
 # canvas/, knowledges/, projects/) are never touched by this step.
 Write-Host "`n[30/31] Deleting .qoder CLI run state (tmp/telemetry, logs)..." -ForegroundColor Cyan
 $step30Failed = $false
 $qoderRunTrees = @((Join-Path $userQoderRoot "tmp\telemetry"), (Join-Path $userQoderRoot "logs"))
 foreach ($tree in $qoderRunTrees) {
-    $step30AuditStart = $audit.Count
-    $binaryActions = Invoke-StoreDelete -Paths @($tree) -Action "delete" -BackupRoot $backupRoot -Audit ([ref]$audit) -RootPath $env:USERPROFILE
-    $actions += @($binaryActions)
-    if ((Get-StepAuditStatus -Audit ([ref]$audit) -StartIndex $step30AuditStart -Path $tree).Success) {
-        Write-Host "    [OK] $tree" -ForegroundColor Green
+    # BS-7 HIGH: these are the big run-manifest/log trees the per-file helper
+    # was built for - one locked log must not leave 99% of the tree on disk
+    # (the whole-tree delete fails FAST on the first lock). Steps [13]-[18]
+    # deliberately stay on whole-path store-delete: small cache dirs whose
+    # unit failure is honestly audited + counted.
+    $sweep = Clear-TreeFilesIndividually -Path $tree -BackupRoot $backupRoot -BackupLabel (Split-Path -Leaf $tree) -Audit ([ref]$audit)
+    if ($sweep.BackedUpTo) {
+        $actions += @([ordered]@{
+            action       = "delete"
+            originalPath = $tree
+            backupPath   = $sweep.BackedUpTo
+            renamedPath  = $null
+        })
+    }
+    if ($sweep.Failed -eq 0) {
+        Write-Host ("    [OK] {0} (deleted {1} file(s))" -f $tree, $sweep.Deleted) -ForegroundColor Green
     }
     else {
-        Write-Host "    [PARTIAL] $tree (some entries failed)" -ForegroundColor Yellow
+        Write-Host ("    [PARTIAL] {0} (deleted {1}, failed {2} - see audit)" -f $tree, $sweep.Deleted, $sweep.Failed) -ForegroundColor Yellow
         $step30Failed = $true
     }
 }
@@ -2180,8 +2283,16 @@ foreach ($pr in $profileRoots) {
         $finalJsonOk = $false
     }
 
-    $sqliteAuditEntries = @($audit | Where-Object { $_.file -eq $sqlitePath -and $_.key -eq "storage.serviceMachineId" })
-    $sqliteOk = ($sqliteAuditEntries.Count -gt 0) -and ($sqliteAuditEntries[-1].ok -eq $true)
+    # BS-7: re-assert the value the run wrote (idempotent) instead of replaying
+    # step [3]'s audit entries - the replay verified nothing about the CURRENT
+    # file (a post-run recreation with the old id passed). The re-assert both
+    # detects it (ok=false) and heals it. Missing DB file = honest FAILED (the
+    # re-assert must never CREATE a store the reset left behind).
+    $sqliteOk = $false
+    if (Test-Path -LiteralPath $sqlitePath) {
+        $fpReport = Invoke-GhostCore @("sqlite-update", $sqlitePath, (_B64Payload @{ "storage.serviceMachineId" = $ids.devDeviceId }))
+        $sqliteOk = ($null -ne $fpReport -and $null -ne $fpReport.ok -and $fpReport.ok)
+    }
     if ($sqliteOk) {
         Write-Host "[OK] final state.vscdb probe passed ($label)" -ForegroundColor Green
     } else {
