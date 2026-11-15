@@ -219,11 +219,20 @@ if (-not $zcodeIsAdmin) {
     # (not a log) is the persisted result channel - the elevated console shows
     # the full live output while the run progresses.
     $zcodeArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$zcodeScript`"$zcodeFwd"
-    Start-Process powershell -Verb RunAs -ArgumentList $zcodeArgs -WindowStyle Normal -Wait
+    # W1-7 (F-08): a stale done-marker from a PREVIOUS run must never be
+    # shown as this run's result - delete it before launching (an early
+    # child exit then surfaces as no result). -PassThru + .ExitCode relays
+    # the elevated child's exit code (a bare -Wait always exited 0, so a
+    # failing reset looked green to $LASTEXITCODE callers; the child exits 1
+    # when failCount > 0).
+    Remove-Item -LiteralPath "$env:TEMP\zcode_v1.5_done.txt" -Force -ErrorAction SilentlyContinue
+    $zcodeChild = Start-Process powershell -Verb RunAs -ArgumentList $zcodeArgs -WindowStyle Normal -Wait -PassThru
     if (Test-Path -LiteralPath "$env:TEMP\zcode_v1.5_done.txt") {
         Get-Content -LiteralPath "$env:TEMP\zcode_v1.5_done.txt"
     }
-    exit
+    $zcodeChildCode = $zcodeChild.ExitCode
+    if ($null -eq $zcodeChildCode) { $zcodeChildCode = 1 }
+    exit $zcodeChildCode
 }
 
 Write-GhostBanner -Target "ZCode/Qoder Identity Reset [$(Get-ZcodeTargetDisplay $Target)]" -Version "1.5"
@@ -1396,6 +1405,15 @@ function Stop-ZcodeTargetTree {
     if ($RequireSurvivor -and (-not $enforceSurvivor)) {
         Write-Host "    [INFO] no survivor instance running at entry -- survivor check disabled" -ForegroundColor DarkGray
     }
+    # W1-6 (F-07): instances ARE running but NONE classify as this clone -
+    # the classic bare-launched clone (no marker in its subtree = it owns the
+    # PRIMARY profile). The old code silently "OK'd in ~3s having killed
+    # nothing". The on-disk reset proceeds, but the WARN must say why no
+    # process matched. Primary keeps its own ambiguity abort below.
+    if (($entryTargets -eq 0) -and ($Label -ne 'Primary') -and ($entryTotal -gt 0)) {
+        Write-Host "[WARN] no $(Get-ZcodeTargetDisplay $Label) main found - if this clone was started as a bare ZCode.exe it owns the PRIMARY profile." -ForegroundColor Yellow
+        Write-Host "    On-disk reset proceeds. Relaunch the clone via its clone shortcut / launcher so its subtree carries the clone home marker." -ForegroundColor Yellow
+    }
     if (($Label -eq 'Primary') -and ($entryTargets -ge 2) -and ($entrySurvivors -eq 0)) {
         Write-Host "[FAILED] ambiguous classification: $($entryTargets) ZCode mains running but none classify as a clone." -ForegroundColor Red
         Write-Host "    Refusing to kill: every main looks like Primary, so a Primary tree-kill would close ALL windows." -ForegroundColor Red
@@ -1590,6 +1608,18 @@ if (-not (Test-Path -LiteralPath $zcodeRoaming)) {
     exit 1
 }
 
+# W1-10 (F-13): a clone home that exists but holds only a PARTIAL profile
+# (aborted seed) used to be reset with most steps SKIPing missing files and
+# exit 0, and the launcher's old gate then skipped the reseed forever. The
+# launcher now auto-heals partials via its .zcode-seeded/.zcode-seeding
+# markers, but the reset still says so loudly instead of presenting the
+# partial as healthy.
+if (($Target -ne 'Primary') -and (-not (Test-Path -LiteralPath (Join-Path $zcodeUserProfile "v2\setting.json")))) {
+    Write-Host "[WARN] clone profile looks PARTIAL (no v2\setting.json in $zcodeUserProfile)." -ForegroundColor Yellow
+    Write-Host "    The reset proceeds on what exists; relaunch the clone once afterwards so the launcher re-seeds it (its .zcode-seeding marker auto-clears the partial)." -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $zcodeUserProfile -Key "profile-completeness" -Before "partial" -After "warned" -Ok $true
+}
+
 # v1.5: the core must be present and a functional Python 3 with it - fail
 # fast BEFORE touching anything (v1.4 needed Python only for the SQLite
 # steps; v1.5 routes every store mutation through the core).
@@ -1688,6 +1718,14 @@ $storageUpdates = @{
     "telemetry.devDeviceId"  = $ids.devDeviceId
     "telemetry.macMachineId" = $ids.macMachineId
 }
+
+# W1-4 abort checkpoint (F-05): the whole step pipeline runs inside try, and
+# the finally below re-flushes the audit log + restore script EVEN on a hard
+# abort - the old write-only-at-the-tail layout left a mid-run abort with
+# mutations applied but NO audit, NO restore script. The pipeline body is
+# deliberately NOT re-indented (minimal diff); the flush is idempotent with
+# the tail write.
+try {
 
 # --- [1/27] Qoder storage.json telemetry IDs (per profile: main + CORS_Profile) ---
 Write-Host "`n[1/27] Updating Qoder storage.json telemetry IDs (per profile)..." -ForegroundColor Cyan
@@ -2583,6 +2621,21 @@ Test-WatchdogRecreation -CoreFiles $watchdogCoreFiles -Audit ([ref]$audit)
 # the old unconditional passCount++ turned those into a green exit 0.
 $watchdogFailures = @($audit | Where-Object { $_.key -eq 'watchdog-recreate' -and -not $_.ok }).Count
 if ($watchdogFailures -gt 0) { $failCount++ } else { $passCount++ }
+
+}
+finally {
+    # W1-4: flush whatever the run has produced so far - on the happy path
+    # this is simply overwritten (idempotent) by the tail write below; on an
+    # abort it is the only record + rollback path the operator gets. Errors
+    # here are loud; the flush itself never masks the original abort.
+    try {
+        Write-AuditLog -Audit $audit -Path (Join-Path $backupRoot ("audit_{0}.json" -f $timestamp))
+        $null = New-RestoreScript -BackupRoot $backupRoot -App "ZCode" -Actions $actions
+    }
+    catch {
+        Write-Host "[abort] checkpoint flush FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
 
 # --- Audit + Restore ---
 $auditPath = Join-Path $backupRoot ("audit_{0}.json" -f $timestamp)

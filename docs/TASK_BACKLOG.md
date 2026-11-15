@@ -80,16 +80,19 @@ relaunch note, W2-4 label, W3-1 watchdog clone-aware relaunch and harness
 scenario M shipped). Remaining:
 
 - **W1 remainder** in `reset_zcode.ps1` (now the v1.5 thin manifest):
-  W1-4 incremental audit/restore, W1-6 empty-target WARN, W1-7 elevation
-  marker + exit-code relay, W1-9 `-DryRun`, W1-10 partial-profile WARN +
-  header/usage fix.
+  W1-9 `-DryRun`.
   DONE: W1-8 Python preflight (PR #71 — the v1.5 fail-fast preflight),
   W1-5 purge retention policy (PR #73, = BS-5), W1-2 Qoder steps gated on
   Primary (2026-11-15, F-02 decision D2 in-script gate; the contradicting
   v1.4 comment is now true), W1-1 shared-CLI-db scrub step [26b] for clone
   targets (2026-11-15 — WAL-aware backup + lock-tolerant honest WARN) and
   W1-3 strict backup mode at every Backup-ViaCore call site (2026-11-15 —
-  no backup ⇒ no mutation; the core backup verb gained `--sqlite-wal`).
+  no backup ⇒ no mutation; the core backup verb gained `--sqlite-wal`),
+  W1-4 abort checkpoint (2026-11-15 — try/finally flushes audit + restore
+  script even on a hard abort), W1-6 empty-target WARN (bare-launched
+  clone), W1-7 elevation marker + exit-code relay, W1-10 partial-profile
+  WARN (F-13; F-14's audit-BOM + dead-helper items verified already
+  closed).
 - **W2-3** optional dry-run menu entry; **W3-2** reset-side watchdog-running
   preflight WARN.
 - **W4-1** `AGENTS.md` launch-gid list add 41 — **OBSOLETE (closed
