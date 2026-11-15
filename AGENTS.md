@@ -817,7 +817,17 @@ reset_zcode.ps1       # ZCode v1.5 THIN MANIFEST (2026-11-14): 27 steps +
                                    #          (bare-launched clone owns Primary); self-elevation
                                    #          deletes the stale done-marker + relays the child exit
                                    #          code via -PassThru; a PARTIAL clone profile (no
-                                   #          v2\setting.json) warns with the reseed hint
+                                   #          v2\setting.json) warns with the reseed hint;
+                                   #          W1-9+W3-2 (2026-11-15, F-11/F-03): -DryRun = report-only
+                                   #          planner (roots, presence, would-kill set + survivor
+                                   #          count, the 27-step plan; exits BEFORE the Python
+                                   #          preflight and BEFORE self-elevation - no UAC, no
+                                   #          writes, no kills; the Both/All orchestrator prints its
+                                   #          child sequence without spawning them) and the captcha
+                                   #          watchdog's mutex is probed before the kill with a WARN
+                                   #          (its blanket taskkill voids the survivor guarantee);
+                                   #          W2-3: GHOST.bat ZCode [33] / gid 109 = the Dry-run
+                                   #          reset planner row (:RunWith, All instances)
 ghost_launch_guard.ps1             # Shared 3-way RAM/concurrency launch guard (2026-11-14) —
                                    #   the generalized mechanics that launch_zcode_second_instance
                                    #   carried since 2026-10-28; wired into ALL FOUR suites' launchers
@@ -1118,7 +1128,10 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   = the clone status row — 2026-11-14, ZCode's parity for the newer
   suites' -Status: running state per instance (copy-family + marker
   classified), profile dirs, v2\telemetry-state.json deviceMid prefix,
-  per-instance commit pressure; tools/status_zcode_instances.ps1); AutoClaw2:
+  per-instance commit pressure; tools/status_zcode_instances.ps1);
+  [33] gid 109 = the Dry-run reset planner — appended 2026-11-15 in display
+  order (:RunWith, -Target All -DryRun, report-only, no elevation;
+  W2-3 of the edge-cases plan); AutoClaw2:
   Launch Clones [1]-[7]
   gid 73, Chat inventory gid 75, Import chats gid 76, [11] MCP sync watcher
   gid 74 — reserved 2026-11-04, LIVE 2026-11-14: watch_autoclaw2_mcp_sync.ps1

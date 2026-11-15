@@ -146,12 +146,22 @@ BeforeAll {
                 }
                 return @()
             }
+            'RunWith' {
+                # The .bat runs `powershell -File "%~1" %~3` - %~3 expands
+                # UNQUOTED at runtime, so a quoted "-Target All -DryRun" token
+                # word-splits into three real arguments (the gid 109 row,
+                # 2026-11-15). Split like the argsString wrappers above; rows
+                # whose args token has no spaces are unchanged by this.
+                if ($Full.Count -gt 2 -and $Full[2]) {
+                    return @($Full[2] -split '\s+' | Where-Object { $_ })
+                }
+                return @()
+            }
             'Run'                { $rest = 1 }
             'RunZcodeReset'      { $rest = 1 }
             'RunAc2Reset'        { $rest = 1 }
             'RunClineReset'      { $rest = 1 }
             'RunOpenCodeReset'   { $rest = 1 }
-            'RunWith'            { $rest = 2 }
             'ConfirmRun'         { $rest = 3 }
             default         { throw "unexpected wrapper '$Wrapper'" }
         }
@@ -166,7 +176,7 @@ Describe 'menu.json schema' {
             Should -Be 'IDE Resets,ZCode,AutoClaw2,Cline,OpenCode,Maintenance'
     }
 
-    It 'every row has a gid in the 1-108 range, unique per section, and no retired/reserved gid' {
+    It 'every row has a gid in the 1-109 range, unique per section, and no retired/reserved gid' {
         foreach ($sec in $Menu.sections) {
             $gids = @($sec.rows | ForEach-Object { $_.gid })
             ($gids | Select-Object -Unique).Count | Should -Be $gids.Count -Because "section '$($sec.name)'"
@@ -175,7 +185,9 @@ Describe 'menu.json schema' {
         $gids.Count | Should -BeGreaterThan 0
         foreach ($g in $gids) {
             $g | Should -BeGreaterThan 0
-            $g | Should -BeLessOrEqual 108
+            # 109 = the ZCode dry-run planner row (2026-11-15); raise the
+            # ceiling when the next gid lands.
+            $g | Should -BeLessOrEqual 109
             $ReservedGids | Should -Not -Contain $g
         }
     }

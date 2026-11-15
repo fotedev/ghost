@@ -8,6 +8,37 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode reset W1-9 -DryRun + W2-3 menu row (gid 109) + W3-2 watchdog
+  preflight + W4-2 harness scenarios** (2026-11-15): the W1 remainder is
+  COMPLETE. **W1-9 (F-11)**: `reset_zcode.ps1 -DryRun` is a report-only
+  planner — it prints the target roots, presence checks (shared CLI db,
+  Qoder, partial profile), the would-kill process set + survivor count and
+  the full 27-step plan, then exits 0 BEFORE the Python preflight, before
+  any kill and before any write; a DryRun also skips self-elevation (the
+  elevation block moved below the DryRun gate) and the orchestrator
+  (Both/All) prints its child sequence without spawning them. Verified
+  under redirected USERPROFILE/APPDATA fixtures: zero fixture writes (the
+  two created dirs are powershell.exe's own startup artifact, present in
+  the control run too). **W2-3**: GHOST.bat ZCode local **[33]** → **gid
+  109** "Dry-run reset planner" (All instances, dispatched via :RunWith —
+  no elevation needed), wired into the resolver, the dispatch ladder, the
+  :DispatchOne header range (1-109) and menu.json (inline-note mode with
+  the report-only disclaimer; the hub-parity ARGS check now word-splits a
+  RunWith row's args token to match the runtime `%~3` expansion). **W3-2
+  (F-03)**: the reset probes the captcha watchdog's `ZcodeCaptchaWatchdog`
+  mutex before the kill and warns that its blanket taskkill can void the
+  survivor guarantee + repopulate the Primary (audited). **W4-2**: two new
+  harness scenarios — V runs the two-token ZCode chain "2 33" END-TO-END
+  through the dispatcher into the real dry-run planner (report-only, so
+  the one reset-family row the harness can execute for real) and W runs
+  the ZCode unknown-token continuation ("2 99" → exactly one Unknown
+  task); scenario D/E moved to the new unassigned gid 110. The harness
+  also pins the test copy's working directory to the repo root (GHOST.bat
+  self-normalizes via `cd /d "%~dp0"`; without the swap the first
+  dispatched-script scenario fails on relative paths). Pester 238/238
+  (incl. the repo-integrity dispatch-range check and the hub-parity ARGS),
+  harness PASS, unittest 194 OK, PSSA 21=21, parse clean. Live runs
+  pending user supervision.
 - **ZCode reset W1-4 abort checkpoint + W1-6/W1-7/W1-10 UX hardening**
   (2026-11-15): the second slice of the W1 remainder. **W1-4 (F-05)**: the
   whole 27-step pipeline now runs inside `try/finally` whose flush re-writes

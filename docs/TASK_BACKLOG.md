@@ -72,27 +72,26 @@ Standing fallback unchanged: if `artifact_secret_detected` ever fires on one
 of these files again, stop and surface to the user — never bypass the guard
 (precedent: BLOCKED_FIXES.md).
 
-## 3. ZCode reset hardening — W1 / W2-3 / W3-2 / W4 (spec exists)
+## 3. ZCode reset hardening — W1 / W2-3 / W3-2 / W4 — **FULLY APPLIED 2026-11-15**
 
 Source + spec: [ZCODE_RESET_EDGE_CASES_PLAN.md](ZCODE_RESET_EDGE_CASES_PLAN.md)
 (W1-1..W1-10 script-side items deferred 2026-10-23; W2-1 confirm gate, W2-2
 relaunch note, W2-4 label, W3-1 watchdog clone-aware relaunch and harness
-scenario M shipped). Remaining:
+scenario M shipped 2026-10-23; the W1 script-side items + W2-3 + W3-2 +
+W4-2/W4-3 landed 2026-11-15 across PRs #71/#73/#77/#78/#79 and the W1-9
+pass — every item is DONE; the live destructive matrix in the spec's §6
+remains user-supervised).
 
-- **W1 remainder** in `reset_zcode.ps1` (now the v1.5 thin manifest):
-  W1-9 `-DryRun`.
-  DONE: W1-8 Python preflight (PR #71 — the v1.5 fail-fast preflight),
-  W1-5 purge retention policy (PR #73, = BS-5), W1-2 Qoder steps gated on
-  Primary (2026-11-15, F-02 decision D2 in-script gate; the contradicting
-  v1.4 comment is now true), W1-1 shared-CLI-db scrub step [26b] for clone
-  targets (2026-11-15 — WAL-aware backup + lock-tolerant honest WARN) and
-  W1-3 strict backup mode at every Backup-ViaCore call site (2026-11-15 —
-  no backup ⇒ no mutation; the core backup verb gained `--sqlite-wal`),
-  W1-4 abort checkpoint (2026-11-15 — try/finally flushes audit + restore
-  script even on a hard abort), W1-6 empty-target WARN (bare-launched
-  clone), W1-7 elevation marker + exit-code relay, W1-10 partial-profile
-  WARN (F-13; F-14's audit-BOM + dead-helper items verified already
-  closed).
+- **W1 remainder** in `reset_zcode.ps1` — **FULLY APPLIED 2026-11-15** (all
+  of W1-1..W1-10 + W2-3 + W3-2 + W4-2; W1-2/W1-5/W1-8 closed earlier):
+  W1-9 `-DryRun` report-only planner (skips elevation + Python preflight;
+  verified zero-write under redirected fixtures) + W2-3 the GHOST.bat
+  ZCode [33] / gid 109 menu row (:RunWith dispatch, hub-parity ARGS word-
+  split added) + W3-2 the captcha-watchdog mutex preflight WARN + W4-2 the
+  two harness scenarios (V two-token chain end-to-end through the real
+  dry-run planner, W ZCode unknown-token continuation) + the harness CWD
+  pin (`cd /d "%~dp0"` → repo root) so dispatched-script scenarios resolve
+  repo-relative paths.
 - **W2-3** optional dry-run menu entry; **W3-2** reset-side watchdog-running
   preflight WARN.
 - **W4-1** `AGENTS.md` launch-gid list add 41 — **OBSOLETE (closed
@@ -140,9 +139,9 @@ it guarded was carried as BS-4/BS-5/BS-6 and is now paid (see §1).
 1. ~~§2 unblock decision → BS-1..BS-6 staged diffs~~ — DONE (BS-1/2 MOOT with the v1.20 sunset; BS-4/5/6 = PRs #72–#74).
 2. ~~BS-8~~ — CLOSED verification-only (all 9 findings pre-fixed).
 3. ~~BS-7~~ — CLOSED (#76: walked vs v0.5; remainders applied).
-4. **ZCode W1 remainder** (W1-1/3/4/6/7/9/10 + W2-3 + W3-2 + W4-2; W1-2/W4-3/W4-1/W1-5/W1-8 done).
+4. ~~ZCode W1 remainder~~ — FULLY APPLIED (#71/#73/#77/#78/#79 + the W1-9 pass; see §3).
 5. ~~Migration queue~~ — COMPLETE (#67–#71).
-6. **BS-10** (v1 shortcut installers + change_device_id + scaffold M/Ls), CS-1 and remaining DT items; CS-2 / CS-3 only on a developer go.
+6. **BS-10** (v1 shortcut installers + change_device_id + scaffold M/Ls), **CS-1** (OpenCode config sync — needs the scrub design) and remaining DT items; CS-2 / CS-3 only on a developer go.
 7. OPS items (CS-4 MOOT, CS-5) whenever the user drives them.
 
 ## Recorded non-tasks (do not re-derive)
