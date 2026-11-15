@@ -1575,6 +1575,20 @@ if ($SkipQoder) {
     $qoderPresent = $false
     $qoderProfiles = @()
 }
+if (($Target -ne 'Primary') -and $qoderPresent) {
+    # W1-2 (edge-cases plan F-02, decision D2: in-script gate, defense in
+    # depth): single-target CLONE resets never run the Qoder steps. The Qoder
+    # kill below is Primary-only, so on a clone run a live Qoder could re-
+    # persist storage.json after verify (silent revert of step [1]) and a hard
+    # file lock could abort the whole run BEFORE audit/restore exist. The
+    # Both/All orchestrators already route Qoder to the Primary child via
+    # -SkipQoder; this gate covers the direct clone rows. (The v1.4 header
+    # claimed "clone targets never touch Qoder" while the code did the
+    # opposite - with this gate the comment is finally true.)
+    Write-Host "Qoder: skipped for clone target $Target (Qoder steps belong to the Primary run)" -ForegroundColor Yellow
+    $qoderPresent = $false
+    $qoderProfiles = @()
+}
 
 New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
 

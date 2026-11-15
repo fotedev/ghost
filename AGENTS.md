@@ -790,7 +790,14 @@ reset_zcode.ps1       # ZCode v1.5 THIN MANIFEST (2026-11-14): 27 steps +
                                    #          RandomNumberGenerator.GetBytes (repo convention);
                                    #          Python required for ALL steps (fail-fast preflight -- one
                                    #          of the recorded PENDING v1.5 items, delivered here; the
-                                   #          others stay PENDING)
+                                   #          others stay PENDING); W1-2 (2026-11-15, edge-cases
+                                   #          plan F-02 / D2): clone-only resets NO LONGER run the
+                                   #          Qoder steps (in-script gate on $Target -eq Primary --
+                                   #          the Qoder kill is Primary-only, so a live Qoder could
+                                   #          silently revert the scrub and a hard file lock aborted
+                                   #          the run pre-audit; Both/All already routed Qoder to the
+                                   #          Primary child via -SkipQoder; the v1.4 "clone targets
+                                   #          never touch Qoder" comment is finally true)
 ghost_launch_guard.ps1             # Shared 3-way RAM/concurrency launch guard (2026-11-14) —
                                    #   the generalized mechanics that launch_zcode_second_instance
                                    #   carried since 2026-10-28; wired into ALL FOUR suites' launchers

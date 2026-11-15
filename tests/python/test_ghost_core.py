@@ -581,6 +581,40 @@ class ClearCliTelemetryTests(unittest.TestCase):
         self.assertEqual(result["deleted"], 0)
         self.assertIn("error", result)
 
+    def test_store_without_matching_rows_is_clean(self):
+        # W4-3: a store whose ItemTable holds NO telemetry-like keys (the
+        # clean-box case for the shared-CLI-db scrub) reports zeroed counts
+        # with no error - a scrub is not "failed" just because there was
+        # nothing to delete.
+        db = os.path.join(self._tmp.name, "clean.sqlite")
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO ItemTable (key, value) VALUES ('chat.session', 'v')")
+        conn.commit()
+        conn.close()
+        result = sqlite_keys.clear_cli_telemetry(db)
+        self.assertEqual(result["deleted"], 0)
+        self.assertEqual(result["remaining"], 0)
+        self.assertNotIn("error", result)
+
+    def test_locked_db_surfaces_error_contract(self):
+        # W4-3: another connection holding an EXCLUSIVE lock (a live instance
+        # on the shared CLI db) -> the busy timeout expires, the mutation is
+        # refused, and the bridge reports the error dict honestly (never a
+        # silent {"deleted": 0} success). The lock is released in finally.
+        db = self._make_db()
+        holder = sqlite3.connect(db, timeout=10)
+        try:
+            holder.execute("BEGIN EXCLUSIVE")
+            result = sqlite_keys.clear_cli_telemetry(db)
+            self.assertEqual(result["deleted"], 0)
+            self.assertIn("error", result)
+        finally:
+            holder.rollback()
+            holder.close()
+
 
 class ChatCheckTests(unittest.TestCase):
     def setUp(self):

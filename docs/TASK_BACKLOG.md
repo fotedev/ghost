@@ -11,6 +11,10 @@ Line numbers are evidence anchors, not contracts.
 PR #72, BS-5 → PR #73, BS-6 → PR #74) and BS-9 / BS-11 / CS-6 / DT-1 were
 walked to closure item-by-item against the current code — statuses below
 reflect that pass. The Phase 3 migration queue is COMPLETE (#67–#71).
+**Second pass same day**: BS-7 walked vs the v0.5 manifest and fixed
+(#76), BS-8 closed verification-only (all 9 findings pre-fixed), W1-2 and
+W4-3 done (#77). The whole H-severity bug-sweep tier is now closed; the
+remaining tiers are the W1 remainder, BS-10, CS-1 and the DT items.
 
 Status vocabulary:
 
@@ -50,7 +54,7 @@ and the trae UTF-8 sweep). What remains:
 | BS-5 | H×2 | `reset_zcode.ps1` — the [27] purge wipes same-day backups (incl. `reset_qoder.ps1`'s fresh ones; the Qoder keep-dir never exists) and audits unverified deletes; the watchdog step prints `Pass` and exits 0 even when re-deletes fail. | **FIXED 2026-11-15 — PR #73** (= W1-5): 24 h retention floor + never the current run; `audit_*.json`/`restore_*.ps1` of purged runs preserved at the `ID_Backups` root (the D3 policy); deletes verified (`still-present` audited `ok=$false` + red FAILED); the watchdog step counts `watchdog-recreate` `ok=$false` into `failCount`. Verified with a 7-check functional probe of the extracted function | `_bug_sweep\fixes\BLOCKED_FIXES.md` §2, Diffs A–C |
 | BS-6 | L×3 | `sqlite_keys.py` — URI-quoted read-only connect, `"ok"` in the `sqlite_update` return, rowcount-gated `delete_secrets`; plus the test rename (`test_existing_destination_is_clobbered` → `test_existing_destination_is_uniquified`) that turns the suite green (66/67 today — the only red). | **FIXED 2026-11-15 — PR #74**: (a) `quote(..., safe="/:")` ro-connect (spaced profile paths truncated the URI before), (b) `sqlite_update` returns `ok` (exact OR text-affinity match), (c) rowcount-gated exact-key deletes; (d) the test rename had already landed (`test_existing_destination_is_uniquified_not_clobbered`, suite green since) — +7 unittests, 189 OK | `_bug_sweep\fixes\BLOCKED_FIXES.md` §5 |
 | BS-7 | H×3 | `reset_qoder.ps1` — untouched by the remediation (UTF-8 reads, tree-file call-site verdicts, purge verify, argv insert, MAC restore ledger). | **CLOSED 2026-11-15** — walked report 05 against the v0.5 thin manifest. Closed by the migration: the ANSI-decode HIGH (zero direct app-store reads left; every JSON mutation in the core) and the argv-insert MEDIUM (core `patch_argv_json` inserts the key when absent, winstore.py:315). Applied in PR W1: step [30] uses the sweep-tree core twin (was defined but NEVER called; the header promised it), the [21] purge got the #73 policy (24 h floor + manifest preservation + VERIFIED deletes), stale-marker deletion + `-PassThru` exit relay, taskkill stderr race caught, MAC ledger/restore = true inversion (previousValue/previousExisted/ifIndex/writeOk; `-InterfaceIndex` addressing), honest `Remove-QoderPathSafely` verdict + steps [20]/[21]/[22] count failures, stale "WIN-<8hex>" header fixed, final state.vscdb probe re-asserts instead of replaying audit. One finding stays OPEN: no top-level guard (the W1-4 class). Trae's purge got the same floor + preservation (deletes were already verified) | `_bug_sweep\05-reset-qoder.md` |
-| BS-8 | H | Watchers — `watch_zcode_captcha.ps1` labels a running clone's bare-cmdline main "Primary" (spurious Primary relaunch when only clones run) and has no per-pass error isolation (one transient IOException permanently kills the resident, no stop line logged); `watch_zcode_taskbar.ps1` v6-title fallback can stamp a lone splash-phase clone with the Primary AUMID. | OPEN — pending scope (the last H-severity scope with no staged fix; 10 findings incl. 6 LOW) | `_bug_sweep\12-zcode-watchers.md` |
+| BS-8 | H | Watchers — `watch_zcode_captcha.ps1` labels a running clone's bare-cmdline main "Primary" (spurious Primary relaunch when only clones run) and has no per-pass error isolation (one transient IOException permanently kills the resident, no stop line logged); `watch_zcode_taskbar.ps1` v6-title fallback can stamp a lone splash-phase clone with the Primary AUMID. | **CLOSED 2026-11-15 — verification-only**: all 9 report-12 findings are ALREADY FIXED in current code (the same FIXES_SUMMARY staleness BS-9 proved). Evidence, file:line against the current checkout: captcha HIGH = per-tree marker classification with copy-family patterns + empty-cmdline ambiguity (`Get-ZcodeInstanceSnapshot`, watch_zcode_captcha.ps1:454+); exe resolution = live path + 3-candidate fallback (`Resolve-ZCodeExe` :153); per-pass try/catch + atomic temp+rename state writes + "watchdog stopped" log (:1236-1258); parsed-fields-only 1305 (:890); hourly-cap requeue (:793); midnight day-switch drain (:958-985); `-RunOnce` scan exclusion (:1211); taskbar Primary-never-guesses-from-bare-'ZCode' guard (:317-325); `SeenHwnds` per-pass prune (:330-336); same `-RunOnce` exclusion (:503) | `_bug_sweep\12-zcode-watchers.md` |
 | BS-9 | M/L | `reset_trae.ps1` remainder. Spot-checks 2026-10-28: done-marker deletion, the UTF-8 sweep, the no-`Get-Random` salt rule, and the watchdog+purge verdict block are ALL already present — the FIXES_SUMMARY pending list is stale. Walk report 04 item-by-item to confirm and close. | **CLOSED 2026-11-15** — walked report 04 against v0.3: ANSI-decode HIGH closed (every JSON mutation in the core; remaining PS reads use explicit `-Encoding UTF8`), broad-substring + schema-skips closed by `scrub-rows` (ESCAPE'd adjacency, `skipped_tables` reported), watchdog step [16] counts failures, purge verified, `.Trim()` wrapped in try/catch, salt via `salt-rotate` (0 `Get-Random`), cline-host counted in the clean check, `sweep-tree` verify-after by recount, watchdog probe expanded 4→6. One remainder APPLIED: `-PassThru` + exit-code relay in the self-elevation. One finding stays OPEN: no top-level guard before the end-of-run audit/restore write (= the W1-4 incremental-audit class). Observation: trae's purge has no 24 h floor (the W1-5 policy was decided for reset_zcode only) — candidate follow-up | `_bug_sweep\04-reset-trae.md` |
 | BS-10 | M/L | v1 shortcut installers repair-failure abort + LOWs (report 14); `change_device_id.ps1` MEDIUMs — reg-load exit check, RepairProfiles `.bak` path validation (lockout risk), exit codes on failure paths, UTF-8 restore script (report 09); scaffold LOWs (report 20). | OPEN — pending scope | `_bug_sweep\14-…`, `09-…`, `20-…` |
 | BS-11 | M | Python core: a read-only SELECT probe subcommand (report 02-F08 was SKIPPED only because the core was parent-owned during the child pass; several reset steps want verify-by-select without heredocs). | **CLOSED 2026-11-15** — the `count-keys` verb (PR #70) IS the probe: READ-ONLY survivor count, no mutation, no table creation, exact + LIKE on ItemTable (`purge-keys` / `scrub-rows` / `purge-tables` cover the remaining report-02 needs) | `_bug_sweep\02-reset-cursor.md` F08 |
@@ -77,12 +81,14 @@ scenario M shipped). Remaining:
 
 - **W1 remainder** in `reset_zcode.ps1` (now the v1.5 thin manifest):
   W1-1 shared-CLI-db scrub for clone-only resets (`clear-cli-telemetry`
-  exists in the core — verified), W1-2 Qoder steps gated on Primary,
-  W1-3 strict backup mode (no backup ⇒ no mutation), W1-4 incremental
-  audit/restore, W1-6 empty-target WARN, W1-7 elevation marker + exit-code
-  relay, W1-9 `-DryRun`, W1-10 partial-profile WARN + header/usage fix.
+  exists in the core — verified), W1-3 strict backup mode (no backup ⇒ no
+  mutation), W1-4 incremental audit/restore, W1-6 empty-target WARN, W1-7
+  elevation marker + exit-code relay, W1-9 `-DryRun`, W1-10 partial-profile
+  WARN + header/usage fix.
   DONE: W1-8 Python preflight (PR #71 — the v1.5 fail-fast preflight),
-  W1-5 purge retention policy (PR #73, = BS-5).
+  W1-5 purge retention policy (PR #73, = BS-5), W1-2 Qoder steps gated on
+  Primary (2026-11-15, F-02 decision D2 in-script gate; the contradicting
+  v1.4 comment is now true).
 - **W2-3** optional dry-run menu entry; **W3-2** reset-side watchdog-running
   preflight WARN.
 - **W4-1** `AGENTS.md` launch-gid list add 41 — **OBSOLETE (closed
@@ -91,7 +97,9 @@ scenario M shipped). Remaining:
   "launch-gid" = 0; the gid map lives in GHOST.bat's resolver).
   **W4-2** harness scenarios: a two-token ZCode chain end-to-end
   and unknown-token continuation (scenarios A–R exist; those two do not);
-  **W4-3** `clear-cli-telemetry` tests (empty + locked DB).
+  **W4-3** `clear-cli-telemetry` tests (empty store + locked DB) —
+  **DONE 2026-11-15** (both cases in tests/python/test_ghost_core.py;
+  unittest 189 → 191 OK).
 
 ## 4. Thin-manifest migration queue (roadmap exists; execution spec new)
 
@@ -126,11 +134,11 @@ it guarded was carried as BS-4/BS-5/BS-6 and is now paid (see §1).
 ## Priority order (2026-11-15)
 
 1. ~~§2 unblock decision → BS-1..BS-6 staged diffs~~ — DONE (BS-1/2 MOOT with the v1.20 sunset; BS-4/5/6 = PRs #72–#74).
-2. **BS-8** (watchers — the last H-severity scope with no staged fix).
-3. **BS-7** — walk report 05 against the v0.5 thin manifest, then fix.
-4. **ZCode W1 remainder** (W1-1/2/3/4/6/7/9/10 + W2-3 + W3-2 + W4-2/W4-3).
+2. ~~BS-8~~ — CLOSED verification-only (all 9 findings pre-fixed).
+3. ~~BS-7~~ — CLOSED (#76: walked vs v0.5; remainders applied).
+4. **ZCode W1 remainder** (W1-1/3/4/6/7/9/10 + W2-3 + W3-2 + W4-2; W1-2/W4-3/W4-1/W1-5/W1-8 done).
 5. ~~Migration queue~~ — COMPLETE (#67–#71).
-6. CS-1 and remaining DT items; CS-2 / CS-3 only on a developer go.
+6. **BS-10** (v1 shortcut installers + change_device_id + scaffold M/Ls), CS-1 and remaining DT items; CS-2 / CS-3 only on a developer go.
 7. OPS items (CS-4 MOOT, CS-5) whenever the user drives them.
 
 ## Recorded non-tasks (do not re-derive)

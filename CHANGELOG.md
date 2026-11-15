@@ -8,6 +8,31 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode reset clone-target Qoder gate (W1-2) + BS-8 verification closure
+  + clear-cli-telemetry tests (W4-3)** (2026-11-15): single-target CLONE
+  resets no longer run the Qoder steps — the edge-cases plan's F-02
+  (severity H) closed per its recorded decision D2 (in-script gate on
+  `$Target -eq 'Primary'`, defense in depth). Why it mattered: the Qoder
+  kill is Primary-only, so on a clone-only reset a live Qoder could
+  re-persist `storage.json` AFTER verify (a silent revert of step [1])
+  and a hard Qoder file lock could abort the whole run before audit/
+  restore exist; the v1.4 header claimed "clone targets never touch
+  Qoder" while the code did the opposite — with the gate the comment is
+  finally true. Both/All orchestrators already routed Qoder to the
+  Primary child via `-SkipQoder`, so their behavior is unchanged. Also:
+  **BS-8 (the two ZCode watchers) closed verification-only** — all 9
+  report-12 findings are already fixed in current code (per-tree marker
+  classification with copy-family patterns, live-exe resolution,
+  per-pass error isolation + atomic state writes, parsed-fields-only
+  1305, hourly-cap requeue, midnight day-switch drain, `-RunOnce` scan
+  exclusion, the taskbar Primary-never-guesses guard, `SeenHwnds` prune —
+  evidence cited file:line in TASK_BACKLOG), and **W4-3** lands the two
+  recorded `clear-cli-telemetry` unittests (a store with no matching rows
+  reports zeroed counts honestly; a locked DB surfaces the error dict
+  after the busy timeout instead of a silent success). unittest
+  189 → 191 OK. Pester 238/238, harness PASS. The whole H-severity
+  bug-sweep tier (BS-1..BS-9 + BS-11) is now closed; the remaining tiers
+  are the W1 remainder, BS-10, CS-1 and the DT items.
 - **Qoder reset v0.5 bug-sweep hardening (BS-7) + purge-policy alignment**
   (2026-11-15): report 05 walked item-by-item against the v0.5 thin
   manifest — the two HIGHs the migration had already closed are recorded
