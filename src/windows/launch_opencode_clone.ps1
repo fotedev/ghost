@@ -183,6 +183,26 @@ foreach ($sub in @('desktop','session','data','config','cache','state')) {
 }
 Write-Host "      $CloneHome"
 
+# Definitions-only config sync (CS-1, docs\OPENCODE_CONFIG_SYNC_PLAN.md):
+# MCP + provider DEFINITIONS from the Primary onto this clone's config -
+# BEFORE the clone starts, so there is no running-instance race and no
+# -McpOnly distinction is needed (the ZCode watcher pattern). Child-process
+# only (exit codes - never dot-sourced); a failed sync warns and NEVER
+# blocks the launch, and the sync itself skips a config-less first run
+# (the clone starts anonymous by design).
+$SyncScript = Join-Path $RepoRoot 'tools\sync_opencode_config.ps1'
+if (Test-Path -LiteralPath $SyncScript) {
+    Write-Host '[2b/5] Syncing Primary definitions into the clone config...'
+    $syncOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $SyncScript -Instance $Instance 2>&1
+    $syncExit = $LASTEXITCODE
+    foreach ($l in @($syncOut)) { Write-Host "      $l" }
+    if ($syncExit -ne 0) {
+        Write-Warning "config sync exited $syncExit - continuing the launch anyway (a failed sync must never block a launch; see the lines above)."
+    }
+} else {
+    Write-Warning "sync child not found: $SyncScript - definitions sync skipped."
+}
+
 # Running guard: the per-clone single-instance lock keys off the clone's own
 # userData, so launching a RUNNING clone just focuses it - inform, not block.
 if (Test-LockfileHeld $Lockfile) {
