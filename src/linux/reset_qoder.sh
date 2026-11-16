@@ -94,6 +94,7 @@ else
     # mapped on this platform, nothing touches the filesystem).
     # shellcheck disable=SC2088
     warn "~/.qoder not mapped on this platform - skipped."
+    # shellcheck disable=SC2088
     audit_line "$AUDIT_FILE" "~/.qoder/machineid" "unmapped" "skipped" 1
     PASS_COUNT=$((PASS_COUNT + 1))
 fi
