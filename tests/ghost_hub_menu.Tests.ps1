@@ -176,7 +176,7 @@ Describe 'menu.json schema' {
             Should -Be 'IDE Resets,ZCode,AutoClaw2,Cline,OpenCode,Maintenance'
     }
 
-    It 'every row has a gid in the 1-115 range, unique per section, and no retired/reserved gid' {
+    It 'every row has a gid in the 1-118 range, unique per section, and no retired/reserved gid' {
         foreach ($sec in $Menu.sections) {
             $gids = @($sec.rows | ForEach-Object { $_.gid })
             ($gids | Select-Object -Unique).Count | Should -Be $gids.Count -Because "section '$($sec.name)'"
@@ -185,9 +185,9 @@ Describe 'menu.json schema' {
         $gids.Count | Should -BeGreaterThan 0
         foreach ($g in $gids) {
             $g | Should -BeGreaterThan 0
-            # 115 = the OpenCode suite taskbar watcher row (2026-11-17); raise
-            # the ceiling when the next gid lands.
-            $g | Should -BeLessOrEqual 115
+            # 118 = the OpenCode pressure-report row (2026-11-17); raise the
+            # ceiling when the next gid lands.
+            $g | Should -BeLessOrEqual 118
             $ReservedGids | Should -Not -Contain $g
         }
     }
