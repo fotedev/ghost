@@ -279,6 +279,10 @@ call :Opt 15 "Reset Orange clone" "- chats + tasks kept"
 call :Opt 16 "Reset Primary" "- stock profile - chats + tasks kept"
 call :Opt 17 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
 echo.
+call :Div "Config Sync"
+call :Opt 18 "Sync MCPs to all clones" "- Primary to c1..c5 - running clones skipped"
+call :Opt 19 "Sync MCPs dry-run plan" "- shows what would change, writes nothing"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto CLINE_PROMPT
@@ -523,6 +527,8 @@ if "%~1"=="14" set "RESOLVED=94"
 if "%~1"=="15" set "RESOLVED=95"
 if "%~1"=="16" set "RESOLVED=96"
 if "%~1"=="17" set "RESOLVED=97"
+if "%~1"=="18" set "RESOLVED=112"
+if "%~1"=="19" set "RESOLVED=113"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -535,8 +541,9 @@ rem Clones on the ZCode LIGHT pattern; shortcuts/patch/status/remove shifted
 rem to [9]-[12]. Local ids renumbered, gids 53-62 unchanged (gids NEVER move).
 rem 2026-11-14: locals 13-19 = the Identity Resets section (gids 98-104;
 rem reset_opencode.ps1 -Target c1..c5|Primary|All; the ALL row is gated).
-rem 2026-11-17: locals 21-22 = the Config Sync section (gids 110/111; CS-1 v2
-rem - the one-shot definitions sync row + the resident config sync watcher).
+rem 2026-11-17: locals 21-22 = the OpenCode Config Sync section (gids 110/111;
+rem CS-1 v2 - the one-shot definitions sync row + the resident config sync
+rem watcher); Cline locals 18-19 = its Config Sync rows (gids 112/113).
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=53"
 if "%~1"=="2" set "RESOLVED=54"
@@ -566,7 +573,7 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-111; 63 unused; 74 = the AutoClaw2 MCP sync
+rem Runs one task by global id (1-113; 63 unused; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
 rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
@@ -681,6 +688,8 @@ if "%~1"=="103" (call :RunOpenCodeReset "src\windows\reset_opencode.ps1" -Target
 if "%~1"=="104" (call :ConfirmOpenCodeReset "Reset ALL profiles" "src\windows\reset_opencode.ps1" "-Target All" & exit /b)
 if "%~1"=="105" (call :Run "tools\patch_autoclaw2_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="106" (call :Run "tools\patch_cline_exe_identity.ps1" -Target All & exit /b)
+if "%~1"=="112" (call :Run "tools\sync_cline_mcp.ps1" -Target All & exit /b)
+if "%~1"=="113" (call :Run "tools\sync_cline_mcp.ps1" -Target All -DryRun & exit /b)
 if "%~1"=="107" (call :Run "tools\patch_opencode_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="110" (call :Run "tools\sync_opencode_config.ps1" -Target All & exit /b)
 if "%~1"=="111" (call :Detached "OpenCode Config Sync Watcher" "-NoProfile" "tools\watch_opencode_config_sync.ps1" "" "Config sync watcher opened in a separate window - it keeps running; close it to stop." "Syncs MCP + provider definitions from the Primary OpenCode config to every clone on change. Log: %LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log" & exit /b)

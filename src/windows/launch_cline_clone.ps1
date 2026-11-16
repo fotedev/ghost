@@ -65,7 +65,11 @@ param(
     # ghost_launch_guard.ps1, same mechanics as the ZCode launcher).
     [ValidateRange(1, 10)]
     [int]$MaxConcurrent = 3,
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+    # Escape hatch for the pre-launch MCP settings sync (the AutoClaw2 [2b]
+    # pattern): a failed sync warns and never blocks, so this switch exists
+    # only to skip it entirely.
+    [switch]$SkipMcpSync
 )
 $ErrorActionPreference = 'Stop'
 
@@ -150,6 +154,17 @@ if ($Status) {
     } else {
         Write-Host 'sign-in     : no secrets.json yet (fresh profile - ONE manual sign-in)'
     }
+    $mcpSettings = Join-Path $CloneDir 'data\settings\cline_mcp_settings.json'
+    if (Test-Path $mcpSettings) {
+        try {
+            $mcpCfg = Get-Content -LiteralPath $mcpSettings -Raw | ConvertFrom-Json
+            $n = 0
+            if ($mcpCfg.mcpServers) { $n = @($mcpCfg.mcpServers.PSObject.Properties).Count }
+            Write-Host ("mcp settings: {0} server definition(s)" -f $n)
+        } catch { Write-Host 'mcp settings: file present but does not parse (rewritten on next sync)' }
+    } else {
+        Write-Host 'mcp settings: absent (synced from the Primary on next launch)'
+    }
     $ports = $PortPlan[$Instance]
     foreach ($p in @($ports.Hub, $ports.Sidecar)) {
         $l = Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue |
@@ -204,6 +219,29 @@ if ($clineMains.Count -ge $MaxConcurrent) {
     if (-not $guardProceed) {
         exit 0
     }
+}
+
+# --- [2b] Pre-launch MCP settings sync (2026-11-17, the AutoClaw2 [2b] / -----
+#     CS-1 [2b/5] pattern): the Primary's data\settings\cline_mcp_settings.json
+#     is the definitions source; this clone's own copy is the target. Child
+#     process only (exit codes - never dot-sourced); a failed sync warns and
+#     NEVER blocks the launch. The store is auth-free ({"mcpServers": {}}),
+#     so the sync may also create it for a fresh clone.
+$McpSyncScript = Join-Path $PSScriptRoot '..\..\tools\sync_cline_mcp.ps1'
+if (-not $SkipMcpSync) {
+    if (Test-Path -LiteralPath $McpSyncScript) {
+        Write-Host '[2b] Syncing Primary MCP settings into the clone...'
+        $syncOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $McpSyncScript -Instance $Instance -Quiet 2>&1
+        $syncExit = $LASTEXITCODE
+        foreach ($l in @($syncOut)) { Write-Host "      $l" }
+        if ($syncExit -ne 0) {
+            Write-Warning "MCP sync exited $syncExit - continuing the launch anyway (a failed sync must never block a launch; see the lines above)."
+        }
+    } else {
+        Write-Warning "MCP sync child not found: $McpSyncScript - MCP sync skipped."
+    }
+} else {
+    Write-Host '[2b] MCP sync skipped (-SkipMcpSync).'
 }
 
 # --- Neutralize the single-instance window (pre-launch) ---------------------

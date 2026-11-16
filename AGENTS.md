@@ -15,7 +15,7 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   Clones [1]-[33] / System & GHOST Maintenance
                                              #   [1]-[5] / AutoClaw2 Multi-Instance & Clones
                                              #   [1]-[22] / Cline Multi-Instance & Clones
-                                             #   [1]-[17] / OpenCode Multi-Instance & Clones
+                                             #   [1]-[19] / OpenCode Multi-Instance & Clones
                                              #   [1]-[22]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
@@ -302,6 +302,21 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     [2c/5] step ensures the watcher is running + autostarted
                                    #     (zcode-2e mechanics, best-effort, never blocks the launch);
                                    #     Pester: tests/watch_opencode_config_sync.Tests.ps1 (19);
+                                   #   cline_mcp_merge.ps1 + sync_cline_mcp.ps1 — Cline MCP
+                                   #     settings sync (2026-11-17; Cline [18] sync = gid 112,
+                                   #     [19] dry-run plan = gid 113): the zcode merge invariant
+                                   #     adapted to Cline's per-server disabled flag (Primary
+                                   #     defs win, clone-local disabled survives, clone-only
+                                   #     kept) over <profile>\data\settings\cline_mcp_settings.json
+                                   #     (VERIFIED auth-free {"mcpServers": {}} — hence the child
+                                   #     CREATES a missing clone store, unlike the OpenCode
+                                   #     config-less SKIP); hub-lock-held = RUNNING → SKIP + WARN;
+                                   #     backup + verify-after + JSONL audit
+                                   #     <CloneHome>\mcp-sync-audit.jsonl (names only); Primary
+                                   #     READ-ONLY + hash re-check; launcher [2b] pre-launch step
+                                   #     (-SkipMcpSync hatch, failed sync warns never blocks);
+                                   #     Pester: tests/cline_mcp_sync.Tests.ps1 (23 incl.
+                                   #     functional %TEMP% fixture runs);
                                    #   patch_zcode_exe_identity.ps1 (+ pure core
                                    #     zcode_exe_identity_lib.ps1, unit-tested by
                                    #     tests/zcode_exe_identity.Tests.ps1) — per-clone Task
@@ -1663,9 +1678,34 @@ are already stated in the live suites' sections where they apply.
   in the state tree (`data\secrets.json` clineAccountId + userInfo,
   `data\settings\providers.json` OAuth). Fresh clone = no secrets at all —
   ONE manual sign-in per clone (one credential = one instance).
-- NO seeding, NO reset script in this suite (developer decision
-  2026-10-24): clone reset = stop instance + delete
-  `ClineClonesHome\<cN>` + launch again; Primary reset out of scope.
+- NO seeding (fresh profile per clone). RESET SCRIPT: the 2026-10-24
+  "no reset script" decision was OVERRIDDEN 2026-11-14 —
+  `src/windows/reset_cline.ps1` (11 steps/target, Cline [11]-[17] =
+  gids 91-97) deletes secrets.json + providers.json (the ONLY auth
+  stores) + sweeps stale locks/logs/cache/web-login profile; db, sessions,
+  global settings PRESERVED. -Target Primary|c1..c5|All, -KeepLogin,
+  -DryRun.
+- MCP settings sync (2026-11-17): the store is
+  `<profile>\data\settings\cline_mcp_settings.json` (container
+  `mcpServers`, Claude-Desktop format; VERIFIED auth-free on the dev host
+  — the Primary's file is exactly `{"mcpServers": {}}`, login lives in
+  secrets.json/providers.json). `tools/sync_cline_mcp.ps1` syncs Primary →
+  clone (`-Instance cN | -Target All`, `-DryRun`, `-Quiet` for the
+  launcher path) with the zcode merge invariant adapted to Cline's
+  per-server `disabled` flag (`tools/cline_mcp_merge.ps1` pure core:
+  Primary definitions win, the clone's LOCAL disabled state survives,
+  clone-only servers never removed, Primary never mutated); running clone
+  = hub-lock-held SKIP + WARN; missing store = CREATE (deliberate
+  deviation from the OpenCode config-less SKIP — this store is auth-free
+  and the app only creates it on first MCP-panel use); backup
+  `cline_mcp_settings-pre-sync-<ts>.json` + verify-after re-read +
+  deep-compare + JSONL audit `<CloneHome>\mcp-sync-audit.jsonl` (server
+  NAMES only); Primary READ-ONLY with a hash re-check. The launcher's
+  `[2b]` pre-launch step is the primary path (`-SkipMcpSync` escape
+  hatch; a failed sync warns, never blocks). GHOST.bat Cline [18] sync =
+  gid 112, [19] dry-run plan = gid 113. Pester:
+  `tests/cline_mcp_sync.Tests.ps1` (23, incl. functional %TEMP% fixture
+  runs of the child).
 - NO patching anywhere → app updates break nothing (launchers only set
   env + rename a window); `CLINE_NO_AUTO_UPDATE` deliberately NOT set.
 - Taskbar identity: shortcut-AUMIDs-only (DEGRADED, developer decision
