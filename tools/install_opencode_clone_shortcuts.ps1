@@ -182,13 +182,21 @@ function Set-ShortcutAumid {
     [ShortcutAumid]::Set($LnkPath, $Aumid)
 }
 
+$script:Failed = $false
+
 # Base AUMID: read from the stock Start Menu OpenCode.lnk (the app declares
-# ai.opencode.desktop); verified constant as the fallback.
+# ai.opencode.desktop); verified constant as the fallback. 14-C1-class guard:
+# only an UNSUFFIXED read may become the base - a clone-suffixed stock lnk
+# (ai.opencode.desktop.c2) would stamp ai.opencode.desktop.c2.c1 onto every
+# clone shortcut, exactly the cross-suite poisoning autoclaw2 fixed with its
+# constant. A suffixed read keeps the constant (the repair path below strips
+# the suffix from the stock shortcut).
 $BaseAumid = 'ai.opencode.desktop'
 $stockLnk  = Join-Path $StartMenu 'OpenCode.lnk'
 if (Test-Path $stockLnk) {
     $readAumid = Get-ShortcutAumid $stockLnk
-    if ($readAumid) { $BaseAumid = $readAumid }
+    if ($readAumid -and ($readAumid -notmatch '\.\d+$')) { $BaseAumid = $readAumid }
+    elseif ($readAumid) { Write-Warning "stock OpenCode.lnk AUMID '$readAumid' is clone-suffixed - keeping the '$BaseAumid' constant (run -RepairPrimaryAumid to heal the stock lnk)" }
 }
 
 if ($RepairPrimaryAumid) {
@@ -214,7 +222,7 @@ if ($RepairPrimaryAumid) {
         $chk  = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
         $ok   = ($back -eq $BaseAumid) -and ($chk.IconLocation -like "$ExePath*")
         Write-Host ("{0} : repaired {1} -> aumid={2} icon={3}" -f $(if ($ok) {'OK  '} else {'FAIL'}), $lnk, $back, $chk.IconLocation)
-        if ($ok) { $repaired++ } 
+        if ($ok) { $repaired++ } else { $script:Failed = $true }
     }
     if ($repaired -gt 0) {
         Write-Host ""
@@ -222,7 +230,15 @@ if ($RepairPrimaryAumid) {
     } else {
         Write-Host "nothing needed repairing."
     }
-    return
+    if (-not $Remove) {
+        # 14-L3: a bare repair ends here and honors its failures (the old
+        # unconditional return exited 0 even on FAIL and silently dropped a
+        # combined -Remove).
+        if ($script:Failed) { Write-Host 'FAILED - see FAIL lines above.' -ForegroundColor Red; exit 1 }
+        return
+    }
+    Write-Host ""
+    Write-Host "repair done - continuing to -Remove."
 }
 
 $sh = New-Object -ComObject WScript.Shell
@@ -237,7 +253,16 @@ foreach ($id in $TargetIds) {
         $legacyLnk = Join-Path $root $def.LegacyShortcutName
         if ($Remove) {
             foreach ($candidate in @($lnk, $legacyLnk)) {
-                if (Test-Path $candidate) { Remove-Item $candidate -Force; Write-Host "removed: $candidate" }
+                # 14-L4 class: verify-after on the delete.
+                if (Test-Path -LiteralPath $candidate) {
+                    Remove-Item -LiteralPath $candidate -Force
+                    if (Test-Path -LiteralPath $candidate) {
+                        Write-Host "FAILED: still exists after delete: $candidate" -ForegroundColor Red
+                        $script:Failed = $true
+                    } else {
+                        Write-Host "removed: $candidate"
+                    }
+                }
             }
             continue
         }
@@ -263,12 +288,14 @@ foreach ($id in $TargetIds) {
         $s.Description      = "OpenCode $($def.DisplayName) clone - isolated clone home"
         $s.Save()
 
-        try { Set-ShortcutAumid -LnkPath $lnk -Aumid $aumid } catch { Write-Warning "AUMID set failed on $lnk : $($_.Exception.Message)" }
+        try { Set-ShortcutAumid -LnkPath $lnk -Aumid $aumid } catch { Write-Warning "AUMID set failed on $lnk : $($_.Exception.Message)"; $script:Failed = $true }
 
         $chk = $sh.CreateShortcut($lnk)
-        $ok  = ($chk.TargetPath -eq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe') -and
-               ($chk.Arguments -match "launch_opencode_clone\.ps1.*-Instance $id")
         $aumidBack = Get-ShortcutAumid $lnk
+        $ok  = ($chk.TargetPath -eq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe') -and
+               ($chk.Arguments -match "launch_opencode_clone\.ps1.*-Instance $id") -and
+               ($aumidBack -eq $aumid)
+        if (-not $ok) { $script:Failed = $true }
         Write-Host ("{0} : {1}  aumid={2}" -f $(if ($ok) {'OK  '} else {'FAIL'}), $lnk, $(if ($aumidBack) { $aumidBack } else { '<none>' }))
     }
 }
@@ -278,3 +305,4 @@ if (-not $Remove) {
     Write-Host "shortcuts installed. Start clones SEQUENTIALLY (double-click one at a time," -ForegroundColor Green
     Write-Host "or run launch_opencode_clones_all.ps1 once)." -ForegroundColor Green
 }
+if ($script:Failed) { Write-Host 'FAILED - see FAIL lines above.' -ForegroundColor Red; exit 1 }
