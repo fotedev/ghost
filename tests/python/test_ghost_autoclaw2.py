@@ -648,6 +648,15 @@ class WorkspaceMappingTests(_PatchedHome):
         src = [{"root_path": "C:/programming/github/UNBAN-MACHINE-ID"}]
         pairs, warns = autoclaw2._map_target_workspaces(src, self._wss(), "default")
         matched = [p for p in pairs if p["matched_root"]]
+        if os.name != "nt":
+            # normalize_root case-folds ONLY on Windows (os.name == "nt" in
+            # autoclaw2.normalize_root) - matching the case-insensitive NTFS
+            # reality; on POSIX a differing-case path is a genuine non-match,
+            # so the assert below would fail on the CI's ubuntu leg.
+            self.assertEqual(len(matched), 0)
+            self.assertEqual(len(warns), 1)
+            self.assertEqual(warns[0]["reason"], "no-root-match-skipped")
+            return
         self.assertEqual(len(matched), 1)
         self.assertEqual(matched[0]["target_workspace"]["workspace_id"], "w-repo")
         self.assertEqual(warns, [])
@@ -900,6 +909,8 @@ class McpApplyTests(_PatchedHome):
         self.assertEqual(second["status"], "unchanged")
         self.assertEqual(second["action_count"], 0)
 
+    @unittest.skipUnless(sys.platform.startswith("win"),
+                         "exclusive-lock fixture uses kernel32 (no windll on POSIX)")
     def test_running_target_is_skipped(self):
         handle = self.fixture.hold_lock("c1")
         try:
@@ -1252,6 +1263,8 @@ class ChatImportTests(_PatchedHome):
         self.assertEqual(result["events"], 2)
         self.assertEqual(open(self.fixture.db_paths["c1"], "rb").read(), before)
 
+    @unittest.skipUnless(sys.platform.startswith("win"),
+                         "exclusive-lock fixture uses kernel32 (no windll on POSIX)")
     def test_running_target_refused(self):
         sid, _ = self.fixture.session("Primary")
         handle = self.fixture.hold_lock("c1")

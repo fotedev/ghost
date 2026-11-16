@@ -8,6 +8,42 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **CI runner-only failures fixed (2026-11-16)** — main's CI had been red
+  since the 2026-11-14 parity wave (PR #62 broke `PowerShell lint + tests`,
+  PR #66 broke `Python core tests (ubuntu)` and `Shell lint`); the merges
+  used admin bypass, so the red jobs went unnoticed. Three fixes, none of
+  them logic regressions on Windows:
+  - `tests/exe_identity_suites.Tests.ps1` dot-sourced the three new
+    `patch_*_exe_identity.ps1` wrappers whose MAIN flow runs at script
+    level — on the runner (no AutoClaw2/Cline/OpenCode installs) the
+    `Resolve-*InstallDir` throw aborted the whole file (11 tests failed).
+    The wrappers now carry the canonical dot-source guard
+    (`if ($MyInvocation.InvocationName -eq '.') { return }`, cf.
+    `reset_autoclaw2.ps1`) placed AFTER every function + `$script:`
+    constant — direct runs are unchanged; the Pester harness gets the maps
+    without resolving an install, so the tests now actually RUN on CI
+    instead of aborting.
+  - `tests/python/test_ghost_autoclaw2.py`: the two exclusive-lock tests
+    use `ctypes.windll` (kernel32 `CreateFileW` no-sharing) — now
+    `skipUnless(sys.platform.startswith("win"))` (the runner's ubuntu leg
+    errored 2×); `test_root_match_is_case_and_slash_insensitive` asserted
+    Windows-only behavior unconditionally — `normalize_root` case-folds
+    ONLY on `os.name == "nt"` (correct: NTFS is case-insensitive, POSIX is
+    not), so on Linux the differing-case path is a genuine non-match and
+    the test now asserts the SKIP+WARN outcome there instead.
+  - `Shell lint` (shellcheck): `reset_trae.sh`'s `b64_json` was a REAL
+    latent bug — the function read `$1` while every call site PIPES the
+    JSON (argv[1] arrived empty, `json.loads('')` would raise on Linux);
+    it now reads STDIN (SC2120/SC2119 resolved; `reset_cursor.sh` keeps
+    its argv style, its call site passes the document). Also: the dead
+    `<pass_var> <fail_var>` parameters of `reset_electron_stores` removed
+    (no caller passed them, the body never used them — SC2034; the
+    function's return code is the outcome and callers bump their own
+    counters); intentional shellcheck shapes suppressed with justification
+    comments (SC2016 `$(dirname %q)` emitted into the GENERATED restore
+    script; SC2153 caller-assigned `BACKUP_ROOT`; SC2088 `~/.app` display
+    labels in the three "not mapped on this platform" branches).
+    Local: `bash -n` clean, Pester 238/238, unittest OK.
 - **ZCode reset W1-9 -DryRun + W2-3 menu row (gid 109) + W3-2 watchdog
   preflight + W4-2 harness scenarios** (2026-11-15): the W1 remainder is
   COMPLETE. **W1-9 (F-11)**: `reset_zcode.ps1 -DryRun` is a report-only
