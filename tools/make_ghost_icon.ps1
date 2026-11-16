@@ -48,13 +48,21 @@ namespace GhostIcon
     {
         // Checkerboard background = flat low-saturation gray in the two poster tones
         // (light cells ~203, white cells 255). Tile pixels are dark or colorful.
+        // 20-L6: these constants are hard-tuned to the CURRENT poster art
+        // (assets/ghost-source.png). When a future poster re-tune fails, the
+        // dials to move are SAT_MAX / the 188..220 luminance band / the >=238
+        // white cut - they are named in the DetectTileBounds failure message.
+        const int SAT_MAX = 14;
+        const int LUM_BAND_LOW = 188;
+        const int LUM_BAND_HIGH = 220;
+        const int LUM_WHITE_MIN = 238;
         static bool IsBackground(byte r, byte g, byte b)
         {
             int mx = Math.Max(r, Math.Max(g, b));
             int mn = Math.Min(r, Math.Min(g, b));
-            if (mx - mn > 14) return false;
+            if (mx - mn > SAT_MAX) return false;
             int lum = (r * 299 + g * 587 + b * 114) / 1000;
-            return (lum >= 188 && lum <= 220) || lum >= 238;
+            return (lum >= LUM_BAND_LOW && lum <= LUM_BAND_HIGH) || lum >= LUM_WHITE_MIN;
         }
 
         // Row/column background-fraction profiles; the tile is the single long run of
@@ -107,7 +115,7 @@ namespace GhostIcon
                 else { curStart = -1; curLen = 0; }
             }
             if (bestStart < 0) throw new InvalidOperationException(
-                "tile detection failed: no low-background run found");
+                "tile detection failed: no low-background run found - the background classifier is hard-tuned to the current poster (IsBackground: sat<=" + SAT_MAX + ", luminance band " + LUM_BAND_LOW + ".." + LUM_BAND_HIGH + " or >=" + LUM_WHITE_MIN + "; 20-L6: retune those constants for new poster art)");
             return new Rectangle(bestStart, 0, bestLen, 1);
         }
 

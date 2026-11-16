@@ -387,6 +387,12 @@ else {
         $parts = $ManualCrop.Split(',')
         if ($parts.Length -ne 3) { throw "-ManualCrop must be 'x,y,size' (square tile)" }
         $mx = [int]$parts[0]; $my = [int]$parts[1]; $msz = [int]$parts[2]
+        # 20-L4: bounds-check BEFORE any GDI+ work - the C# MakeMaster clamps
+        # the rectangle via crop.Intersect, so an out-of-bounds crop silently
+        # distorted the master instead of failing.
+        if ($msz -le 0 -or $mx -lt 0 -or $my -lt 0 -or ($mx + $msz) -gt $src.Width -or ($my + $msz) -gt $src.Height) {
+            throw ("-ManualCrop 'x={0},y={1},size={2}' is out of bounds for the {3}x{4} source - the tile must fit entirely inside the image (20-L4)" -f $mx, $my, $msz, $src.Width, $src.Height)
+        }
         Write-Host ("[2/5] Manual crop: x={0} y={1} size={2}" -f $mx, $my, $msz)
         $bounds = New-Object System.Drawing.Rectangle ($mx), ($my), ($msz), ($msz)
         $master = [CloneIcon.Core]::MakeMaster($src, $bounds, 0.0, $CornerRadiusPercent, $MasterSize)
