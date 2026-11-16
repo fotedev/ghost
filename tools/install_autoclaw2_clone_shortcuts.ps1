@@ -229,8 +229,18 @@ if ($RepairPrimaryAumid) {
     } else {
         Write-Host "nothing needed repairing."
     }
-    if ($script:Failed) { Write-Host 'FAILED - see FAIL lines above.' -ForegroundColor Red; exit 1 }
-    return
+    if (-not $Remove) {
+        # 14-L3: a bare repair ends here. With -Remove both switches are
+        # honored - the old unconditional return silently dropped the removal.
+        if ($script:Failed) { Write-Host 'FAILED - see FAIL lines above.' -ForegroundColor Red; exit 1 }
+        return
+    }
+    if ($script:Failed) {
+        Write-Host 'repair FAILED - continuing to -Remove; its exit code reflects every failure.' -ForegroundColor Yellow
+    } else {
+        Write-Host ""
+        Write-Host "repair done - continuing to -Remove."
+    }
 }
 
 foreach ($id in $TargetIds) {
@@ -245,7 +255,16 @@ foreach ($id in $TargetIds) {
         $legacyLnk = Join-Path $root $def.LegacyShortcutName
         if ($Remove) {
             foreach ($candidate in @($lnk, $legacyLnk)) {
-                if (Test-Path $candidate) { Remove-Item $candidate -Force; Write-Host "removed: $candidate" }
+                # 14-L4: verify-after on the delete (mirrors the zcode installer).
+                if (Test-Path -LiteralPath $candidate) {
+                    Remove-Item -LiteralPath $candidate -Force
+                    if (Test-Path -LiteralPath $candidate) {
+                        Write-Host "FAILED: still exists after delete: $candidate" -ForegroundColor Red
+                        $script:Failed = $true
+                    } else {
+                        Write-Host "removed: $candidate"
+                    }
+                }
             }
             continue
         }
@@ -255,15 +274,24 @@ foreach ($id in $TargetIds) {
             Remove-Item $legacyLnk -Force
             Write-Host "removed legacy: $legacyLnk"
         }
-        if (-not (Test-Path $iconPath)) {
-            Write-Warning "icon missing ($iconPath) - falling back to exe icon"
-            $iconPath = $exe
+        $iconResolved = $iconPath
+        if (-not (Test-Path -LiteralPath $iconResolved)) {
+            # 14-M3: the fallback must keep the header contract "never a
+            # set-but-absent icon path" - only fall back when the exe exists.
+            if (Test-Path -LiteralPath $exe) {
+                Write-Warning "icon missing ($iconPath) - falling back to the exe icon"
+                $iconResolved = $exe
+            } else {
+                Write-Warning "icon missing ($iconPath) AND the exe is absent ($exe) - IconLocation left unset (the run FAILs below)"
+                $script:Failed = $true
+                $iconResolved = $null
+            }
         }
         $s = $sh.CreateShortcut($lnk)
         $s.TargetPath       = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
         $s.Arguments        = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -Instance $id"
         $s.WorkingDirectory = Split-Path -Parent $Launcher
-        $s.IconLocation     = "$iconPath,0"
+        if ($iconResolved) { $s.IconLocation = "$iconResolved,0" }
         $s.Description      = "AutoClaw2 $($def.DisplayName) clone - isolated profile"
         $s.Save()
 
@@ -275,7 +303,12 @@ foreach ($id in $TargetIds) {
         # ABSOLUTE and exist (a relative IconLocation renders a blank shortcut
         # icon - the live bug this suite shipped with, fixed 2026-10-29).
         $iconBack = ($chk.IconLocation -replace ',\d+$', '')
-        $iconOk   = ($iconBack -ieq $iconPath) -and [System.IO.Path]::IsPathRooted($iconBack) -and (Test-Path -LiteralPath $iconBack)
+        if ($iconResolved) {
+            $iconOk = ($iconBack -ieq $iconResolved) -and [System.IO.Path]::IsPathRooted($iconBack) -and (Test-Path -LiteralPath $iconBack)
+        } else {
+            # 14-M3 unset-icon case: the IconLocation must be genuinely empty.
+            $iconOk = [string]::IsNullOrWhiteSpace($chk.IconLocation)
+        }
         $ok  = ($chk.TargetPath -eq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe') -and
                ($chk.Arguments -match "launch_autoclaw2_clone\.ps1.*-Instance $id") -and
                ($aumidBack -eq $aumid) -and

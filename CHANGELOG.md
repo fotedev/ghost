@@ -8,6 +8,33 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Shortcut installer hardening — bug-sweep report 14 walk + same-family
+  siblings (BS-10, 2026-11-16)**: of report 14's findings, 6 were genuinely
+  open in the zcode/autoclaw2 installers (the autoclaw-v1 target is deleted;
+  the CRITICAL/HIGH base-AUMID + verify-exit findings already landed in the
+  2026-10-24 batch). `install_zcode_second_shortcuts.ps1`: **14-M2** — the
+  base AUMID is adopted only when CLEAN (the old first-read adoption took a
+  clone-suffixed value, so a FAILED repair left `dev.zcode.app.2.2`-shaped
+  AUMIDs stamped onto every clone shortcut); `Get-InstalledZCodeAumid`
+  skips suffixed reads and a hard stop refuses to stamp after a failed
+  self-heal; **14-L3** — `-RepairPrimaryAumid` + `-Remove` are both
+  honored (the old repair block exited before the removal ran); **14-L5**
+  — verify-after covers `.Description`; **14-L2** — header "N = 2..6"
+  matches the ValidateSet. `install_autoclaw2_clone_shortcuts.ps1`:
+  **14-M3** — the exe-icon fallback only fires when the exe really exists
+  (absent exe ⇒ IconLocation left unset, contract "never a set-but-absent
+  icon path" restored, verify asserts the unset case); **14-L4** —
+  `-Remove` re-reads every delete. Same-family fixes in the NEWER
+  `install_opencode_clone_shortcuts.ps1` / `install_cline_clone_shortcuts.ps1`
+  (not in the report, same defect classes): both installers now carry
+  `$script:Failed` + `exit 1` on every verify/remove failure (opencode
+  printed FAIL then exited 0), the 14-C1 poisoning-class guard on the
+  stock-lnk base adoption (an unsuffixed read only), the 14-L4
+  remove-verify, the 14-M3-class icon fallback chain (cline), and opencode's
+  repair path records its FAILs (they were printed and forgotten) and honors
+  a combined `-Remove`. Pester 238/238, harness PASS, unittest OK, parse 0,
+  PSSA per-file baselines identical (one pre-existing trailing-whitespace
+  finding removed). No live shortcut writes — user-supervised.
 - **CI runner-only failures fixed (2026-11-16)** — main's CI had been red
   since the 2026-11-14 parity wave (PR #62 broke `PowerShell lint + tests`,
   PR #66 broke `Python core tests (ubuntu)` and `Shell lint`); the merges

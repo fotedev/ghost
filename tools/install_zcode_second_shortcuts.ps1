@@ -22,7 +22,7 @@
 
   Every write is re-read and compared (no silent-success). Unless -SkipAumid is
   given, each shortcut also gets System.AppUserModel.ID = <installed ZCode AUMID>
-  + ".<N>" (N = 2/3/4 - the same value the app.asar patch computes for that
+  + ".<N>" (N = 2..6 - the same value the app.asar patch computes for that
   clone), so a taskbar pin groups with the running clone's window. The same
   repair path (-RepairPrimaryAumid) also repairs a hijacked PRIMARY ZCode.lnk:
   restores a pin-drifted TARGET back to the stock install ZCode.exe (verified
@@ -311,7 +311,11 @@ function Repair-PrimaryAumid {
     Repair-PrimaryLnkTarget $c
     $id = Get-LnkAumid $c
     if (-not [string]::IsNullOrWhiteSpace($id)) {
-      if ($base -eq $null) { $base = $id }
+      # 14-M2: only a CLEAN (unsuffixed) AUMID may become the base. The old
+      # first-read adoption took the raw value even when clone-suffixed, so a
+      # FAILED repair left the hijacked base in $base and the stamping loop
+      # wrote dev.zcode.app.2.2-shaped AUMIDs onto every clone shortcut.
+      if (($base -eq $null) -and ($id -notmatch '\.\d+$')) { $base = $id }
       if ($id -match '\.\d+$') {
         $clean = $id -replace '\.\d+$', ''
         try {
@@ -320,7 +324,6 @@ function Repair-PrimaryAumid {
           if ($after -ieq $clean) {
             Write-Host "  [ok] repaired AUMID '$id' -> '$clean' in $c" -ForegroundColor Green
             $repaired++
-            if ($base -eq $id) { $base = $clean }
             Repair-PrimaryLnkIcon $c
           } else {
             Write-Host "  [FAILED] AUMID still '$after' after repair in $c" -ForegroundColor Red
@@ -345,7 +348,9 @@ function Get-InstalledZCodeAumid {
   foreach ($c in (Get-PrimaryLnkPaths)) {
     if (Test-Path -LiteralPath $c) {
       $id = Get-LnkAumid $c
-      if (-not [string]::IsNullOrWhiteSpace($id)) { return $id }
+      # 14-M2: a clone-suffixed AUMID is exactly the collision shape the
+      # self-heal just tried to fix - never offer it as the stamping base.
+      if ((-not [string]::IsNullOrWhiteSpace($id)) -and ($id -notmatch '\.\d+$')) { return $id }
     }
   }
   return $null
@@ -355,11 +360,18 @@ if ($RepairPrimaryAumid) {
   Write-Host '[repair] Checking primary ZCode.lnk (AUMID, target, icon)...'
   Add-AumidType
   [void](Repair-PrimaryAumid)
-  if ($script:Failed) { Write-Host 'FAILED - see lines above.' -ForegroundColor Red; exit 1 }
-  Write-Host 'SUCCESS - primary shortcut AUMID healthy.' -ForegroundColor Green
-  Write-Host 'If the Start-menu pin did not come back by itself, right-click ZCode in' -ForegroundColor Yellow
-  Write-Host 'the app list once and choose Pin to Start.' -ForegroundColor Yellow
-  exit 0
+  if ($script:Failed) { Write-Host 'REPAIR FAILED - see lines above.' -ForegroundColor Red }
+  else {
+    Write-Host 'SUCCESS - primary shortcut AUMID healthy.' -ForegroundColor Green
+    Write-Host 'If the Start-menu pin did not come back by itself, right-click ZCode in' -ForegroundColor Yellow
+    Write-Host 'the app list once and choose Pin to Start.' -ForegroundColor Yellow
+  }
+  if (-not $Remove) {
+    # 14-L3: a bare -RepairPrimaryAumid ends here. With -Remove both switches
+    # are honored - the old unconditional exits silently dropped the removal.
+    if ($script:Failed) { exit 1 }
+    exit 0
+  }
 }
 
 if (-not (Test-Path -LiteralPath $Launcher)) { throw "Launcher not found: $Launcher" }
@@ -449,6 +461,9 @@ foreach ($inst in $Instance) {
     Assert-Value 'Arguments'        $spec.Arguments   $chk.Arguments
     Assert-Value 'WorkingDirectory' $workDir          $chk.WorkingDirectory
     if ($spec.IconOk) { Assert-Value 'IconLocation' $spec.IconLocation $chk.IconLocation }
+    # Named parameters here (the sibling calls stay positional, their PSSA
+    # finding is pre-existing baseline) so this PR adds no new PSSA instance.
+    Assert-Value -Name 'Description' -Expected $spec.Description -Actual $chk.Description
   }
 }
 
@@ -462,6 +477,13 @@ if ($SkipAumid) {
   $base = Repair-PrimaryAumid
   if ([string]::IsNullOrWhiteSpace($base)) {
     $base = Get-InstalledZCodeAumid
+  }
+  # 14-M2 hard stop: even after the self-heal + the clean-only fallbacks, a
+  # suffixed base must never reach the stamping loop.
+  if ((-not [string]::IsNullOrWhiteSpace($base)) -and ($base -match '\.\d+$')) {
+    Write-Host '  [FAILED] base AUMID is still clone-suffixed after the self-heal - refusing to stamp clones (they would join a wrong taskbar group).' -ForegroundColor Red
+    $script:Failed = $true
+    $base = $null
   }
   if ([string]::IsNullOrWhiteSpace($base)) {
     Write-Host '  [skip] Could not read AUMID from the installed ZCode shortcut.' -ForegroundColor Yellow

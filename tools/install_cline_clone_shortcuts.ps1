@@ -174,11 +174,19 @@ function Set-ShortcutAumid {
 
 # Base AUMID: read from the stock Start Menu Cline.lnk (the app declares
 # bot.cline.app); verified constant as the fallback.
+$script:Failed = $false
+
+# Base AUMID: read from the stock Start Menu Cline.lnk; verified constant as
+# the fallback. 14-C1-class guard: only an UNSUFFIXED read may become the base
+# - a clone-suffixed stock lnk (bot.cline.app.c2) would stamp bot.cline.app.c2.c1
+# onto every clone shortcut (the cross-suite poisoning autoclaw2 fixed with its
+# constant).
 $BaseAumid = 'bot.cline.app'
 $stockLnk  = Join-Path $StartMenu 'Cline.lnk'
 if (Test-Path $stockLnk) {
     $readAumid = Get-ShortcutAumid $stockLnk
-    if ($readAumid) { $BaseAumid = $readAumid }
+    if ($readAumid -and ($readAumid -notmatch '\.\d+$')) { $BaseAumid = $readAumid }
+    elseif ($readAumid) { Write-Warning "stock Cline.lnk AUMID '$readAumid' is clone-suffixed - keeping the '$BaseAumid' constant" }
 }
 
 $sh = New-Object -ComObject WScript.Shell
@@ -193,7 +201,16 @@ foreach ($id in $TargetIds) {
         $legacyLnk = Join-Path $root $def.LegacyShortcutName
         if ($Remove) {
             foreach ($candidate in @($lnk, $legacyLnk)) {
-                if (Test-Path $candidate) { Remove-Item $candidate -Force; Write-Host "removed: $candidate" }
+                # 14-L4 class: verify-after on the delete.
+                if (Test-Path -LiteralPath $candidate) {
+                    Remove-Item -LiteralPath $candidate -Force
+                    if (Test-Path -LiteralPath $candidate) {
+                        Write-Host "FAILED: still exists after delete: $candidate" -ForegroundColor Red
+                        $script:Failed = $true
+                    } else {
+                        Write-Host "removed: $candidate"
+                    }
+                }
             }
             continue
         }
@@ -203,9 +220,16 @@ foreach ($id in $TargetIds) {
             Remove-Item $legacyLnk -Force
             Write-Host "removed legacy: $legacyLnk"
         }
-        if (-not (Test-Path $iconPath)) {
-            Write-Warning "icon missing ($iconPath) - falling back to exe icon"
-            $iconPath = $ExePath
+        if (-not (Test-Path -LiteralPath $iconPath)) {
+            # 14-M3 class: never write a set-but-absent icon path - the exe
+            # fallback only when it exists, else the always-present host icon.
+            if ($ExePath -and (Test-Path -LiteralPath $ExePath)) {
+                Write-Warning "icon missing ($iconPath) - falling back to exe icon"
+                $iconPath = $ExePath
+            } else {
+                Write-Warning "icon missing ($iconPath) and the exe is absent ($ExePath) - falling back to the powershell host icon"
+                $iconPath = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+            }
         }
         $s = $sh.CreateShortcut($lnk)
         $s.TargetPath       = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -215,7 +239,7 @@ foreach ($id in $TargetIds) {
         $s.Description      = "Cline $($def.DisplayName) clone - isolated profile"
         $s.Save()
 
-        try { Set-ShortcutAumid -LnkPath $lnk -Aumid $aumid } catch { Write-Warning "AUMID set failed on $lnk : $($_.Exception.Message)" }
+        try { Set-ShortcutAumid -LnkPath $lnk -Aumid $aumid } catch { Write-Warning "AUMID set failed on $lnk : $($_.Exception.Message)"; $script:Failed = $true }
 
         $chk = $sh.CreateShortcut($lnk)
         # Verify-after covers the icon too: "$path,index" -> the path must be
@@ -223,10 +247,12 @@ foreach ($id in $TargetIds) {
         # icon - the live bug this suite shipped with, fixed 2026-10-29).
         $iconBack = ($chk.IconLocation -replace ',\d+$', '')
         $iconOk   = ($iconBack -ieq $iconPath) -and [System.IO.Path]::IsPathRooted($iconBack) -and (Test-Path -LiteralPath $iconBack)
+        $aumidBack = Get-ShortcutAumid $lnk
         $ok  = ($chk.TargetPath -eq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe') -and
                ($chk.Arguments -match "launch_cline_clone\.ps1.*-Instance $id") -and
+               ($aumidBack -eq $aumid) -and
                $iconOk
-        $aumidBack = Get-ShortcutAumid $lnk
+        if (-not $ok) { $script:Failed = $true }
         Write-Host ("{0} : {1}  aumid={2}  icon={3}" -f $(if ($ok) {'OK  '} else {'FAIL'}), $lnk, $(if ($aumidBack) { $aumidBack } else { '<none>' }), $(if ($iconOk) { $iconBack } else { "BAD: $($chk.IconLocation)" }))
     }
 }
@@ -236,3 +262,4 @@ if (-not $Remove) {
     Write-Host "shortcuts installed. Start clones SEQUENTIALLY (double-click one at a time," -ForegroundColor Green
     Write-Host "or run launch_cline_clones_all.ps1 once)." -ForegroundColor Green
 }
+if ($script:Failed) { Write-Host 'FAILED - see FAIL lines above.' -ForegroundColor Red; exit 1 }
