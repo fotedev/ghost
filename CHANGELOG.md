@@ -8,6 +8,61 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
+  DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
+  MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`
+  **20-L1**: the GHOST.bat wiring now honors the intake's instance count —
+  ONE Launch + ONE Reset row/gid pair PER CLONE (the old hardcoded
+  `-CloneCount 2` left resolver ids 3+ resolving to UnknownTask forever on
+  a larger intake) — resolver ids, `:DispatchOne` rows, submenu rows and
+  the range header all scale, keeping the repo-integrity invariant
+  "every resolver target has a dispatch case"; `Edit-GhostMenu` gains an
+  optional `-BatPath` (fixture-tested against a %TEMP% launcher copy:
+  CloneCount 3 → 6 resolver lines → gids 110-115 with per-clone
+  `-Instance instN`). Found + fixed WHILE probing: the range-header
+  replace (anchor 5) was a silent NO-OP against the real header format
+  ("(1-109; 63 unused; ...)") — a generated suite would have shipped a
+  stale range and failed `tests/repo-integrity.Tests.ps1`; the replace now
+  matches the number only and verifies the edit landed. **20-L2**: the
+  reset skeleton's example uses the REAL helper signatures
+  (`Backup-FileToTimestampDir -Source/-BackupRoot/-Label`,
+  `Set-JsonIdentity -Path/-Updates/-Audit [ref]` — the old example called
+  parameters that do not exist). **20-L3**: the shortcuts skeleton
+  verify-after re-reads TargetPath + Arguments + WorkingDirectory +
+  IconLocation (the old one checked TargetPath only while its [ok] line
+  printed an AUMID it never verified). `make_clone_icon.ps1` **20-L4**:
+  `-ManualCrop 'x,y,size'` is bounds-checked against the source BEFORE any
+  GDI+ work (the C# `crop.Intersect` clamp silently distorted
+  out-of-bounds crops; probe: 9999-size crop on a 32px source throws with
+  the values). `make_ghost_icon.ps1` **20-L6**: the background classifier's
+  hard-tuned constants are named (SAT_MAX / 188..220 band / ≥238 white
+  cut), carried into the compile-checked C# and printed verbatim in the
+  tile-detection failure message so a future poster re-tune knows exactly
+  which dials to move. **DT-4**: a new CHANGELOG entry records the
+  2026-10-24 sweep remediation wave for release notes (the sweep folders
+  stay gitignored). Pester 238/238, harness PASS, unittest OK, parse 0,
+  PSSA per-file baselines identical.
+- **2026-10-24 bug-sweep remediation, recorded for release notes (DT-4,
+  2026-11-16)**: the sweep itself (`_bug_sweep\`, ~196 findings: 3 CRITICAL /
+  24 HIGH / 75 MEDIUM / 94 LOW across 20 reports) is gitignored, so the
+  CHANGELOG never recorded its remediation wave. Summary, from the sweep's
+  own FIXES_SUMMARY: the 2026-10-24 in-tree wave fixed ~130 findings across
+  22 files — executor scopes 02 reset_cursor (11), 03 reset_devin (10),
+  07 reset_qoderwork (11/11), 08 reset_minimax (9/9), 13 refresh+sync
+  (12/12), 15 patch engines (12/13), 16 tools misc (11/11), 17 update_ghost
+  (4/4), 11 launch_autoclaw2 (4/15, rest blocked then); the parent fixed the
+  shared `identity_utils.ps1` core (backup uniquify killing the
+  same-label-clobber class, UTF-8 reads, guarded writes, `-RedactKeys`,
+  `Test-GhostValueEqual`, BOM-less audit, hostname RNG bias), the Python
+  core modules, the autoclaw2 installer's CRITICAL base-AUMID constant, the
+  `change_device_id.ps1` HIGH `.bak`-key abort class, `ghost.sh` child-fail
+  isolation, and `new_clone_suite.ps1`'s 3 MEDIUMs. Five files were blocked
+  by workspace write-guard false positives with staged diffs ready — those
+  landed later: the launcher/reset_zcode/sqlite_keys trio as PRs #72–#74
+  (2026-11-15 hardening wave), reset_autoclaw/launch_autoclaw with the v1.20
+  sunset deletion (2026-11-01). The "pending" tail of that summary was
+  systematically stale — the 2026-11-15/16 walks (PRs #75–#77, #81, #83)
+  closed reports 05/09/12/14/20 against current code with evidence.
 - **Shortcut installer hardening — bug-sweep report 14 walk + same-family
   siblings (BS-10, 2026-11-16)**: of report 14's findings, 6 were genuinely
   open in the zcode/autoclaw2 installers (the autoclaw-v1 target is deleted;

@@ -220,9 +220,13 @@ foreach ($tgt in (Get-TargetOrder $Target)) {
     $store = Join-Path $env:APPDATA $dir
     if (-not (Test-Path -LiteralPath $store)) { continue }
     Write-Host ("  [2/$TotalSteps] <TODO> patch JSON identity stores under {0}" -f $store)
-    # Example (uncomment + adjust after discovery):
-    # Backup-FileToTimestampDir -Path (Join-Path $store 'storage.json') -Label "reset-$tgt"
-    # Set-JsonIdentity -FilePath (Join-Path $store 'storage.json') -Identity $ids -DryRun:$DryRun
+    # Example (uncomment + adjust after discovery). 20-L2: the OLD example
+    # used helper signatures that do not exist (-Path on a function that
+    # takes -Source/-BackupRoot/-Label; -Identity/-DryRun on a function that
+    # takes -Updates/-Audit[ref]) - uncommenting it as-is crashed the run.
+    # $audit = @{}
+    # Backup-FileToTimestampDir -Source (Join-Path $store 'storage.json') -BackupRoot (Join-Path $store 'ID_Backups') -Label "reset-$tgt"
+    # Set-JsonIdentity -Path (Join-Path $store 'storage.json') -Updates @{ 'telemetry.devDeviceId' = $ids.devDeviceId } -Audit ([ref]$audit)
   }
   Write-Host ("  [3/$TotalSteps] <TODO> SQLite identity rows (Set-SqliteKeys handles Python probing + verify-after)")
   Write-Host ("  [4/$TotalSteps] <TODO> binary identity stores (Clear-BinaryIdentityStore: rename/delete, clobber old .backup)")
@@ -438,10 +442,21 @@ foreach ($name in $Instance) {
     # IPropertyStore helper - copy it from tools\install_autoclaw2_clone_shortcuts.ps1
     # and call it here with $def.Aumid before $lnk.Save().
     $lnk.Save()
-    # verify-after
+    # verify-after (20-L3: never silent success - re-read EVERY field the
+    # block writes; the old skeleton checked only TargetPath while its [ok]
+    # line printed the AUMID it never verified). The AUMID itself stays a
+    # TODO until the C# IPropertyStore helper above is wired.
     $chk = $wsh.CreateShortcut((Join-Path $root $def.LnkName))
-    if ($chk.TargetPath -ne $psExe) { Write-Host "  [FAILED] target verify: $root\$($def.LnkName)" -ForegroundColor Red; $failed = $true }
-    else { Write-Host ("  [ok] {0} -> {1} (aumid {2})" -f $def.LnkName, $name, $def.Aumid) }
+    $vfail = $false
+    if ($chk.TargetPath -ne $psExe) { Write-Host "  [FAILED] target verify: $root\$($def.LnkName)" -ForegroundColor Red; $vfail = $true }
+    if ($chk.Arguments -notmatch ('-Instance {0}\b' -f [regex]::Escape($name))) { Write-Host "  [FAILED] args verify: $root\$($def.LnkName)" -ForegroundColor Red; $vfail = $true }
+    if ($chk.WorkingDirectory -ne (Join-Path $RepoRoot 'src\windows')) { Write-Host "  [FAILED] workdir verify: $root\$($def.LnkName)" -ForegroundColor Red; $vfail = $true }
+    if ($icon) {
+      $iconBack = ($chk.IconLocation -replace ',\d+$', '')
+      if ($iconBack -ne $icon) { Write-Host "  [FAILED] icon verify: $root\$($def.LnkName) (got '$($chk.IconLocation)')" -ForegroundColor Red; $vfail = $true }
+    }
+    if ($vfail) { $failed = $true }
+    else { Write-Host ("  [ok] {0} -> {1} (aumid: wire the helper above, then verify it here)" -f $def.LnkName, $name) }
   }
 }
 if ($failed) { Write-Host 'FAILED - see lines above.' -ForegroundColor Red; exit 1 }
@@ -500,9 +515,13 @@ $SpecT = @'
 # ---------------------------------------------------------------------------
 
 function Edit-GhostMenu {
-  param([hashtable]$It, [string]$Slug, [string]$Pascal, [int]$SubmenuId, [int]$GidBase, [int]$CloneCount)
-  $batPath = Join-Path $PSScriptRoot '..\GHOST.bat'
-  $batPath = [System.IO.Path]::GetFullPath($batPath)
+  # 20-L1: -CloneCount now comes from the intake (the old call site passed a
+  # hardcoded 2 - a 3-clone intake got resolver ids 3+ that resolve to
+  # UnknownTask forever). -BatPath defaults to the repo launcher and exists so
+  # the resolver/gid emission can be fixture-tested against a %TEMP% copy.
+  param([hashtable]$It, [string]$Slug, [string]$Pascal, [int]$SubmenuId, [int]$GidBase, [int]$CloneCount, [string]$BatPath)
+  if (-not $BatPath) { $BatPath = Join-Path $PSScriptRoot '..\GHOST.bat' }
+  $batPath = [System.IO.Path]::GetFullPath($BatPath)
   $bat = [System.IO.File]::ReadAllText($batPath)
 
   # Keep the ORIGINAL launcher for rollback: the .new_clone_suite.bak staging
@@ -534,11 +553,26 @@ function Edit-GhostMenu {
   $bat = $bat.Substring(0, $lineEnd + 2) + $escEntry + "`r`n" + $bat.Substring($lineEnd + 2)
 
   # Anchor 3: new submenu section + resolver, inserted before :UnknownTask.
+  # 20-L1: ONE Launch + ONE Reset row PER CLONE (local ids 1..2N), because the
+  # resolver ids must land on real dispatch rows - the old 2-row skeleton left
+  # ids 3+ dead for a larger intake.
+  $optRows = New-Object System.Collections.Generic.List[string]
   $resolverLines = New-Object System.Collections.Generic.List[string]
   for ($i = 1; $i -le $CloneCount; $i++) {
-    $gid = $GidBase + $i - 1
-    $resolverLines.Add(('if "%~1"=="{0}" set "RESOLVED={1}"' -f $i, $gid))
+    $launchLocal = 2 * $i - 1
+    $resetLocal  = 2 * $i
+    $launchGid   = $GidBase + 2 * ($i - 1)
+    $resetGid    = $launchGid + 1
+    if ($i -eq 1) {
+      $optRows.Add('call :Opt 1 "Launch <Color> clone" "- first clone - own profile, identity, ports"')
+    } else {
+      $optRows.Add(('call :Opt {0} "Launch <Color> clone" "- clone {1} - own profile, identity, ports"' -f $launchLocal, $i))
+    }
+    $optRows.Add(('call :Opt {0} "Reset <Color> clone" ""' -f $resetLocal))
+    $resolverLines.Add(('if "%~1"=="{0}" set "RESOLVED={1}"' -f $launchLocal, $launchGid))
+    $resolverLines.Add(('if "%~1"=="{0}" set "RESOLVED={1}"' -f $resetLocal, $resetGid))
   }
+  $optRowsText = ($optRows -join "`r`n")
   $resolver = ($resolverLines -join "`r`n")
   $submenu = @"
 
@@ -549,8 +583,7 @@ echo.
 call :Div "Launch Clones"
 rem Row pattern (2026-11-03): label = action + COLOR name (e.g. "Launch Blue clone");
 rem the frozen instance key (inst1) never appears user-visible - only in params/dirs.
-call :Opt 1 "Launch <Color> clone" "- first clone - own profile, identity, ports"
-call :Opt 2 "Reset <Color> clone" ""
+$optRowsText
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -586,20 +619,35 @@ exit /b
   $bat = $bat.Substring(0, $idx) + $submenu + $bat.Substring($idx)
 
   # Anchor 4: DispatchOne gids - append after the highest existing gid line.
+  # 20-L1: TWO gid slots PER CLONE (launch + reset), matching the resolver and
+  # the submenu rows - the repo-integrity invariant "every resolver target has
+  # a :DispatchOne case" holds for any intake size.
   $gidMatches = [regex]::Matches($bat, 'if "%~1"=="(\d+)" \(call')
   $maxGid = ($gidMatches | ForEach-Object { [int]$_.Groups[1].Value } | Measure-Object -Maximum).Maximum
   $gidLine = 'if "%~1"=="{0}" ' -f $maxGid
   $idx = $bat.IndexOf($gidLine)
   if ($idx -lt 0) { throw "GHOST.bat anchor missing: gid $maxGid dispatch line" }
   $lineEnd = $bat.IndexOf("`r`n", $idx)
-  $newGids = @(
-    ('if "%~1"=="{0}" (call :Detached "{1} <Color>" "-NoProfile" "src\windows\launch_{2}_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)' -f ($GidBase), $Pascal, $Slug)
-    ('if "%~1"=="{0}" (call :Run "src\windows\reset_{1}.ps1" -Target inst1 & exit /b)' -f ($GidBase + 1), $Slug)
-  ) -join "`r`n"
-  $bat = $bat.Substring(0, $lineEnd + 2) + $newGids + "`r`n" + $bat.Substring($lineEnd + 2)
+  $newGids = New-Object System.Collections.Generic.List[string]
+  for ($i = 1; $i -le $CloneCount; $i++) {
+    $launchGid = $GidBase + 2 * ($i - 1)
+    $resetGid  = $launchGid + 1
+    $newGids.Add(('if "%~1"=="{0}" (call :Detached "Launch <Color>" "-NoProfile" "src\windows\launch_{1}_clone.ps1" "-Instance inst{2}" "Launcher opened in a separate window - it closes automatically when done." & exit /b)' -f $launchGid, $Slug, $i))
+    $newGids.Add(('if "%~1"=="{0}" (call :Run "src\windows\reset_{1}.ps1" -Target inst{2} & exit /b)' -f $resetGid, $Slug, $i))
+  }
+  $newGidsText = ($newGids -join "`r`n")
+  $bat = $bat.Substring(0, $lineEnd + 2) + $newGidsText + "`r`n" + $bat.Substring($lineEnd + 2)
 
-  # Anchor 5: the DispatchOne range comment.
-  $bat = $bat -replace ('Runs one task by global id \(1-{0}\)' -f $maxGid), ('Runs one task by global id (1-{0})' -f ($GidBase + 1))
+  # Anchor 5: the DispatchOne range comment. The old pattern demanded ')'
+  # right after the number - the REAL header reads "(1-109; 63 unused; ...)",
+  # so the replace was a silent no-op and a generated suite shipped a stale
+  # range (repo-integrity asserts header max == dispatch max). Replace the
+  # number only and VERIFY the edit landed (never silent success).
+  $newMaxGid = $GidBase + 2 * $CloneCount - 1
+  $bat = [regex]::Replace($bat, 'Runs one task by global id \(1-\d+', ('Runs one task by global id (1-' + $newMaxGid))
+  if (-not $bat.Contains('Runs one task by global id (1-' + $newMaxGid)) {
+    throw 'GHOST.bat verify-after failed: the DispatchOne range header was not updated'
+  }
 
   # Backup + write + verify-after.
   $backup = "$batPath.new_clone_suite.bak"
@@ -623,7 +671,8 @@ $cloneCount = $it.instanceCount - 1
 $instParams = (@('Primary') + (1..$cloneCount | ForEach-Object { "inst$_" }) -join "', '")
 $instParamsClones = (1..$cloneCount | ForEach-Object { "inst$_" }) -join "', '"
 
-# gid allocation: next free DispatchOne slot (two gids per suite skeleton).
+# gid allocation: next free DispatchOne slot (TWO gids per CLONE skeleton row:
+# launch + reset for inst1..instN - 20-L1).
 $batPath = Join-Path $PSScriptRoot '..\GHOST.bat'
 $batPath = [System.IO.Path]::GetFullPath($batPath)
 $batNow = [System.IO.File]::ReadAllText($batPath)
@@ -693,8 +742,6 @@ foreach ($p in $plan) {
 
 # Parse-check every emitted .ps1 BEFORE the GHOST.bat edit (never silent-
 # success): a parse failure must abort while the launcher is still untouched.
-# NOTE: the skeleton wires only inst1 (two gid slots) regardless of the intake
-# instanceCount - extend Edit-GhostMenu + the gid allocation to wire more.
 foreach ($p in $plan) {
   if ($p.Path -notlike '*.ps1') { continue }
   $full = Join-Path $repoRoot $p.Path
@@ -706,10 +753,10 @@ foreach ($p in $plan) {
   }
 }
 
-$backup = Edit-GhostMenu -It $it -Slug $slug -Pascal $pascal -SubmenuId $submenuId -GidBase $gidBase -CloneCount 2
+$backup = Edit-GhostMenu -It $it -Slug $slug -Pascal $pascal -SubmenuId $submenuId -GidBase $gidBase -CloneCount $cloneCount -BatPath $batPath
 Copy-Item -LiteralPath $backup -Destination $batPath -Force
 Remove-Item -LiteralPath $backup -Force
-Write-Host "[ok] GHOST.bat wired (submenu [$submenuId], resolver :${pascal}One, gids $gidBase-$($gidBase + 1))"
+Write-Host "[ok] GHOST.bat wired (submenu [$submenuId], resolver :${pascal}One, gids $gidBase-$($gidBase + 2 * $cloneCount - 1))"
 
 # Parse-check every emitted .ps1 (never silent-success).
 foreach ($p in $plan) {
