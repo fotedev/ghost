@@ -134,19 +134,22 @@ $out = Invoke-Scenario 'C_space_submenu' @('2', ' ', '0', '0')
 if ($out -match 'Unknown task')            { $failures += 'C: Unknown task on tokenless submenu input' }
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'C: ZCode submenu not shown' }
 
-# D) invalid main-menu id -> exactly one legit Unknown task "110"
-#    (110 = the next unassigned gid; 109 became REAL when the ZCode dry-run
-#    planner row landed 2026-11-15)
-$out = Invoke-Scenario 'D_invalid_main' @('110', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "110"')).Count
+# D) invalid main-menu id -> exactly one legit Unknown task "150"
+#    MAINTENANCE RULE: the probe id must stay UNASSIGNED - a main-menu id
+#    dispatches :DispatchOne DIRECTLY, so when the probe id becomes a real
+#    gid the scenario EXECUTES that row instead of printing Unknown (110
+#    silently ran the OpenCode sync row once, 2026-11-17). Bump the probe
+#    id whenever the dispatched gid lands (109 -> 110 -> 150).
+$out = Invoke-Scenario 'D_invalid_main' @('150', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "150"')).Count
 if ($hits -ne 1)                           { $failures += "D: expected 1 legit Unknown task, got $hits" }
 
-# E) main sub-path "2 110" -> chain reaches ZCodeOne, exactly one legit
+# E) main sub-path "2 150" -> chain reaches ZCodeOne, exactly one legit
 #    Unknown task, and the PENDING_CHAIN literal never appears
-#    (110 = the next unassigned gid; 109 became REAL when the ZCode dry-run
-#    planner row landed 2026-11-15)
-$out = Invoke-Scenario 'E_subpath_chain' @('2 110', '0', '0')
-$hits = ([regex]::Matches($out, 'Unknown task "110"')).Count
+#    (150 is unknown to the ZCode RESOLVER - submenu-local ids cap far below
+#    it, so this stays invalid no matter how many gids land)
+$out = Invoke-Scenario 'E_subpath_chain' @('2 150', '0', '0')
+$hits = ([regex]::Matches($out, 'Unknown task "150"')).Count
 if ($hits -ne 1)                           { $failures += "E: expected 1 Unknown task from chain, got $hits" }
 if ($out -match '%PENDING_CHAIN%')         { $failures += 'E: literal %PENDING_CHAIN% leaked' }
 if ($out -notmatch 'ZCode Multi-Instance') { $failures += 'E: ZCode submenu not reached via sub-path' }

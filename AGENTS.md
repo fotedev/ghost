@@ -12,11 +12,11 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   CLI cheat sheet: docs/cli.md); GHOST.bat =
                                              #   6 submenus with CONTINUOUS LOCAL numbering
                                              #   (IDE Resets [1]-[8] / ZCode Multi-Instance &
-                                             #   Clones [1]-[31] / System & GHOST Maintenance
+                                             #   Clones [1]-[33] / System & GHOST Maintenance
                                              #   [1]-[5] / AutoClaw2 Multi-Instance & Clones
-                                             #   [1]-[13] / Cline Multi-Instance & Clones
-                                             #   [1]-[9] / OpenCode Multi-Instance & Clones
-                                             #   [1]-[12]) + ANSI colors + local chained input
+                                             #   [1]-[22] / Cline Multi-Instance & Clones
+                                             #   [1]-[17] / OpenCode Multi-Instance & Clones
+                                             #   [1]-[22]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
                                              #   global gid jump from the main menu, and
@@ -281,6 +281,27 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     §5 items 1/3/4/5 (dry-run zero-write, zero secret leaks
                                    #     in config AND audit, SKIP paths, Primary hash stable) +
                                    #     idempotence; live runs = user-supervised;
+                                   #   watch_opencode_config_sync.ps1 — resident OpenCode
+                                   #     config sync watcher (CS-1 v2, 2026-11-17; OpenCode
+                                   #     [21] one-shot sync = gid 110, [22] resident = gid 111):
+                                   #     stat-guards the Primary ~\.config\opencode\opencode.jsonc
+                                   #     (mtime+size, JSONC parse-guard via the merge core — a
+                                   #     torn config skips the pass, never syncs) and on every
+                                   #     change spawns sync_opencode_config.ps1 -Target All as a
+                                   #     console-less child (600s kill cap, zcode-watcher
+                                   #     mechanics) — the watcher writes NOTHING itself; first
+                                   #     pass converges drift, deep re-verify every 60 passes
+                                   #     (~5 min), log at
+                                   #     %LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log,
+                                   #     single instance via mutex OpencodeConfigSyncWatcher +
+                                   #     startup process scan, -RunOnce/-DryRun/
+                                   #     -InstallAutostart/-RemoveAutostart (Startup .lnk "OpenCode
+                                   #     config sync watcher.lnk"); NO -ApplyLive by design (a
+                                   #     running OpenCode clone's config re-read timing is
+                                   #     unverified — recorded in TASK_BACKLOG); the launcher's
+                                   #     [2c/5] step ensures the watcher is running + autostarted
+                                   #     (zcode-2e mechanics, best-effort, never blocks the launch);
+                                   #     Pester: tests/watch_opencode_config_sync.Tests.ps1 (19);
                                    #   patch_zcode_exe_identity.ps1 (+ pure core
                                    #     zcode_exe_identity_lib.ps1, unit-tested by
                                    #     tests/zcode_exe_identity.Tests.ps1) — per-clone Task
@@ -1749,7 +1770,8 @@ are already stated in the live suites' sections where they apply.
 - Launch SEQUENTIALLY, never in parallel, never elevated (UIPI; the app
   itself is asInvoker). All via the launcher / "OpenCode cN" shortcuts —
   a bare OpenCode.exe (or protocol launch) always opens the PRIMARY
-  profile. GHOST.bat OpenCode submenu [1]-[12] (gids 53-62 + 79/80).
+  profile. GHOST.bat OpenCode submenu [1]-[22] (gids 53-62, 79/80, 98-104,
+  107, 110/111 — [21]/[22] = the CS-1 v2 config-sync rows, 2026-11-17).
 - Light worker (2026-11-07, spike-verified + LIVE-ACCEPTED — spec §3.9):
   OpenCode submenu [7] gid 79 = `src/windows/launch_opencode_cli_light.ps1`
   runs the v2 CLI (`<install>\resources\opencode-cli.exe`) headless on a
