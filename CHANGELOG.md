@@ -44,6 +44,35 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     script; SC2153 caller-assigned `BACKUP_ROOT`; SC2088 `~/.app` display
     labels in the three "not mapped on this platform" branches).
     Local: `bash -n` clean, Pester 238/238, unittest OK.
+- **change_device_id.ps1 hardening — bug-sweep report 09 walk (BS-10, PR
+  2026-11-16)**: of report 09's findings, 7 were genuinely open (7 of the
+  reset_autoclaw ones are obsolete — the target was deleted with the v1
+  suite; the HIGH .bak/hive-load findings already landed 2026-11-11).
+  **09-M1**: every `reg export` now checks `$LASTEXITCODE` (reg.exe never
+  throws, so the old try/catch was dead code) — the LegacyReset nine-key
+  backup aborts BEFORE the first destructive write on any failed export,
+  and RepairProfiles refuses to repair without its ProfileList rollback
+  artifact. **09-M2**: RepairProfiles validates each `.bak` key's
+  `ProfileImagePath` exists on disk before the swap (a leftover temp
+  profile would point ProfileList at a missing path after the rename =
+  logon lockout); such keys are skipped loudly. **09-M3**: the generated
+  restore script is written no-BOM UTF-8 (was `-Encoding ASCII`, which
+  mangled every path the moment `%TEMP%` carries a non-ASCII username).
+  **09-M4**: failure paths now exit 1 (elevation refusal, repair failure,
+  aborted-after-rollback, unreadable state) and success paths exit 0 —
+  the menu's child exit code is meaningful. **09-L1**: the create-new-key
+  branch re-reads and compares after the write (never-silent-success).
+  **09-L2**: `Read-State` distinguishes genuine first-run ($null) from an
+  UNREADABLE state file (corrupt JSON / DPAPI failure = sentinel object);
+  `Write-State` refuses to overwrite an unreadable state (a fresh salt
+  would silently re-base the fingerprint history) and Fingerprint mode
+  fails loudly with `stateUnreadable` in the JSON. **09-L3**: the HKCU
+  pass no longer double-writes the current user's entries — the SID pass
+  records what it wrote for the current user's SID and HKCU only carries
+  entries the SID pass could not reach (the duplicate write also appended
+  a rollback entry recording the pass-1 random as the "original"). PSSA
+  rule multiset identical (4 trailing-whitespace findings removed), parse
+  clean. Destructive modes stay user-supervised.
 - **ZCode reset W1-9 -DryRun + W2-3 menu row (gid 109) + W3-2 watchdog
   preflight + W4-2 harness scenarios** (2026-11-15): the W1 remainder is
   COMPLETE. **W1-9 (F-11)**: `reset_zcode.ps1 -DryRun` is a report-only
