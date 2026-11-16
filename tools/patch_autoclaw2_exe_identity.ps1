@@ -87,6 +87,13 @@ function Invoke-ExeIdentityPatch {
     -DryRun:$DryRun -Force:$Force
 }
 
+# Dot-source guard (canonical repo pattern, cf. reset_autoclaw2.ps1): direct
+# runs continue into main; dot-sourcing (the Pester harness) defines the
+# functions + map and returns WITHOUT resolving an install - the runner has
+# none. (CI fix 2026-11-16: BeforeAll dot-source on a machine without the
+# suite threw "install not found" and failed 11 tests.)
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 # ---- main ----------------------------------------------------------------
 
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
