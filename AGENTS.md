@@ -179,7 +179,14 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     Start-menu shortcuts for all five clones (AppUserModel.ID =
                                    #     base + ".2"/".3"/".4"/".5"/".6" for pin grouping; -Instance to scope;
                                    #     -Remove to uninstall; install = ZCode submenu [8],
-                                   #     remove = ZCode submenu [30]);
+                                   #     remove = ZCode submenu [30]); 2026-11-16 BUG-SWEEP HARDENING
+                                   #     (BS-10 report 14, PR #83): the base AUMID is adopted only when
+                                   #     CLEAN (the old first-read adoption took a clone-suffixed value,
+                                   #     so a FAILED repair left dev.zcode.app.2.2-shaped AUMIDs stamped
+                                   #     onto every clone shortcut) + a hard stop refuses to stamp after
+                                   #     a failed self-heal; -RepairPrimaryAumid + -Remove are both
+                                   #     honored (the old repair block exited before the removal ran);
+                                   #     verify-after covers .Description; header N=2..6;
                                    #   refresh_zcode_second_chats.ps1 — cross-instance chat
                                    #     refresh (name is historical; -Target Primary|Second|Third|
                                    #     Fourth|Fifth|Sixth|All covers every instance now). One-shot (ZCode submenu [22]
@@ -710,12 +717,31 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     per-clone IconLocation =
                                    #     tools\opencode-<color>-branding\tray_icon.ico,0 (missing
                                    #     dir warns + falls back to the exe icon); OpenCode
-                                   #     submenu [7]
+                                   #     submenu [7]; 2026-11-16 BUG-SWEEP family fixes (PR #83):
+                                   #     $script:Failed + exit 1 on every verify/remove/AUMID failure
+                                   #     (was: FAIL printed, exit 0); the stock-lnk base adoption only
+                                   #     accepts an UNSUFFIXED read (a hijacked ai.opencode.desktop.cN
+                                   #     stock lnk would have stamped .cN.cN onto every clone — the
+                                   #     14-C1 poisoning class); remove verify-after; repair FAILs are
+                                   #     recorded and a combined -Remove is honored (the install_cline
+                                   #     twin got the same classes)
                                    #   new_clone_suite.ps1 — clone-suite scaffolding generator (playbook
                                    #     phases 3-10 mechanics): intake JSON → reset/launcher/.bat/
                                    #     shortcuts/SPEC skeletons + GHOST.bat submenu anchor-edit with
                                    #     verify-after; parse-checks every emitted .ps1; Phases 0-2 stay
-                                   #     with the agent as <TODO: Phase 1 discovery> slots
+                                   #     with the agent as <TODO: Phase 1 discovery> slots;
+                                   #     2026-11-16 BUG-SWEEP fixes (BS-10 report 20, PR #84): the
+                                   #     GHOST.bat wiring honors the intake instance count (ONE Launch
+                                   #     + ONE Reset row/gid pair PER CLONE — the old hardcoded
+                                   #     -CloneCount 2 left resolver ids 3+ dead on larger intakes);
+                                   #     the DispatchOne range-header replace was found to be a silent
+                                   #     NO-OP against the real "(1-109; 63 unused…)" format (a generated
+                                   #     suite would have shipped a stale range and failed the
+                                   #     repo-integrity test) — replaced + verified; the skeleton's
+                                   #     helper examples use the REAL signatures and its shortcut
+                                   #     verify-after re-reads every written field; Edit-GhostMenu
+                                   #     takes optional -BatPath (fixture-tested against a %TEMP%
+                                   #     launcher copy)
                                    #   make_clone_icon.ps1 — GENERIC clone-icon generator (any app,
                                    #     PS 5.1 + System.Drawing only): corner-sampled background →
                                    #     tile detection (LongestLowRun profiles, -BgTolerance, or
@@ -726,7 +752,10 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     -HueRotate derives extra colors (zcode-red-branding =
                                    #     blue master +150°); re-runs reuse the transparent-corner
                                    #     master; verify-after + TEMP previews; built for the
-                                   #     opencode/cline future clones — do not delete
+                                   #     opencode/cline future clones — do not delete;
+                                   #     2026-11-16: -ManualCrop is bounds-checked against the source
+                                   #     BEFORE any GDI+ work (the C# Intersect clamp silently
+                                   #     distorted out-of-bounds crops; 20-L4, PR #84)
 ```
 
 ## Architecture
@@ -1062,7 +1091,26 @@ change_device_id.ps1              # System-level: Fingerprint (self-test) / Lega
                                    #   never flip the Fingerprint self-test (WMI signals, ground truth #4);
                                    #   per-user hive failures now SKIP that SID loudly instead of aborting
                                    #   the whole run (same class as the .bak exclusion fix; reg load's
-                                   #   $LASTEXITCODE is checked — reg.exe never throws).
+                                   #   $LASTEXITCODE is checked — reg.exe never throws);
+                                   #   2026-11-16 BUG-SWEEP HARDENING (BS-10 report 09, PR #81): every
+                                   #   reg export checks $LASTEXITCODE (reg.exe never throws — the old
+                                   #   try/catch was dead code) and a failed backup aborts BEFORE the
+                                   #   first destructive write (LegacyReset nine-key loop + RepairProfiles'
+                                   #   ProfileList artifact); RepairProfiles validates each .bak key's
+                                   #   ProfileImagePath EXISTS on disk before the swap (a leftover temp
+                                   #   profile would point ProfileList at a missing path = logon lockout;
+                                   #   skipped loudly); the generated restore script is no-BOM UTF-8
+                                   #   (was -Encoding ASCII — mangled every path with a non-ASCII %TEMP%);
+                                   #   failure paths exit 1 (elevation refusal, repair failure,
+                                   #   aborted-after-rollback, unreadable state), success paths exit 0;
+                                   #   the create-new-key branch re-reads + compares (never silent
+                                   #   success); Read-State distinguishes genuine first-run ($null) from
+                                   #   an UNREADABLE state file (sentinel — Write-State refuses to
+                                   #   overwrite it, a fresh salt would silently re-base the fingerprint
+                                   #   history) and Fingerprint fails loudly with stateUnreadable in the
+                                   #   JSON; the HKCU pass skips entries the SID pass already wrote for
+                                   #   the current user's SID (the duplicate write also poisoned the
+                                   #   rollback log with a pass-1 random as the "original").
 spoof_wmi_serials.ps1              # System-level WMI serial spoof (2026-10-27, Maintenance [3] / gid 66):
                                    #   generated .mof ([DYNPROPS], real CIM keys, escaped literals) redeclares
                                    #   Win32_BIOS/BaseBoard/ComputerSystemProduct/SystemEnclosure/
