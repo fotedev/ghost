@@ -234,6 +234,9 @@ call :Opt 20 "Reset Orange clone" "- chats + work kept"
 call :Opt 21 "Reset Primary" "- default profile - chats + work kept"
 call :Opt 22 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
 echo.
+call :Div "Watchers"
+call :Opt 23 "Taskbar identity watcher" "- resident - re-stamps window AUMIDs + heals the Primary lnk"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto AUTOCLAW_PROMPT
@@ -334,6 +337,9 @@ echo.
 call :Div "Config Sync"
 call :Opt 21 "Sync configs to all clones" "- Primary to c1..c5 - running clones skipped"
 call :Opt 22 "Config sync watcher" "- resident - syncs on Primary config change"
+echo.
+call :Div "Watchers"
+call :Opt 23 "Taskbar identity watcher" "- resident - re-stamps window AUMIDs + heals the Primary lnk"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -500,6 +506,7 @@ if "%~1"=="19" set "RESOLVED=87"
 if "%~1"=="20" set "RESOLVED=88"
 if "%~1"=="21" set "RESOLVED=89"
 if "%~1"=="22" set "RESOLVED=90"
+if "%~1"=="23" set "RESOLVED=114"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -567,13 +574,14 @@ if "%~1"=="19" set "RESOLVED=103"
 if "%~1"=="20" set "RESOLVED=104"
 if "%~1"=="21" set "RESOLVED=110"
 if "%~1"=="22" set "RESOLVED=111"
+if "%~1"=="23" set "RESOLVED=115"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-113; 63 unused; 74 = the AutoClaw2 MCP sync
+rem Runs one task by global id (1-115; 63 unused; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
 rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
@@ -693,6 +701,8 @@ if "%~1"=="113" (call :Run "tools\sync_cline_mcp.ps1" -Target All -DryRun & exit
 if "%~1"=="107" (call :Run "tools\patch_opencode_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="110" (call :Run "tools\sync_opencode_config.ps1" -Target All & exit /b)
 if "%~1"=="111" (call :Detached "OpenCode Config Sync Watcher" "-NoProfile" "tools\watch_opencode_config_sync.ps1" "" "Config sync watcher opened in a separate window - it keeps running; close it to stop." "Syncs MCP + provider definitions from the Primary OpenCode config to every clone on change. Log: %LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log" & exit /b)
+if "%~1"=="114" (call :Detached "AutoClaw2 Taskbar Watcher" "-NoProfile" "tools\watch_suite_taskbar.ps1" "-Suite autoclaw2" "Taskbar watcher opened in a separate window - it keeps running; close it to stop." "Re-stamps window AUMIDs + heals the Primary lnk. Log: %LOCALAPPDATA%\watch-autoclaw2-taskbar\taskbar.log" & exit /b)
+if "%~1"=="115" (call :Detached "OpenCode Taskbar Watcher" "-NoProfile" "tools\watch_suite_taskbar.ps1" "-Suite opencode" "Taskbar watcher opened in a separate window - it keeps running; close it to stop." "Re-stamps window AUMIDs + heals the Primary lnk. Log: %LOCALAPPDATA%\watch-opencode-taskbar\taskbar.log" & exit /b)
 if "%~1"=="81" (call :RunWith "tools\build_ghost_exe.ps1" "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or after moving this repo folder." & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)

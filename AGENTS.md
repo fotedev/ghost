@@ -14,9 +14,9 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   (IDE Resets [1]-[8] / ZCode Multi-Instance &
                                              #   Clones [1]-[33] / System & GHOST Maintenance
                                              #   [1]-[5] / AutoClaw2 Multi-Instance & Clones
-                                             #   [1]-[22] / Cline Multi-Instance & Clones
+                                             #   [1]-[23] / Cline Multi-Instance & Clones
                                              #   [1]-[19] / OpenCode Multi-Instance & Clones
-                                             #   [1]-[22]) + ANSI colors + local chained input
+                                             #   [1]-[23]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
                                              #   global gid jump from the main menu, and
@@ -317,6 +317,27 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     (-SkipMcpSync hatch, failed sync warns never blocks);
                                    #     Pester: tests/cline_mcp_sync.Tests.ps1 (23 incl.
                                    #     functional %TEMP% fixture runs);
+                                   #   watch_suite_taskbar.ps1 — GENERIC suite taskbar-identity
+                                   #     watcher (2026-11-17; AutoClaw2 [23] = gid 114,
+                                   #     OpenCode [23] = gid 115; -Suite autoclaw2|opencode
+                                   #     MANDATORY, Cline excluded by plan CS-2): the
+                                   #     watch_zcode_taskbar mechanics parameterized — per-suite
+                                   #     AUMID base/mutex/log/Startup-lnk/repair-script maps;
+                                   #     classification = per-color exe copy on the root cmdline
+                                   #     FIRST, then argv markers (opencode's
+                                   #     --opencode-clone-home ONLY — autoclaw2 passes env, not
+                                   #     argv), then the opencode title map ("OpenCode <Color>");
+                                   #     HONEST LIMIT: a stock-exe AutoClaw2 clone is
+                                   #     unclassifiable (no markers, shared "AutoClaw" title) →
+                                   #     warned once + left alone (never re-stamped to base —
+                                   #     the clone-AUMID-vs-Primary-verdict guard); .kick toggle
+                                   #     + read-back verify; primary-lnk hijack guard every ~5m
+                                   #     = clone-AUMID predicate on Shell ExtendedProperty +
+                                   #     installer -RepairPrimaryAumid child (120s cap) +
+                                   #     re-read verify; -RunOnce/-IntervalSeconds/
+                                   #     -InstallAutostart/-RemoveAutostart; menu row is the
+                                   #     only entry point (launchers do NOT ensure it);
+                                   #     Pester: tests/watch_suite_taskbar.Tests.ps1 (17);
                                    #   patch_zcode_exe_identity.ps1 (+ pure core
                                    #     zcode_exe_identity_lib.ps1, unit-tested by
                                    #     tests/zcode_exe_identity.Tests.ps1) — per-clone Task

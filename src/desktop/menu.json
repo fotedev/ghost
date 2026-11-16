@@ -194,6 +194,10 @@
         ] },
         { "gid": 90, "label": "Reset ALL profiles", "tail": "- Blue..Orange + Primary - asks first", "mode": "confirm-reset", "confirmTitle": "Reset ALL profiles", "confirmText": "This tree-kills the affected profiles and rewrites their identity stores.", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "All"], "notes": [
           "NOTE: relaunch profiles via their AutoClaw2 Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare AutoClaw2.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 114, "label": "Taskbar identity watcher", "tail": "- resident - re-stamps window AUMIDs + heals the Primary lnk", "mode": "detached", "title": "AutoClaw2 Taskbar Watcher", "psFlags": "-NoProfile", "script": "tools/watch_suite_taskbar.ps1", "args": ["-Suite", "autoclaw2"], "notes": [
+          "Taskbar watcher opened in a separate window - it keeps running; close it to stop.",
+          "Re-stamps window AUMIDs + heals the Primary lnk. Log: %LOCALAPPDATA%\\watch-autoclaw2-taskbar\\taskbar.log"
         ] }
       ]
     },
@@ -326,6 +330,10 @@
         { "gid": 111, "label": "Config sync watcher", "tail": "- resident - syncs on Primary config change", "mode": "detached", "title": "OpenCode Config Sync Watcher", "psFlags": "-NoProfile", "script": "tools/watch_opencode_config_sync.ps1", "args": [], "notes": [
           "Config sync watcher opened in a separate window - it keeps running; close it to stop.",
           "Syncs MCP + provider definitions from the Primary OpenCode config to every clone on change. Log: %LOCALAPPDATA%\\watch-opencode-config-sync\\config-sync.log"
+        ] },
+        { "gid": 115, "label": "Taskbar identity watcher", "tail": "- resident - re-stamps window AUMIDs + heals the Primary lnk", "mode": "detached", "title": "OpenCode Taskbar Watcher", "psFlags": "-NoProfile", "script": "tools/watch_suite_taskbar.ps1", "args": ["-Suite", "opencode"], "notes": [
+          "Taskbar watcher opened in a separate window - it keeps running; close it to stop.",
+          "Re-stamps window AUMIDs + heals the Primary lnk. Log: %LOCALAPPDATA%\\watch-opencode-taskbar\\taskbar.log"
         ] }
       ]
     },
