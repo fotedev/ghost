@@ -20,7 +20,7 @@ Add-Type -AssemblyName System.Security
 if ($Mode -eq 'LegacyReset' -or $Mode -eq 'RepairProfiles') {
     if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-Host "Please run this script as Administrator!" -ForegroundColor Red
-        Exit
+        exit 1
     }
 }
 
@@ -80,7 +80,14 @@ function Read-State {
         }
         return $obj
     } catch {
-        return $null
+        # 09-L2: distinguish "no state yet" ($null = genuine first run) from
+        # "state unreadable" (corrupt JSON / DPAPI failure). The old catch-all
+        # returned $null for both, so a corrupt state was silently overwritten
+        # with first-run semantics - a new salt, which silently re-bases the
+        # whole fingerprint history. Unreadable state is now a sentinel object;
+        # Write-State refuses to overwrite it and the Fingerprint mode fails
+        # loudly instead of re-basing.
+        return [pscustomobject]@{ Unreadable = $true; Error = $_.Exception.Message }
     }
 }
 
@@ -89,6 +96,9 @@ function Write-State {
         [Parameter(Mandatory=$true)][string]$Path,
         [Parameter(Mandatory=$true)]$State
     )
+    if ($State -and $State.PSObject.Properties['Unreadable'] -and $State.Unreadable) {
+        throw "Write-State refuses to overwrite an unreadable state at $Path - fix or delete the state file manually"
+    }
     $dir = Split-Path -Parent $Path
     if (-not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -280,6 +290,21 @@ function Get-ConsensusSnapshot {
 
 if ($Mode -eq 'Fingerprint') {
     $state = Read-State -Path $StatePath
+    if ($state -and $state.PSObject.Properties['Unreadable'] -and $state.Unreadable) {
+        # 09-L2: never overwrite unreadable state with first-run semantics -
+        # a fresh salt here would silently re-base the fingerprint history.
+        Write-Host "FAILED: existing state at $StatePath is unreadable ($($state.Error)) - refusing to overwrite it. Fix or delete the file manually." -ForegroundColor Red
+        $out = [ordered]@{
+            mode = 'Fingerprint'
+            profile = $PrivacyProfile
+            statePath = $StatePath
+            ts = (Get-Date).ToString('o')
+            stateUnreadable = $true
+            error = $state.Error
+        }
+        $out | ConvertTo-Json -Depth 10
+        exit 1
+    }
     if (-not $state) {
         $state = [ordered]@{
             version = 1
@@ -362,7 +387,7 @@ if ($Mode -eq 'Fingerprint') {
     }
 
     $out | ConvertTo-Json -Depth 10
-    Exit
+    exit 0
 }
 
 function Repair-ProfileList {
@@ -377,9 +402,18 @@ function Repair-ProfileList {
     New-Item -ItemType Directory -Path $backupDirLocal -Force | Out-Null
     try {
         reg export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" "$backupDirLocal\ProfileList.reg" /y | Out-Null
+        # 09-M1: reg.exe never throws - only $LASTEXITCODE reports failure. The
+        # catch below is dead code for the real failure path, so a failed export
+        # used to print the success line and the repair ran with NO rollback
+        # artifact. A repair must never proceed without its backup.
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "FAILED: ProfileList backup export did not succeed (reg exit $LASTEXITCODE) - refusing to repair without a rollback artifact" -ForegroundColor Red
+            return $false
+        }
         Write-Host "Backup created at: $backupDirLocal" -ForegroundColor Cyan
     } catch {
-        Write-Host "Warning: Could not export ProfileList backup`: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "FAILED: could not export ProfileList backup`: $($_.Exception.Message) - refusing to repair without a rollback artifact" -ForegroundColor Red
+        return $false
     }
 
     $bakKeys = Get-ChildItem -Path $profileListPath -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like '*.bak' }
@@ -387,6 +421,17 @@ function Repair-ProfileList {
         $bakName = $bakKey.PSChildName
         $baseName = $bakName.Substring(0, $bakName.Length - 4)
         $baseKeyPath = Join-Path $profileListPath $baseName
+
+        # 09-M2: validate the .bak BEFORE swapping. After the swap the profile
+        # points at the .bak's ProfileImagePath - if that directory does not
+        # exist on disk (leftover temp profile), the restored key locks the
+        # profile out at next logon. Skip those keys loudly; Reset semantics
+        # (keep the .bak) are unaffected.
+        $bakImagePath = $bakKey.GetValue('ProfileImagePath')
+        if ([string]::IsNullOrWhiteSpace($bakImagePath) -or -not (Test-Path -LiteralPath $bakImagePath)) {
+            Write-Host "SKIP: $bakName has no on-disk profile directory ('$bakImagePath') - swapping would point ProfileList at a missing path (lockout risk)" -ForegroundColor Yellow
+            continue
+        }
 
         if (Test-Path $baseKeyPath) {
             try {
@@ -424,10 +469,10 @@ if ($Mode -eq 'RepairProfiles') {
     $ok = Repair-ProfileList
     if ($ok) {
         Write-Host "Profile repair complete. Please restart your computer." -ForegroundColor Yellow
-        Exit
+        exit 0
     }
     Write-Host "Profile repair failed. Please restore from backup if needed." -ForegroundColor Red
-    Exit
+    exit 1
 }
 
 # Create backup directory and timestamp
@@ -489,22 +534,35 @@ $currentInfo = @{
 }
 $currentInfo | ConvertTo-Json | Out-File "$backupDir\system_info_backup.json"
 
-# Export registry keys
-try {
-    reg export "HKLM\SOFTWARE\Microsoft\SQMClient" "$backupDir\SQMClient.reg" /y | Out-Null
-    reg export "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Device Metadata" "$backupDir\DeviceMetadata.reg" /y | Out-Null
-    reg export "HKLM\SYSTEM\CurrentControlSet\Control\SystemInformation" "$backupDir\SystemInformation.reg" /y | Out-Null
-    reg export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion" "$backupDir\WindowsNTCurrentVersion.reg" /y | Out-Null
-    reg export "HKLM\SOFTWARE\Microsoft\Cryptography" "$backupDir\Cryptography.reg" /y | Out-Null
-    reg export "HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor" "$backupDir\CentralProcessor.reg" /y | Out-Null
-    # Backup user hives as well
-    reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo" "$backupDir\SessionInfo.reg" /y | Out-Null
-    reg export "HKCU\Software\Microsoft\IdentityCRL" "$backupDir\IdentityCRL.reg" /y | Out-Null
-    reg export "HKCU\Software\Microsoft\Personalization" "$backupDir\Personalization.reg" /y | Out-Null
-    Write-Host "Registry backups created successfully" -ForegroundColor Green
-} catch {
-    Write-Host "Warning: Could not create complete registry backups`: $($_.Exception.Message)" -ForegroundColor Yellow
+# Export registry keys - reg.exe never throws, so the old try/catch was dead
+# code for the real failure path: any failed export printed a warning and the
+# run still rewrote the values with no .reg rollback artifact (09-M1). Every
+# export's $LASTEXITCODE is now checked; any failure aborts BEFORE the first
+# destructive write, leaving nothing changed and the backup dir for inspection.
+$exportTargets = @(
+    @{ Hive = "HKLM\SOFTWARE\Microsoft\SQMClient";                                              File = "SQMClient.reg" },
+    @{ Hive = "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Device Metadata";                 File = "DeviceMetadata.reg" },
+    @{ Hive = "HKLM\SYSTEM\CurrentControlSet\Control\SystemInformation";                        File = "SystemInformation.reg" },
+    @{ Hive = "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion";                              File = "WindowsNTCurrentVersion.reg" },
+    @{ Hive = "HKLM\SOFTWARE\Microsoft\Cryptography";                                           File = "Cryptography.reg" },
+    @{ Hive = "HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor";                              File = "CentralProcessor.reg" },
+    @{ Hive = "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo";            File = "SessionInfo.reg" },
+    @{ Hive = "HKCU\Software\Microsoft\IdentityCRL";                                            File = "IdentityCRL.reg" },
+    @{ Hive = "HKCU\Software\Microsoft\Personalization";                                        File = "Personalization.reg" }
+)
+$exportFailed = $false
+foreach ($exportTarget in $exportTargets) {
+    reg export $exportTarget.Hive (Join-Path $backupDir $exportTarget.File) /y | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAILED: registry backup export for $($exportTarget.Hive) (reg exit $LASTEXITCODE)" -ForegroundColor Red
+        $exportFailed = $true
+    }
 }
+if ($exportFailed) {
+    Write-Host "Registry backup incomplete - aborting BEFORE any write. Nothing was changed; inspect the backup dir: $backupDir" -ForegroundColor Red
+    exit 1
+}
+Write-Host "Registry backups created successfully" -ForegroundColor Green
 
 # Generate new IDs
 $newDeviceID = [System.Guid]::NewGuid().ToString().ToUpper()
@@ -619,8 +677,18 @@ foreach ($cpuKey in $cpuKeys) {
 # the base SID), that failure was invisible ($LASTEXITCODE never checked),
 # and the first .bak-targeted write then aborted the whole LegacyReset with
 # a full rollback - on exactly the machines this tool targets.
-$userProfiles = Get-ChildItem -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" | 
+$userProfiles = Get-ChildItem -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" |
     Where-Object { $_.PSChildName -match "S-1-5-21" -and $_.PSChildName -notlike "*.bak" }
+
+# 09-L3: the current user's SID is in ProfileList, so the SID pass below
+# already writes HKCU's physical keys (HKEY_USERS\<sid> == HKCU). The old
+# unconditional HKCU pass then wrote the SAME keys again with a SECOND random
+# value and appended a rollback entry that recorded the pass-1 random as the
+# "original" - a rollback would have restored a random instead of the real
+# value. The HKCU pass therefore only carries the entries the SID pass could
+# not reach (no hive on disk / hive load failure).
+$currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$sidPassWritten = @()
 
 # Add user-specific registry entries to modify for each user profile
 foreach ($profile in $userProfiles) {
@@ -674,30 +742,52 @@ foreach ($profile in $userProfiles) {
                 SID = $sid
             }
         )
+
+        if ($sid -eq $currentUserSid) {
+            $sidPassWritten = @(
+                "Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo",
+                "Software\Microsoft\IdentityCRL",
+                "Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist"
+            )
+        }
     }
 }
 
-# For current user, also update HKCU directly
-$registryPaths += @(
+# For current user, also update HKCU directly - but ONLY the entries the SID
+# pass above could not reach (09-L3; a duplicate write would double-roll the
+# current user's values and poison the rollback log with a random "original").
+$hkcuEntries = @(
     @{
-        Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo"
-        Name = "PermanentSessionId"
-        Value = (Get-Random -Minimum 1 -Maximum 999)
-        Type = "DWord"
+        SubPath = "Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo"
+        Path    = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo"
+        Name    = "PermanentSessionId"
+        Value   = (Get-Random -Minimum 1 -Maximum 999)
+        Type    = "DWord"
     },
     @{
-        Path = "HKCU:\Software\Microsoft\IdentityCRL"
-        Name = "DeviceId"
-        Value = $newDeviceID
-        Type = "String"
+        SubPath = "Software\Microsoft\IdentityCRL"
+        Path    = "HKCU:\Software\Microsoft\IdentityCRL"
+        Name    = "DeviceId"
+        Value   = $newDeviceID
+        Type    = "String"
     },
     @{
-        Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist"
-        Name = "MachineGuid"
-        Value = $newMachineGUID
-        Type = "String"
+        SubPath = "Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist"
+        Path    = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist"
+        Name    = "MachineGuid"
+        Value   = $newMachineGUID
+        Type    = "String"
     }
 )
+foreach ($hkcuEntry in $hkcuEntries) {
+    if ($sidPassWritten -contains $hkcuEntry.SubPath) { continue }
+    $registryPaths += @{
+        Path  = $hkcuEntry.Path
+        Name  = $hkcuEntry.Name
+        Value = $hkcuEntry.Value
+        Type  = $hkcuEntry.Type
+    }
+}
 
 # Update registry values
 $successCount = 0
@@ -738,11 +828,22 @@ foreach ($reg in $registryPaths) {
                     "Binary" { 
                         New-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -PropertyType Binary -Force | Out-Null 
                     }
-                    Default { 
-                        New-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -PropertyType String -Force | Out-Null 
+                    Default {
+                        New-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -PropertyType String -Force | Out-Null
                     }
                 }
-                
+
+                # Verify-after (09-L1): "the write did not throw" is not "the
+                # value is in place" - re-read and compare before counting it
+                # (same contract as the existing branch below; string-affinity
+                # covers DWord Int32 vs Int64 rounding).
+                $createdValue = (Get-ItemProperty -Path $reg.Path -Name $reg.Name -ErrorAction SilentlyContinue).$($reg.Name)
+                if (($createdValue -ne $reg.Value) -and ([string]$createdValue -ne [string]$reg.Value)) {
+                    Write-Host "FAILED: created $($reg.Path)\$($reg.Name) but the re-read does not match" -ForegroundColor Red
+                    $rollbackNeeded = $true
+                    break
+                }
+
                 Write-Host "Created new registry entry: $($reg.Path)\$($reg.Name)" -ForegroundColor Green
                 $successCount++
             } catch {
@@ -956,7 +1057,7 @@ if ($rollbackNeeded) {
     }
     
     Write-Host "`nOperation aborted. No changes were made." -ForegroundColor Red
-    Exit
+    exit 1
 }
 
 # Unload any temporarily mounted hives
@@ -993,13 +1094,16 @@ Write-Host "NOTE: the Fingerprint self-test still reports sameIdentity after thi
 Write-Host "registry GUIDs are not WMI fingerprint signals. For the hardware/BIOS identity" -ForegroundColor DarkGray
 Write-Host "layer use GHOST Maintenance [3] - spoof WMI hardware serials." -ForegroundColor DarkGray
 
-# Create restore script
+# Create restore script. 09-M3: written with -Encoding ASCII before, which
+# mangled every path the moment %TEMP% carries a non-ASCII username - the
+# recovery script could not even find its own .reg imports. No-BOM UTF-8
+# (repo convention) round-trips any path.
 $restoreScriptPath = "$backupDir\restore_original_values.ps1"
-@"
+$restoreScriptText = @"
 # Run as Administrator
 if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Please run this script as Administrator!" -ForegroundColor Red
-    Exit
+    exit 1
 }
 
 # Import registry backups
@@ -1019,7 +1123,8 @@ Rename-Computer -NewName "$($currentInfo.ComputerName)" -Force
 Write-Host "Computer name will be restored to: $($currentInfo.ComputerName)" -ForegroundColor Green
 
 Write-Host "System restoration complete. Please restart your computer." -ForegroundColor Green
-"@ | Out-File -FilePath $restoreScriptPath -Encoding ASCII
+"@
+[System.IO.File]::WriteAllText($restoreScriptPath, $restoreScriptText, [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "`nA restore script has been created at: $restoreScriptPath" -ForegroundColor Cyan
 Write-Host "You can run this script to restore your original settings if needed." -ForegroundColor Cyan
