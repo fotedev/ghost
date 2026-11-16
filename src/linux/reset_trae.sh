@@ -45,7 +45,12 @@ generate_ids() {
 }
 
 b64_json() {
-    python3 -c "import base64, json, sys; print(base64.b64encode(json.dumps(json.loads(sys.argv[1]), separators=(',', ':')).encode()).decode())" "$1"
+    # Reads the JSON document on STDIN (every caller here pipes it). The old
+    # $1-based body was broken for piped calls: argv[1] arrived EMPTY and
+    # json.loads('') raised (shellcheck SC2120/SC2119 flagged the shape;
+    # CI fix 2026-11-16). reset_cursor.sh keeps its argv-style definition -
+    # its single call site passes the document as an argument.
+    python3 -c "import base64, json, sys; print(base64.b64encode(json.dumps(json.loads(sys.stdin.read()), separators=(',', ':')).encode()).decode())"
 }
 
 ensure_trae_closed() {

@@ -265,6 +265,9 @@ emit_restore_script() {
         for entry in "${RESTORE_ENTRIES[@]}"; do
             dest="${entry%%|*}"
             orig="${entry#*|}"
+            # SC2016 intentional: $(dirname ...) must evaluate in the GENERATED
+            # restore script, not here - the %q fills the path argument only.
+            # shellcheck disable=SC2016
             printf 'mkdir -p "$(dirname %q)"\n' "$orig"
             printf 'cp -f %q %q\n' "$dest" "$orig"
         done
@@ -323,13 +326,14 @@ verify_file_value() {
 # minimax): telemetry keys in <config>/User/globalStorage/storage.json via
 # the core json-patch verb + ItemTable upserts in state.vscdb via
 # sqlite-update + verify-after. Requires GHOST_CLI_PATH resolved and
-# AUDIT_FILE/BACKUP_ROOT/RESTORE_ENTRIES initialized; bumps PASS_COUNT /
-# FAIL_COUNT via the caller's counters passed by name.
+# AUDIT_FILE/BACKUP_ROOT/RESTORE_ENTRIES initialized. The pass/fail outcome
+# is the function's own return code - callers bump their counters (the old
+# dead <pass_var> <fail_var> parameters, which no caller ever passed and the
+# body never used, are gone; shellcheck SC2034 flagged them).
 reset_electron_stores() {
     # reset_electron_stores <config_root> <dev_device_id> <machine_id> \
-    #     <mac_machine_id> <sqm_id> <pass_var> <fail_var>
+    #     <mac_machine_id> <sqm_id>
     local config_root="$1" dev_id="$2" mach_id="$3" mac_id="$4" sqm_id="$5"
-    local pass_var="$6" fail_var="$7"
     local storage_json="$config_root/User/globalStorage/storage.json"
     local sqlite_db="$config_root/User/globalStorage/state.vscdb"
     local updates="{\"telemetry.devDeviceId\":\"$dev_id\",\"telemetry.machineId\":\"$mach_id\",\"telemetry.macMachineId\":\"$mac_id\",\"telemetry.sqmId\":\"$sqm_id\",\"storage.serviceMachineId\":\"$dev_id\"}"
@@ -344,6 +348,10 @@ reset_electron_stores() {
 
     if [[ -f "$storage_json" ]]; then
         local sb
+        # SC2153 false positive: BACKUP_ROOT is assigned by each caller script
+        # after it sources this shared helper - shellcheck analyzes one file
+        # at a time and cannot see it.
+        # shellcheck disable=SC2153
         sb=$(core_backup "$storage_json" "$BACKUP_ROOT" "storage_json")
         if python3 "$GHOST_CLI_PATH" json-patch "$storage_json" "$updates_b64" \
            && verify_json_keys "$storage_json" \
