@@ -1708,11 +1708,17 @@ are already stated in the live suites' sections where they apply.
   runs of the child).
 - NO patching anywhere → app updates break nothing (launchers only set
   env + rename a window); `CLINE_NO_AUTO_UPDATE` deliberately NOT set.
-- Taskbar identity: shortcut-AUMIDs-only (DEGRADED, developer decision
-  2026-10-24): pins distinct via `bot.cline.app.c1..c5` + per-color icons
-  (`tools\cline-<color>-branding\tray_icon.ico`); RUNNING windows share
-  the base identity (identical titles "Cline v0.0.48") — no patchable
-  surface, window-stamp helper is a future option (ZCode pattern).
+- Taskbar identity (CS-2, IMPLEMENTED 2026-11-17): pins distinct via
+  `bot.cline.app.c1..c5` + per-color icons AND, since the parity build-out,
+  the launcher STAMPS the running window — `bot.cline.app.cN` onto the
+  launched process's main-window property store (the proven ZCode step-4
+  interop; ole32 `PropVariantClear` — ground truth #6) + the distinct
+  "Cline `<Color>` vN" title; re-stamps on handle change inside the poll;
+  verify-after read-back; any mismatch = loud WARN, NEVER a launch failure
+  (identity is cosmetic). NO resident watcher (windows do not splash-swap —
+  plan §3.5). Phase-0 live probes: `tools/probe_cline_window.ps1`
+  (read-only, off-menu). Stock Cline unaffected (only the launcher-stamped
+  child is touched).
 - Launch SEQUENTIALLY, never in parallel (racing boots vs window
   creation can make a later launch exit), never elevated (UIPI). All via
   the launcher / "Cline cN" shortcuts — a bare cline-app.exe always

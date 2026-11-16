@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
 .SYNOPSIS
   Cline desktop (Tauri) clone-instance launcher for GHOST.
@@ -117,6 +117,78 @@ function Test-SingleInstanceWindowFindable {
     return ([ClineSiWindow]::FindWindowW($SiClass, $SiTitle) -ne [IntPtr]::Zero)
 }
 
+# --- Window-level taskbar identity (CS-2, 2026-11-17) -------------------------
+# The AutoClaw-v2 pattern, external variant (docs/CLINE_WINDOW_IDENTITY_PLAN.md
+# §3): the Tauri app has NO patchable surface, so the launcher stamps
+# System.AppUserModel.ID onto the MAIN exe's top-level window property store
+# (top shell precedence, re-groups live) + renames the window title. The
+# property-store mechanics are the proven ZCode step-4 block verbatim-adapted
+# (ole32 PropVariantClear - oleaut32 dropped that export in Win10 19041.7548,
+# ground truth #6). Identity is COSMETIC: every stamp failure warns loudly and
+# NEVER blocks the launch.
+if (-not ('ClineWindowAumid' -as [type])) {
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+public class ClineWindowAumid {
+    [StructLayout(LayoutKind.Sequential)] public struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Explicit)]
+    public struct PROPVARIANT {
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(8)] public IntPtr pointerValue;
+        [FieldOffset(8)] public long longValue;
+    }
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore {
+        void GetCount(out uint cProps);
+        void GetAt(uint iProp, out PROPERTYKEY pkey);
+        void GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+        void SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
+        void Commit();
+    }
+    [DllImport("shell32.dll")] public static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+    // oleaut32 dropped this export in Win10 19041.7548 (2026-07 CU) - ole32 keeps it
+    [DllImport("ole32.dll")] public static extern int PropVariantClear(ref PROPVARIANT pv);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SetWindowTextW(IntPtr hWnd, string lpString);
+    public static readonly PROPERTYKEY PKEY_AUMID = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
+    static Guid IID_IPropertyStore = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+    // Stamp + read back; returns what the store actually holds.
+    public static string Stamp(IntPtr hwnd, string aumid) {
+        IPropertyStore store;
+        int hr = SHGetPropertyStoreForWindow(hwnd, ref IID_IPropertyStore, out store);
+        if (hr != 0) return "<hr=0x" + hr.ToString("X") + ">";
+        IntPtr pStr = Marshal.StringToCoTaskMemUni(aumid);
+        try {
+            PROPVARIANT pv = new PROPVARIANT();
+            pv.vt = 31; // VT_LPWSTR
+            pv.pointerValue = pStr;
+            var key = PKEY_AUMID;
+            store.SetValue(ref key, ref pv);
+            store.Commit();
+        } finally { Marshal.FreeCoTaskMem(pStr); }
+        return Read(hwnd);
+    }
+    public static string Read(IntPtr hwnd) {
+        IPropertyStore store;
+        int hr = SHGetPropertyStoreForWindow(hwnd, ref IID_IPropertyStore, out store);
+        if (hr != 0) return "<hr=0x" + hr.ToString("X") + ">";
+        PROPVARIANT back;
+        var key = PKEY_AUMID;
+        store.GetValue(ref key, out back);
+        // VT_LPWSTR is CoTaskMem-allocated by the property store: copy the
+        // string out first, then free the variant, or a resident caller leaks.
+        string result;
+        if (back.vt == 31) result = Marshal.PtrToStringUni(back.pointerValue);
+        else if (back.vt == 0) result = "<EMPTY>";
+        else result = "<readback vt=" + back.vt + ">";
+        PropVariantClear(ref back);
+        return result;
+    }
+}
+"@
+}
+
 function Neutralize-SingleInstanceWindow {
     # Rename the hidden WM_COPYDATA window so FindWindowW fails on it.
     # The plugin's second-instance exit path runs ONLY when the window is
@@ -180,6 +252,16 @@ if ($Status) {
         Write-Host 'si window   : FINDABLE - next clone launch would exit! Run the launcher to neutralize.' -ForegroundColor Yellow
     } else {
         Write-Host 'si window   : not findable (neutralized or absent)'
+    }
+    # Window-level identity (CS-2): report the FIRST live cline-app main
+    # window's property-store AUMID (read-only; the launcher stamps clones).
+    $live = Get-Process -Name 'cline-app' -ErrorAction SilentlyContinue |
+        Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+    if ($live) {
+        $aumid = [ClineWindowAumid]::Read($live.MainWindowHandle)
+        Write-Host ("window aumid : '{0}' (pid {1}, title '{2}')" -f $aumid, $live.Id, $live.MainWindowTitle)
+    } else {
+        Write-Host 'window aumid : no live cline-app main window'
     }
     return
 }
@@ -266,6 +348,18 @@ Write-Host "  CLINE_SIDECAR_PORT        = $env:CLINE_SIDECAR_PORT"
 $proc = Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath) -PassThru
 Write-Host "spawned pid $($proc.Id)."
 
+# Window-level identity targets (CS-2): the AUMID must EQUAL the shortcut's
+# (bot.cline.app.cN) so the running button resolves the clone shortcut's
+# colored icon; the distinct title prevents the ZCode pin-collision class
+# (a window titled like the Primary can hijack Cline.lnk on pin). vN comes
+# from the exe's VERSIONINFO.
+$wantAumid = "bot.cline.app.$Instance"
+$exeVersion = ''
+try { $exeVersion = [string](Get-Item -LiteralPath $ExePath -ErrorAction Stop).VersionInfo.FileVersion } catch { }
+$wantTitle = if ($exeVersion) { "Cline $CloneColor v$exeVersion" } else { "Cline $CloneColor" }
+$stampLastHandle = [Int64]0
+$stampSeen = ''
+
 # --- Post-launch verify (60s window) ----------------------------------------
 $dataOk   = $false
 $portOk   = $false
@@ -281,6 +375,18 @@ for ($i = 0; $i -lt 30; $i++) {
     # The fresh instance may have created a NEW hidden window (it happens
     # when this boot was the mutex creator); neutralize as soon as seen.
     Neutralize-SingleInstanceWindow | Out-Null
+    # Re-stamp on main-window handle change (splash -> real window swap):
+    # only THIS clone's own process is stamped - WebView2 renders in child
+    # msedgewebview2.exe processes and must never be touched (plan §3.1).
+    if (-not $proc.HasExited -and $proc.MainWindowHandle -ne 0) {
+        $curHandle = [Int64]$proc.MainWindowHandle
+        if ($curHandle -ne $stampLastHandle) {
+            $stampLastHandle = $curHandle
+            $titleOk = [ClineWindowAumid]::SetWindowTextW($proc.MainWindowHandle, $wantTitle)
+            $stampSeen = [ClineWindowAumid]::Stamp($proc.MainWindowHandle, $wantAumid)
+            Write-Host ("[identity] stamped pid {0} hwnd 0x{1:X} -> read-back '{2}' (title set: {3})" -f $proc.Id, $curHandle, $stampSeen, $titleOk)
+        }
+    }
     if (-not $dataOk -and (Test-Path (Join-Path $CloneDir 'data'))) { $dataOk = $true }
     if (-not $portOk) {
         $hub = Get-NetTCPConnection -State Listen -LocalPort $ports.Hub -ErrorAction SilentlyContinue |
@@ -299,6 +405,19 @@ Write-Host ("hub port {0} + sidecar port {1} : {2}" -f $ports.Hub, $ports.Sideca
 Write-Host ("single-instance window : {0}" -f $(if ($windowOk) { 'neutralized (OK)' } else { 'STILL FINDABLE - FAILED' }))
 if (-not ($dataOk -and $portOk -and $windowOk)) {
     Write-Warning "one or more post-launch checks did not pass within 60s - inspect the output above."
+}
+
+# Final identity verify: read back from a FRESH resolve - a stamp on a window
+# that has since exited must not count as success. Identity is COSMETIC: any
+# mismatch is a loud WARN, never a launch failure (plan acceptance 3).
+$finalAumid = ''
+if (-not $proc.HasExited -and $proc.MainWindowHandle -ne 0) {
+    $finalAumid = [ClineWindowAumid]::Read($proc.MainWindowHandle)
+}
+if ($finalAumid -eq $wantAumid) {
+    Write-Host ("[identity] verified: window AUMID '{0}', title '{1}'." -f $finalAumid, $proc.MainWindowTitle) -ForegroundColor Green
+} else {
+    Write-Warning ("[identity] window AUMID read-back '{0}' != wanted '{1}' - taskbar grouping degraded (pins still carry the per-clone AUMIDs). Identity is cosmetic; the launch stands." -f $finalAumid, $wantAumid)
 }
 Write-Host ""
 Write-Host "launched. First run of a fresh profile needs ONE manual sign-in." -ForegroundColor Green
