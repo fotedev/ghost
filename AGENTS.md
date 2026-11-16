@@ -240,6 +240,40 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     tests/zcode_mcp_merge.Tests.ps1 (clone-local enabled
                                    #     survives, clone-only servers kept, new servers inherit
                                    #     Primary enabled, Primary definitions win);
+                                   #   opencode_config_merge.ps1 — pure merge core of the OpenCode
+                                   #     definitions-only Primary→clone config sync (CS-1,
+                                   #     2026-11-16; design docs/OPENCODE_CONFIG_SYNC_PLAN.md):
+                                   #     same invariant as zcode_mcp_merge for the mcp + provider
+                                   #     blocks (Primary defs win, clone-local enabled survives,
+                                   #     clone-only entries kept) + the secret scrub (decision D2
+                                   #     = the plan default): apiKey-shaped keys (deep, e.g.
+                                   #     provider.<id>.options.apiKey) coming from the PRIMARY are
+                                   #     REMOVED and reported as the Scrubbed list (the child turns
+                                   #     them into the loud "fill the API key once in this clone"
+                                   #     WARN); a secret the CLONE already has survives; no
+                                   #     placeholder is ever written. Intentionally duplicates the
+                                   #     zcode merge helpers (that file ships + is unit-tested;
+                                   #     dedup recorded as follow-up); unit-tested by
+                                   #     tests/opencode_config_merge.Tests.ps1 (12 - the zcode
+                                   #     invariant cases ported + the scrub cases + JSONC strip +
+                                   #     no-BOM round-trip);
+                                   #   sync_opencode_config.ps1 — the CS-1 child: -Instance cN |
+                                   #     -Target All, -DryRun (+ -PrimaryConfig/-ClonesRoot fixture
+                                   #     overrides); syncs MCP + provider DEFINITIONS from
+                                   #     ~\.config\opencode\opencode.jsonc onto each clone's
+                                   #     <home>\config\opencode\opencode.jsonc (jsonc-aware reader);
+                                   #     lockfile-held clone = RUNNING → SKIP + WARN (zcode
+                                   #     semantics); config-less clone = SKIP (first run anonymous);
+                                   #     backup config-pre-sync-<ts>.json into the clone home,
+                                   #     verify-after re-read + deep-compare, JSONL audit at
+                                   #     <CloneHome>\config-sync-audit.jsonl (paths + key NAMES
+                                   #     only — never values); Primary READ-ONLY with a hash
+                                   #     re-check after every run (acceptance 5); the launcher's
+                                   #     [2b/5] pre-launch step is the primary path (failed sync
+                                   #     warns, never blocks); fixture acceptance ran the plan's
+                                   #     §5 items 1/3/4/5 (dry-run zero-write, zero secret leaks
+                                   #     in config AND audit, SKIP paths, Primary hash stable) +
+                                   #     idempotence; live runs = user-supervised;
                                    #   patch_zcode_exe_identity.ps1 (+ pure core
                                    #     zcode_exe_identity_lib.ps1, unit-tested by
                                    #     tests/zcode_exe_identity.Tests.ps1) — per-clone Task
@@ -1056,7 +1090,11 @@ launch_opencode_clone.ps1          # OpenCode desktop clone launcher -Instance c
                                    #   preflight ABORTS unpatched installs (a flagged launch on a
                                    #   stock app opens the PRIMARY profile), lockfile running-guard
                                    #   informs instead of blocking (per-clone single-instance keys
-                                   #   off the per-clone userData), writes .opencode-clone-identity
+                                   #   off the per-clone userData), step [2b/5] (2026-11-16, CS-1)
+                                   #   runs the definitions-only config sync child BEFORE the clone
+                                   #   starts (a failed sync warns and never blocks; a config-less
+                                   #   first run is skipped — the clone starts anonymous),
+                                   #   writes .opencode-clone-identity
                                    #   .json + .opencode-clone-icon.ico fresh each launch (json =
                                    #   -Status introspection only), detached start + verify-after
                                    #   (flag-matched process via WMI; lockfile fallback when command

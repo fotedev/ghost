@@ -1,6 +1,15 @@
 # OpenCode Config Sync Plan — definitions-only Primary → clone (secrets never copied)
 
-Status: PROPOSED (not started). Source: OPENCODE_CLONES_SPEC.md §7 future work —
+Status: **IMPLEMENTED 2026-11-16** (D2 = the default: sync provider
+definitions WITHOUT the secret + one loud WARN per clone — developer pick).
+Shipped as `tools\opencode_config_merge.ps1` (pure merge core, 12 Pester
+tests) + `tools\sync_opencode_config.ps1` (the child) + the launcher
+pre-launch step in `src\windows\launch_opencode_clone.ps1` ([2b/5]; a
+failed sync warns and never blocks the launch). In-session acceptance ran
+the plan's §5 items 1/3/4/5 on %TEMP% fixtures (dry-run zero-write; the
+written clone config AND the audit JSONL Select-String clean for the
+Primary's fake key; lockfile-held SKIP; Primary hash stable) — §6's live
+runs stay user-supervised. Source: OPENCODE_CLONES_SPEC.md §7 future work —
 "Per-clone provider config (`opencode.jsonc` API keys) is manual; a
 definitions-only Primary→clone sync (`sync_zcode_assets` pattern) is future
 work — never copy live secrets wholesale without a scrub design." This doc IS

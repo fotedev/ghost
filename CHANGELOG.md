@@ -8,6 +8,38 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **OpenCode definitions-only Primary→clone config sync (CS-1, 2026-11-16)** —
+  the scrub design in `docs\OPENCODE_CONFIG_SYNC_PLAN.md` is implemented
+  (D2 = the doc's default, developer-picked: sync provider definitions
+  WITHOUT the secret + one loud WARN per clone). **`tools\opencode_config_merge.ps1`**
+  — pure merge core mirroring `zcode_mcp_merge.ps1`: the zcode invariant
+  (Primary definitions win, clone-local `enabled` survives, clone-only
+  entries kept) over the config's `mcp` + `provider` blocks, PLUS the
+  secret scrub: apiKey-shaped keys at ANY depth inside a Primary provider
+  block (the real shape is `provider.<id>.options.apiKey` — a top-level
+  scan would have missed it and the secret would have crossed) are REMOVED
+  and reported; a secret the CLONE already has survives; no placeholder is
+  ever written; the Primary object is never mutated. Intentionally
+  duplicates the zcode helpers (that file ships + is unit-tested; dedup =
+  recorded follow-up). **`tools\sync_opencode_config.ps1`** — the child:
+  `-Instance cN | -Target All`, `-DryRun`, jsonc-aware config reader
+  (registry-precedent comment stripper), lockfile-held clone = RUNNING →
+  SKIP + WARN, config-less clone = SKIP (first run anonymous by design),
+  backup `config-pre-sync-<ts>.json` into the clone home, verify-after
+  re-read + deep-compare, JSONL audit at `<CloneHome>\config-sync-audit.jsonl`
+  (paths + key NAMES only — never values), Primary READ-ONLY with a hash
+  re-check after every run. **Launcher wiring** — `launch_opencode_clone.ps1`
+  gains step `[2b/5]` BEFORE the clone starts: no running-instance race, no
+  `-McpOnly` distinction needed, a failed sync warns and NEVER blocks the
+  launch. **Tests** — `tests/opencode_config_merge.Tests.ps1` (12): the
+  zcode invariant cases ported + the scrub cases (Primary key never
+  crosses / clone key survives / `api_key` spelling / mcp env wholesale) +
+  JSONC strip + no-BOM round-trip. In-session fixture acceptance ran the
+  plan's §5 items 1/3/4/5: dry-run zero-write; the written clone config AND
+  the audit JSONL Select-String clean for the Primary's fake key; SKIP
+  paths; Primary hash stable; idempotence ("already in sync" on run 2).
+  Pester 250/250, parse 0, both new files PSSA-clean. §6 live runs stay
+  user-supervised. GHOST.bat/menu wiring deferred to v2 per the plan.
 - **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
   DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
   MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`

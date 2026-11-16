@@ -598,9 +598,15 @@ whole-file .lnk decoding — EC-C09).
   identity rides argv since engine v2 (the ESM main has no `require` —
   any future fs-needing injection must stay require-free or use
   createRequire explicitly).
-- Per-clone provider config (`opencode.jsonc` API keys) is manual; a
-  definitions-only Primary→clone sync (`sync_zcode_assets` pattern) is
-  future work — never copy live secrets wholesale without a scrub design.
+- Per-clone provider config (`opencode.jsonc` API keys) was manual; the
+  definitions-only Primary→clone sync SHIPPED 2026-11-16 (CS-1,
+  `tools\sync_opencode_config.ps1` + the launcher's [2b/5] pre-launch step;
+  design = docs\OPENCODE_CONFIG_SYNC_PLAN.md): MCP + provider DEFINITIONS
+  merge Primary-wins / clone-local toggles + secrets survive; the Primary's
+  apiKey values are deep-scrubbed (D2 = synced WITHOUT the secret + one loud
+  "fill the key once in this clone" WARN), the audit JSONL carries key NAMES
+  only, and the Primary is read-only (hash-checked). The one-manual-fill
+  per clone remains for secret-bearing providers.
 - The Primary `~\.config\opencode\opencode.jsonc` holds live API keys —
   never committed, never copied verbatim (this spec redacts all values).
 - `reset_minimax_opencode.ps1`'s version preflight checks
