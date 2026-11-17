@@ -87,6 +87,32 @@ src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE reset
                                #     fail-closed on an absent store;
                                #   ghost.sh options 10-12 wired; static Pester:
                                #     tests/linux_clone_layer.Tests.ps1 (18)
+src/macos/                     # macOS .sh resetters — the repo's first macOS
+                               #   platform (issue #36, 2026-11-17): reset_qoder.sh
+                               #   v0.1 = a full-attempt 9-step Qoder resetter (Electron
+                               #   stores via reset_electron_stores, the exact Windows [3b]
+                               #   purge-keys list with per-key count audits, salt-rotate,
+                               #   machineid-file x2, rotate_text_file installation_id/
+                               #   .auth machine_id, credential-transaction delete,
+                               #   patch-argv, workspaceStorage sqlite-update, ~/Library
+                               #   sweep with bundle-id globs, webview partitions +
+                               #   Chromium network/cache stores + SharedClientCache,
+                               #   sweep-tree run-state trees); ALL paths DERIVED
+                               #   (platform.py macos column, unverified until a live Mac
+                               #   verifies) and ABSENCE-TOLERANT (loud audited skip, never
+                               #   a guess); bash 3.2-safe (macOS ships /bin/bash 3.2 —
+                               #   no ${var,,}/mapfile/empty-array "${arr[@]}" under
+                               #   set -u); sources ../linux/id_reset_common.sh and
+                               #   FIXES it for macOS (verify_json_keys flat-literal
+                               #   fallback for Chromium's literal-dotted storage.json
+                               #   keys — the nested-only verify failed every correct
+                               #   flat write; emit_restore_script empty-array guard;
+                               #   prompt lowercase without ${var,,}); system identity
+                               #   (IOPlatformUUID/Keychain/hostname/MAC) = loud audited
+                               #   skips; smoke-tested end-to-end on the dev host against
+                               #   a seeded fake home (Pass 13/Fail 0 + 56-assertion
+                               #   checker + idempotence + abort path); live macOS
+                               #   acceptance = user-supervised
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,
@@ -96,7 +122,11 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   maps + `ghost_cli.py paths <slug>` verb (JSON out, unverified
                                #   rows surfaced loudly, exit 2 on unknown slug) — the single
                                #   source of truth the Linux .sh resets resolve paths through
-                               #   (provenance-flagged per ground truth #5); CI python-core
+                               #   (provenance-flagged per ground truth #5); 2026-11-17:
+                               #   opt-in "macos" column (qoder rows, all DERIVED) + live
+                               #   sys.platform three-way selector + LOUD error for a
+                               #   darwin host asking for an unmapped slug (issue #36);
+                               #   CI python-core
                                #   job now runs a windows+ubuntu matrix
 src/desktop/                   # GHOST.exe desktop launcher sources: GhostHub.cs (single-file
                                #   WinForms hub, C# 5 ONLY for the in-box csc.exe), menu.json
