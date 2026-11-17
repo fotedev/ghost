@@ -529,3 +529,15 @@ sudo ./src/linux/reset_cursor.sh                     # also resets /etc/machine-
 ./src/linux/change_device_id.sh Fingerprint          # no root
 sudo ./src/linux/change_device_id.sh ResetMachineId  # /etc/machine-id (root)
 ```
+
+## macOS
+
+Qoder only (issue #36). Every store path is DERIVED from the Windows layout
+until a live Mac verifies it — the script prints the provenance caveat and
+skips any store it does not find. System-level sources (IOPlatformUUID,
+Keychain "Chromium Safe Storage", hostname, MAC) are skipped loudly.
+
+```bash
+chmod +x src/macos/*.sh
+./src/macos/reset_qoder.sh   # close Qoder first; runs unprivileged
+```

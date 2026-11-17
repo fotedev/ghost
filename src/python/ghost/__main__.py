@@ -152,11 +152,11 @@ def _cmd_paths(args):
     try:
         report = platform.get_store_paths(args.slug)
     except ValueError as exc:
-        print("unknown slug: {0}".format(exc), file=sys.stderr)
+        print("paths: {0}".format(exc), file=sys.stderr)
         return 2
     if report["unverified"]:
         print("unverified paths (derived from the Windows layout + documented "
-              "Linux conventions - live verification pending): "
+              "platform conventions - live verification pending): "
               + ", ".join(report["unverified"]), file=sys.stderr)
     print(json.dumps(report))
     return 0
@@ -572,7 +572,8 @@ def build_parser():
     p = sub.add_parser(
         "paths",
         help="resolve an app's identity-store paths for THIS platform as JSON "
-             "(single source of truth: ghost.platform; unverified rows listed)")
+             "(single source of truth: ghost.platform; unverified rows listed; "
+             "a platform the slug does not map is a loud error)")
     p.add_argument("slug",
                    help="app slug (cursor|devin|windsurf|trae|qoder|qoderwork|"
                         "zcode|minimax|opencode-cli)")

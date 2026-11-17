@@ -115,7 +115,8 @@ ensure_not_running() {
     if pgrep -x "$name" >/dev/null 2>&1 || pgrep -f "$pattern" >/dev/null 2>&1; then
         warn "$name is currently running. Please close it before continuing."
         read -r -p "Forcibly close $name now? (y/N): " response
-        if [[ "${response,,}" == "y" ]]; then
+        # bash 3.2-safe (macOS ships /bin/bash 3.2 - no ${var,,} lowercase).
+        if [[ "$response" == [yY] ]]; then
             pkill -x "$name" 2>/dev/null || pkill -f "$pattern" 2>/dev/null || true
             sleep 2
         else
@@ -352,15 +353,21 @@ emit_restore_script() {
         echo '# ID_Backups directory back over the live files. Review, then run.'
         echo 'set -euo pipefail'
         local entry dest orig
-        for entry in "${RESTORE_ENTRIES[@]}"; do
-            dest="${entry%%|*}"
-            orig="${entry#*|}"
-            # SC2016 intentional: $(dirname ...) must evaluate in the GENERATED
-            # restore script, not here - the %q fills the path argument only.
-            # shellcheck disable=SC2016
-            printf 'mkdir -p "$(dirname %q)"\n' "$orig"
-            printf 'cp -f %q %q\n' "$dest" "$orig"
-        done
+        # Empty-array guard: on macOS's stock bash 3.2, "${arr[@]}" under
+        # set -u is a fatal unbound-variable error when the array is empty
+        # (a first-launch reset with nothing to back up). Guarded, so an
+        # empty run emits a clean no-op restore script.
+        if [[ "${#RESTORE_ENTRIES[@]}" -gt 0 ]]; then
+            for entry in "${RESTORE_ENTRIES[@]}"; do
+                dest="${entry%%|*}"
+                orig="${entry#*|}"
+                # SC2016 intentional: $(dirname ...) must evaluate in the GENERATED
+                # restore script, not here - the %q fills the path argument only.
+                # shellcheck disable=SC2016
+                printf 'mkdir -p "$(dirname %q)"\n' "$orig"
+                printf 'cp -f %q %q\n' "$dest" "$orig"
+            done
+        fi
         echo 'echo "Restore complete."'
     } > "$script_path"
     chmod +x "$script_path" 2>/dev/null || true
@@ -391,6 +398,12 @@ for pair in pairs:
             actual = None
             break
         actual = actual[part]
+    if actual is None and isinstance(data, dict) and key in data:
+        # Flat-literal fallback: Chromium storage.json holds keys with
+        # LITERAL dots ("telemetry.machineId"), which the nested walk
+        # cannot see - json-patch writes them flat, so the verify must
+        # read them flat too (caught by the 2026-11-17 macOS smoke).
+        actual = data[key]
     if actual != expected:
         bad.append("%s (expected %r, got %r)" % (key, expected, actual))
 if bad:
