@@ -136,8 +136,8 @@ if [[ -n "$MINIMAX_DIR" ]]; then
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 else
-    warn "~/.minimax not mapped on this platform - session-handoff rotation skipped."
-    audit_line "$AUDIT_FILE" "~/.minimax/v2/session-handoff/device-id" "unmapped" "skipped" 1
+    warn "$HOME/.minimax not mapped on this platform - session-handoff rotation skipped."
+    audit_line "$AUDIT_FILE" "$HOME/.minimax/v2/session-handoff/device-id" "unmapped" "skipped" 1
     PASS_COUNT=$((PASS_COUNT + 1))
 fi
 
