@@ -123,7 +123,15 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   rows surfaced loudly, exit 2 on unknown slug) — the single
                                #   source of truth the Linux .sh resets resolve paths through
                                #   (provenance-flagged per ground truth #5); CI python-core
-                               #   job now runs a windows+ubuntu matrix; 2026-11-17:
+                               #   job now runs a windows+ubuntu matrix; CI linux-helpers
+                               #   job (2026-11-17) = the FUNCTIONAL gate for the shared
+                               #   src/linux helper layer — sources id_reset_common.sh,
+                               #   asserts every shared helper (29-name contract list in
+                               #   the workflow; ADD a new shared helper THERE) and
+                               #   fixture-exercises the b64 builders + json-set/remove
+                               #   + rotate + audit + verify_json_keys end-to-end (bash -n
+                               #   and shellcheck cannot see a MISSING function — the
+                               #   b64_json latent-bug class); 2026-11-17:
                                #   json_merge.py + `ghost_cli.py json-merge-defs` verb = the
                                #   Primary→clone DEFINITIONS-merge invariant ported from
                                #   tools/zcode_mcp_merge.ps1 (Primary wins, clone-local

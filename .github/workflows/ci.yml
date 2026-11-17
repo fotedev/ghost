@@ -89,6 +89,107 @@ jobs:
             bash -n "$f"
           done
 
+  linux-helpers:
+    name: Linux helper contract
+    runs-on: ubuntu-latest
+    # 2026-11-17: FUNCTIONAL gate for the shared src/linux helper layer.
+    # `bash -n` and shellcheck cannot see a MISSING function - the b64_json
+    # latent bug (a helper consumed by the shared reset_electron_stores but
+    # defined only in cursor/trae) killed four reset scripts at step 1 with
+    # "command not found" under set -e and passed every static gate
+    # (latent since 2026-11-14, caught by hand on 2026-11-17). This job
+    # sources the shared lib and (1) asserts every shared helper the reset
+    # scripts call is DEFINED, (2) exercises the core helpers end-to-end
+    # against temp fixtures. When adding a shared helper: add it to the
+    # contract list below - a missing one dies at runtime, not review.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Helper contract (every shared helper defined)
+        run: |
+          set -euo pipefail
+          # the lib's resolve_ghost_cli anchors on SCRIPT_DIR (each caller
+          # script normally sets it before sourcing) - set it the same way.
+          SCRIPT_DIR="$PWD/src/linux"
+          # shellcheck source=src/linux/id_reset_common.sh
+          source "$SCRIPT_DIR/id_reset_common.sh"
+          HELPERS=(
+            info ok warn err dim show_banner timestamp
+            generate_uuid generate_hex
+            has_python3 resolve_ghost_cli core_backup
+            backup_file backup_to_dir
+            b64_payload b64_json_stdin b64_kv_payload b64_remove_payload
+            core_json_set_kv core_json_remove rotate_text_file
+            audit_init audit_line emit_restore_script
+            verify_json_keys verify_file_value
+            ensure_not_running reset_system_machine_id
+            reset_electron_stores
+          )
+          missing=0
+          for fn in "${HELPERS[@]}"; do
+            if ! type -t "$fn" >/dev/null 2>&1; then
+              echo "::error::missing shared helper: $fn"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "contract OK: ${#HELPERS[@]} helpers defined"
+          # the probe must be FUNCTIONAL (a bare `command -v python3` passed
+          # on Windows dev hosts where python3 is the Store-alias stub)
+          has_python3 || { echo "::error::has_python3 probe failed on a real interpreter"; exit 1; }
+          resolve_ghost_cli || { echo "::error::ghost_cli.py unresolvable"; exit 1; }
+
+      - name: Fixture exercise (core helpers end-to-end)
+        run: |
+          set -euo pipefail
+          SCRIPT_DIR="$PWD/src/linux"
+          # shellcheck source=src/linux/id_reset_common.sh
+          source "$SCRIPT_DIR/id_reset_common.sh"
+          resolve_ghost_cli || exit 1
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          BACKUP_ROOT="$tmp/backups"
+          AUDIT_FILE="$tmp/audit.jsonl"
+
+          # b64_json_stdin round trip (compact JSON, no line breaks)
+          payload=$(printf '{"k":"v"}' | b64_json_stdin)
+          [ "$(python3 -c "import base64,json; print(json.dumps(json.loads(base64.b64decode('$payload')),separators=(',',':')))")" = '{"k":"v"}' ]
+
+          # json-set round trip via b64_kv_payload + verify-after re-read
+          printf '{"a":{"b":1}}' > "$tmp/store.json"
+          python3 "$GHOST_CLI_PATH" json-set "$tmp/store.json" "$BACKUP_ROOT" t "$(b64_kv_payload "a.b" "42")" > /dev/null
+          [ "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['a']['b'])" "$tmp/store.json")" = "42" ]
+
+          # json-remove via b64_remove_payload + key gone
+          python3 "$GHOST_CLI_PATH" json-remove "$tmp/store.json" "$BACKUP_ROOT" t "$(b64_remove_payload '["a.b"]' '[]')" > /dev/null
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert 'b' not in d['a'], d" "$tmp/store.json"
+
+          # core_json_remove wrapper + backup landed
+          printf '{"x":{"secret":1}}' > "$tmp/store2.json"
+          core_json_remove "$tmp/store2.json" t '["x.secret"]' '[]' > /dev/null
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['x']=={}, d" "$tmp/store2.json"
+          [ -d "$BACKUP_ROOT" ]
+
+          # rotate_text_file + verify-after re-read + audit line appended
+          printf 'old-id\n' > "$tmp/id.txt"
+          rotate_text_file "$tmp/id.txt" t "new-id"
+          [ "$(cat "$tmp/id.txt")" = "new-id" ]
+          [ "$(wc -l < "$AUDIT_FILE")" -ge 1 ]
+
+          # verify_json_keys stays honest on a wrong value (key=value pairs)
+          python3 "$GHOST_CLI_PATH" json-set "$tmp/store.json" "$BACKUP_ROOT" t "$(b64_kv_payload "chk" '"expected"')" > /dev/null
+          verify_json_keys "$tmp/store.json" 'chk=expected' || { echo "::error::verify_json_keys rejected a correct value"; exit 1; }
+          if verify_json_keys "$tmp/store.json" 'chk=wrong' 2>/dev/null; then
+            echo "::error::verify_json_keys accepted a wrong value"
+            exit 1
+          fi
+
+          echo "fixture exercise OK: b64 builders, json-set/remove, rotate, audit, verify"
+
   python-core:
     name: Python core tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
