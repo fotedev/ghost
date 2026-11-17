@@ -121,7 +121,8 @@ scrub_clone_identity() {
     # Same stores as reset_zcode.sh v0.2's CLI steps, rooted at the clone.
     # Uses the shared core; $1 = the clone's .zcode root.
     local cli_root="$1"
-    local backup_root="$CLONE_HOME/ID_Backups/$(timestamp)"
+    local backup_root
+    backup_root="$CLONE_HOME/ID_Backups/$(timestamp)"
     mkdir -p "$backup_root"
     RESTORE_ENTRIES=()
     audit_init "$backup_root"

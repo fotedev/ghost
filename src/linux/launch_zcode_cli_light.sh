@@ -42,7 +42,6 @@ if [[ -z "$INSTANCE" ]]; then
 fi
 
 declare -A CLONE_HOME_NAME=( [Second]=ZCodeSecondHome [Third]=ZCodeThirdHome [Fourth]=ZCodeFourthHome [Fifth]=ZCodeFifthHome [Sixth]=ZCodeSixthHome )
-declare -A CLONE_COLOR=( [Second]=Blue [Third]=Yellow [Fourth]=Green [Fifth]=Red [Sixth]=Orange )
 if [[ -z "${CLONE_HOME_NAME[$INSTANCE]:-}" ]]; then
     err "unknown instance '$INSTANCE'"
     exit 1
