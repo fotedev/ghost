@@ -532,12 +532,15 @@ sudo ./src/linux/change_device_id.sh ResetMachineId  # /etc/machine-id (root)
 
 ## macOS
 
-Qoder only (issue #36). Every store path is DERIVED from the Windows layout
-until a live Mac verifies it — the script prints the provenance caveat and
-skips any store it does not find. System-level sources (IOPlatformUUID,
-Keychain "Chromium Safe Storage", hostname, MAC) are skipped loudly.
+Qoder + Cursor (issue #36 follow-ups). Every store path is DERIVED from the
+Windows layout until a live Mac verifies it — each script prints the
+provenance caveat and skips any store it does not find. System-level
+sources (IOPlatformUUID, Keychain "Chromium Safe Storage", hostname, MAC)
+are skipped loudly. The Cursor resetter PRESERVES chat state (Local
+Storage, Backups, cursorDiskKV, workspaceStorage files).
 
 ```bash
 chmod +x src/macos/*.sh
-./src/macos/reset_qoder.sh   # close Qoder first; runs unprivileged
+./src/macos/reset_qoder.sh    # close Qoder first; runs unprivileged
+./src/macos/reset_cursor.sh   # close Cursor first; keeps chats
 ```

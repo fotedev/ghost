@@ -32,7 +32,7 @@ touches, and emits an audit log plus a self-contained restore script.
 
 | Task | Windows | Linux | macOS |
 |------|---------|-------|-------|
-| Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` | platform map only (resetter pending, derived paths) |
+| Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` | `reset_cursor.sh` (v0.1: 13 steps - Electron stores, delete-secrets purge, salt, os_crypt pointer, network/tracking sweeps, sentry, caches, Crashpad/logs, workspaceStorage upserts; Local Storage/Backups/cursorDiskKV PRESERVED; ALL paths DERIVED - live verification pending) |
 | Reset Windsurf\Devin | `reset_devin.ps1` | `reset_devin.sh` | platform map only (resetter pending, derived paths) |
 | Reset Trae | `reset_trae.ps1` | `reset_trae.sh` (v0.3: aha flag + iCubeAuthInfo removal + ckg_server local_env rotation; derived paths) | platform map only (resetter pending, derived paths) |
 | Reset Qoder | `reset_qoder.ps1` | `reset_qoder.sh` (v0.2: installation_id/.auth rotations; derived paths) | `reset_qoder.sh` (v0.1: full-attempt 9 steps - Electron stores, secret purge, salt, machineid files, ~/.qoder rotations, Library sweep, webview partitions; ALL paths DERIVED - live verification pending) |
@@ -79,9 +79,9 @@ bash-3.2-safe) · python3 (ships with the Command Line Tools) · `uuidgen`
 (ships with macOS) · the scripts run unprivileged — system-level sources
 (IOPlatformUUID, Keychain safe-storage, hostname, MAC) are skipped loudly.
 Every app's store paths are mapped for macOS in `ghost/platform.py` (all
-DERIVED from the Windows layout until a live Mac verifies them); the Qoder
-resetter is the only macOS reset script so far (see the DERIVED-PATH SCOPE
-header in `src/macos/reset_qoder.sh`).
+DERIVED from the Windows layout until a live Mac verifies them); macOS
+reset scripts so far: Qoder + Cursor (each header carries its DERIVED-PATH
+SCOPE + preservation policy).
 
 ```bash
 git clone https://github.com/fotedev/ghost.git
@@ -111,9 +111,11 @@ Prefer the interactive menus:
 ```
 
 ```bash
-# macOS (Qoder reset only - run directly, no menu)
+# macOS (run directly, no menu)
 chmod +x src/macos/*.sh
-./src/macos/reset_qoder.sh   # close Qoder first
+./src/macos/reset_qoder.sh    # close Qoder first
+./src/macos/reset_cursor.sh   # close Cursor first (keeps chats: Local
+                              #   Storage/Backups/cursorDiskKV untouched)
 ```
 
 ### Desktop app (optional)

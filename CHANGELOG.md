@@ -8,6 +8,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **macOS Cursor reset (2026-11-18)** — the second macOS resetter (issue #36
+  follow-up; Qoder shipped first). **`src/macos/reset_cursor.sh`** (v0.1):
+  13 steps on the Windows `reset_cursor.ps1` v0.3 + live-verified Linux
+  `reset_cursor.sh` v0.2 step maps, all DERIVED-flagged and
+  absence-tolerant — machineId files in BOTH spellings (Linux writes
+  camelCase `machineId`, Windows lowercase `machineid`; the macOS spelling
+  is unverified so whichever file exists is rotated — on the default
+  case-insensitive APFS they are one file and the second rotate is an
+  honest same-value rewrite), Electron stores via the shared
+  `reset_electron_stores`, the state.vscdb auth secrets via core
+  `delete-secrets` with NO config (the Cursor defaults:
+  `secret://aicoding.auth.%`, `secret://blackbox.%`, `gituser` — ItemTable
+  only, per-key audit + zero-survivor verdict), the Preferences
+  `device_id_salt`, the Local State `os_crypt.encrypted_key` pointer
+  (`json-remove`; the Keychain "Chromium Safe Storage" entry itself stays
+  a manual step), the Network transport + DIPS + SharedStorage + Trust
+  Tokens sweeps, the sentry tree, the cache trees, Crashpad + logs, the
+  workspaceStorage `serviceMachineId` upserts, and the stale `.backup`
+  sidecar purge. **Preservation policy is Cursor's, not Qoder's**: Local
+  Storage, the Backups tree, workspaceStorage files, and the chat-bearing
+  `cursorDiskKV` table are NEVER touched (loudly audited). Smoke-tested
+  end-to-end on the dev host against a seeded fake home: Pass 13 / Fail 0,
+  checker ALL PASS (identity cross-consistency, zero secret survivors,
+  every deletion, AND every preservation), idempotent re-run all-skips,
+  not-installed abort exits 1 before any mutation. One `set -u` bug caught
+  by the smoke (`local summary` without an initializer is an unbound
+  variable on every bash). Live macOS acceptance remains user-supervised.
+
 - **macOS platform maps for every slug (2026-11-18)** — the follow-up to the
   macOS Qoder wave (issue #36): `ghost/platform.py` now carries a `macos`
   column for ALL slugs (cursor, devin, trae, qoderwork, zcode, minimax,
