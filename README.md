@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/fotedev/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/fotedev/ghost/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](#prerequisites)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#prerequisites)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE.svg)](#prerequisites)
 
 Fresh-start toolkit for local AI-IDE identity stores: rotate device identifiers
@@ -30,26 +30,26 @@ generates fresh IDs, updates the relevant config files (JSON, SQLite, binary
 stores), **verifies every write by re-reading it**, backs up everything it
 touches, and emits an audit log plus a self-contained restore script.
 
-| Task | Windows | Linux |
-|------|---------|-------|
-| Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` |
-| Reset Windsurf\Devin | `reset_devin.ps1` | `reset_devin.sh` |
-| Reset Trae | `reset_trae.ps1` | `reset_trae.sh` (v0.3: aha flag + iCubeAuthInfo removal + ckg_server local_env rotation; derived paths) |
-| Reset Qoder | `reset_qoder.ps1` | `reset_qoder.sh` (v0.2: installation_id/.auth rotations; derived paths) |
-| Reset QoderWork | `reset_qoderwork.ps1` | `reset_qoderwork.sh` (v0.2: agents.db purge-tables; derived paths) |
-| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | `reset_zcode.sh` (v0.2: CLI v2 telemetry-state/credentials/setting scrubs; `--instance` = clone reset; shared CLI db untouched - matches Windows) |
-| Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | `reset_minimax_opencode.sh` (v0.2: mcode-public auth deletions + session-handoff device-id; derived paths; CLI XDG auth untouched) |
-| ZCode clones (Primary + 5 branded clones) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | `launch_zcode_clone.sh --instance Second\|...\|Sixth` (PR 8, derived - live acceptance pending) |
-| ZCode Primary (stock profile, never elevated) | `launch_zcode_primary.ps1` (explorer spawn, verify-after) | — |
-| ZCode light headless worker (no desktop window) | `launch_zcode_cli_light.ps1 -Instance Second\|...\|Sixth` (`-Prompt` / `-Server`) | `launch_zcode_cli_light.sh --instance Second\|...\|Sixth` (`-p` one-shot; PR 8, derived) |
-| OpenCode light headless worker (CLI only, clone XDG state) | `launch_opencode_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` / `-Server` / `-Login` / `-StopService`) | — |
-| Reset AutoClaw2 (Primary + clones, chats/work kept) | `reset_autoclaw2.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
-| Reset Cline (Primary + clones, chats/tasks kept) | `reset_cline.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
-| Reset OpenCode desktop (Primary + clones, chats/repos kept) | `reset_opencode.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
-| Device fingerprint self-test + machine-wide ID reset | `change_device_id.ps1` (default = read-only Fingerprint; `-Mode LegacyReset` = the reset, IDE Resets [1]) | `change_device_id.sh Fingerprint` / `ResetMachineId` |
-| WMI serial spoof (BIOS/motherboard/disks/RAM via WMI) | `spoof_wmi_serials.ps1` | — |
-| System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` |
-| Interactive menu | `GHOST.bat` | `ghost.sh` |
+| Task | Windows | Linux | macOS |
+|------|---------|-------|-------|
+| Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` | — |
+| Reset Windsurf\Devin | `reset_devin.ps1` | `reset_devin.sh` | — |
+| Reset Trae | `reset_trae.ps1` | `reset_trae.sh` (v0.3: aha flag + iCubeAuthInfo removal + ckg_server local_env rotation; derived paths) | — |
+| Reset Qoder | `reset_qoder.ps1` | `reset_qoder.sh` (v0.2: installation_id/.auth rotations; derived paths) | `reset_qoder.sh` (v0.1: full-attempt 9 steps - Electron stores, secret purge, salt, machineid files, ~/.qoder rotations, Library sweep, webview partitions; ALL paths DERIVED - live verification pending) |
+| Reset QoderWork | `reset_qoderwork.ps1` | `reset_qoderwork.sh` (v0.2: agents.db purge-tables; derived paths) | — |
+| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | `reset_zcode.sh` (v0.2: CLI v2 telemetry-state/credentials/setting scrubs; `--instance` = clone reset; shared CLI db untouched - matches Windows) | — |
+| Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | `reset_minimax_opencode.sh` (v0.2: mcode-public auth deletions + session-handoff device-id; derived paths; CLI XDG auth untouched) | — |
+| ZCode clones (Primary + 5 branded clones) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | `launch_zcode_clone.sh --instance Second\|...\|Sixth` (PR 8, derived - live acceptance pending) | — |
+| ZCode Primary (stock profile, never elevated) | `launch_zcode_primary.ps1` (explorer spawn, verify-after) | — | — |
+| ZCode light headless worker (no desktop window) | `launch_zcode_cli_light.ps1 -Instance Second\|...\|Sixth` (`-Prompt` / `-Server`) | `launch_zcode_cli_light.sh --instance Second\|...\|Sixth` (`-p` one-shot; PR 8, derived) | — |
+| OpenCode light headless worker (CLI only, clone XDG state) | `launch_opencode_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` / `-Server` / `-Login` / `-StopService`) | — | — |
+| Reset AutoClaw2 (Primary + clones, chats/work kept) | `reset_autoclaw2.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — | — |
+| Reset Cline (Primary + clones, chats/tasks kept) | `reset_cline.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — | — |
+| Reset OpenCode desktop (Primary + clones, chats/repos kept) | `reset_opencode.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — | — |
+| Device fingerprint self-test + machine-wide ID reset | `change_device_id.ps1` (default = read-only Fingerprint; `-Mode LegacyReset` = the reset, IDE Resets [1]) | `change_device_id.sh Fingerprint` / `ResetMachineId` | — |
+| WMI serial spoof (BIOS/motherboard/disks/RAM via WMI) | `spoof_wmi_serials.ps1` | — | — |
+| System machine ID | Windows Registry `MachineGuid` | `/etc/machine-id` | IOPlatformUUID (not userspace-resettable - skipped loudly) |
+| Interactive menu | `GHOST.bat` | `ghost.sh` | — |
 
 Detailed per-tool walkthroughs (paths touched, preservation lists, flags):
 **[docs/getting-started.md](docs/getting-started.md)**.
@@ -71,6 +71,14 @@ Python 3 on `PATH` (SQLite writes run through the bundled stdlib-only core in
 **Linux**: bash 4+ · python3 (recommended) · `uuidgen` or
 `/proc/sys/kernel/random/uuid` · `openssl` or `xxd` · `sudo` only for
 `/etc/machine-id`.
+
+**macOS** (Qoder reset only, issue #36): stock `/bin/bash` 3.2 works (the
+scripts stay bash-3.2-safe) · python3 (ships with the Command Line Tools) ·
+`uuidgen` (ships with macOS) · the script runs unprivileged — system-level
+sources (IOPlatformUUID, Keychain safe-storage, hostname, MAC) are skipped
+loudly. All macOS store paths are DERIVED from the Windows layout until a
+live Mac verifies them (see the DERIVED-PATH SCOPE header in
+`src/macos/reset_qoder.sh`).
 
 ```bash
 git clone https://github.com/fotedev/ghost.git
@@ -97,6 +105,12 @@ Prefer the interactive menus:
 ```bash
 # Linux
 ./ghost.sh
+```
+
+```bash
+# macOS (Qoder reset only - run directly, no menu)
+chmod +x src/macos/*.sh
+./src/macos/reset_qoder.sh   # close Qoder first
 ```
 
 ### Desktop app (optional)
@@ -148,6 +162,8 @@ ghost/
 │   │               #   + reset_autoclaw2/reset_cline/reset_opencode.ps1
 │   │               #   (per-clone identity resets, chats/work preserved)
 │   ├── linux/      # .sh resetters + id_reset_common.sh
+│   ├── macos/      # macOS .sh resetters (issue #36: reset_qoder.sh v0.1,
+│   │               #   all paths DERIVED until a live Mac verifies)
 │   └── python/     # stdlib-only Python core (ghost/) + ghost_cli.py bootstrap —
 │                   #   owns the shared SQLite/JSON identity logic
 ├── tools/          # watch_zcode_captcha.ps1 (captcha watchdog),
@@ -318,8 +334,8 @@ Invoke-Pester -CI -Output Detailed
 ```
 
 ```bash
-shellcheck src/linux/*.sh ghost.sh
-for f in src/linux/*.sh ghost.sh; do bash -n "$f"; done
+shellcheck src/linux/*.sh src/macos/*.sh ghost.sh
+for f in src/linux/*.sh src/macos/*.sh ghost.sh; do bash -n "$f"; done
 
 # Python core — stdlib unittest, no pip installs, runs on any OS
 python -m unittest discover -s tests/python -v
