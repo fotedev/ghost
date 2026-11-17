@@ -15,7 +15,7 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   Clones [1]-[33] / System & GHOST Maintenance
                                              #   [1]-[5] / AutoClaw2 Multi-Instance & Clones
                                              #   [1]-[25] / Cline Multi-Instance & Clones
-                                             #   [1]-[21] / OpenCode Multi-Instance & Clones
+                                             #   [1]-[23] / OpenCode Multi-Instance & Clones
                                              #   [1]-[25]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
@@ -87,32 +87,6 @@ src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE reset
                                #     fail-closed on an absent store;
                                #   ghost.sh options 10-12 wired; static Pester:
                                #     tests/linux_clone_layer.Tests.ps1 (18)
-src/macos/                     # macOS .sh resetters — the repo's first macOS
-                               #   platform (issue #36, 2026-11-17): reset_qoder.sh
-                               #   v0.1 = a full-attempt 9-step Qoder resetter (Electron
-                               #   stores via reset_electron_stores, the exact Windows [3b]
-                               #   purge-keys list with per-key count audits, salt-rotate,
-                               #   machineid-file x2, rotate_text_file installation_id/
-                               #   .auth machine_id, credential-transaction delete,
-                               #   patch-argv, workspaceStorage sqlite-update, ~/Library
-                               #   sweep with bundle-id globs, webview partitions +
-                               #   Chromium network/cache stores + SharedClientCache,
-                               #   sweep-tree run-state trees); ALL paths DERIVED
-                               #   (platform.py macos column, unverified until a live Mac
-                               #   verifies) and ABSENCE-TOLERANT (loud audited skip, never
-                               #   a guess); bash 3.2-safe (macOS ships /bin/bash 3.2 —
-                               #   no ${var,,}/mapfile/empty-array "${arr[@]}" under
-                               #   set -u); sources ../linux/id_reset_common.sh and
-                               #   FIXES it for macOS (verify_json_keys flat-literal
-                               #   fallback for Chromium's literal-dotted storage.json
-                               #   keys — the nested-only verify failed every correct
-                               #   flat write; emit_restore_script empty-array guard;
-                               #   prompt lowercase without ${var,,}); system identity
-                               #   (IOPlatformUUID/Keychain/hostname/MAC) = loud audited
-                               #   skips; smoke-tested end-to-end on the dev host against
-                               #   a seeded fake home (Pass 13/Fail 0 + 56-assertion
-                               #   checker + idempotence + abort path); live macOS
-                               #   acceptance = user-supervised
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,
@@ -122,11 +96,7 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   maps + `ghost_cli.py paths <slug>` verb (JSON out, unverified
                                #   rows surfaced loudly, exit 2 on unknown slug) — the single
                                #   source of truth the Linux .sh resets resolve paths through
-                               #   (provenance-flagged per ground truth #5); 2026-11-17:
-                               #   opt-in "macos" column (qoder rows, all DERIVED) + live
-                               #   sys.platform three-way selector + LOUD error for a
-                               #   darwin host asking for an unmapped slug (issue #36);
-                               #   CI python-core
+                               #   (provenance-flagged per ground truth #5); CI python-core
                                #   job now runs a windows+ubuntu matrix
 src/desktop/                   # GHOST.exe desktop launcher sources: GhostHub.cs (single-file
                                #   WinForms hub, C# 5 ONLY for the in-box csc.exe), menu.json
@@ -1297,6 +1267,34 @@ launch_cline_clone.ps1             # Cline desktop clone launcher -Instance c1..
                                    #   running-guard ABORTS (app-level guard is neutralized),
                                    #   post-launch checks: state dir + both ports + window gone
 launch_cline_clones_all.ps1        # sequential all-five (fixed 12s stagger)
+launch_cline_cli_light.ps1         # Cline LIGHT headless worker -Instance c1..c5 (Cline
+                                   #   [22] / gid 122; + [23] / gid 123 = -Auth login row;
+                                   #   2026-11-17): runs the desktop install's OWN standalone
+                                   #   CLI binary (cline-cli.exe, a Bun SEA 3.0.74 = the same
+                                   #   engine the desktop spawns as its hub/sidecar daemons;
+                                   #   ladder = -ClineBin override -> %LOCALAPPDATA%\Cline\
+                                   #   cline-cli.exe -> `cline` on PATH, functional --version
+                                   #   probe = bare semver) on the clone's own state via the
+                                   #   SAME env levers the desktop launcher sets (CLINE_DIR=
+                                   #   ClineClonesHome\cN + the frozen per-clone
+                                   #   CLINE_HUB_PORT/CLINE_SIDECAR_PORT 25471..25475/
+                                   #   3131..3135 - a drift tripwire test pins the port table
+                                   #   to launch_cline_clone.ps1's). Modes: interactive CLI
+                                   #   session (default; the CLI's own defaults apply and are
+                                   #   loud: act mode + tool auto-approval ON), -Prompt one-shot
+                                   #   (positional prompt = the CLI's one-shot contract;
+                                   #   -Json = --json headless output, -Timeout = -t,
+                                   #   -Model = -m, -NoAutoApprove = --auto-approve false,
+                                   #   -Yolo = the CLI's limited-set -y), -Auth = interactive
+                                   #   `auth` flow exit-code-gated. HONEST LIMITS (header,
+                                   #   DERIVED): a held desktop hub lock WARNs (never blocks -
+                                   #   shared-home semantics; the CLI is expected to ATTACH to
+                                   #   the running hub, unverified) and login persistence has
+                                   #   no file-verified check yet (the desktop web login may
+                                   #   not cover the CLI - the [23] row is the fix; live
+                                   #   acceptance). Phase-0 evidence: --help captured 2026-11-17
+                                   #   (positional prompt one-shot, --json headless);
+                                   #   Pester: tests/cline_cli_light.Tests.ps1 (18)
 launch_opencode_clone.ps1          # OpenCode desktop clone launcher -Instance c1..c5 + -Status
                                    #   (Electron 2.0.32, asInvoker; see the OpenCode conventions
                                    #   section): argv isolation --opencode-clone-home=<home> consumed

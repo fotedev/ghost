@@ -8,46 +8,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **macOS Qoder reset — the repo's first macOS platform (issue #36, 2026-11-17)** —
-  **`src/macos/reset_qoder.sh`** (v0.1): a full-attempt 9-step Qoder resetter
-  for macOS built on the shared lib + the OS-neutral Python core — Electron
-  stores (storage.json + state.vscdb via `reset_electron_stores`), the exact
-  Windows [3b] secret purge (`purge-keys` with per-key count audits), the
-  Preferences `device_id_salt` (`salt-rotate`), the machineid files
-  (`machineid-file`), the `~/.qoder` installation_id / .auth/machine_id
-  rotations (`rotate_text_file`) + credential-transaction sentinel + argv.json
-  crash-reporter-id (`patch-argv`), the workspaceStorage serviceMachineId
-  upserts, the `~/Library` sweep (Caches/Logs/Preferences/Saved Application
-  State/HTTPStorages, bundle-id globs), the webview partitions + the Chromium
-  network/cache stores + SharedClientCache inside the userData, and the
-  `.qoder` tmp/telemetry + logs run-state trees (`sweep-tree`). Every path is
-  DERIVED (Electron `~/Library/Application Support/Qoder` conventions) and
-  ABSENCE-TOLERANT — a store the app never created is a loud audited skip,
-  never a guess; the header carries the DERIVED-PATH SCOPE block plus the
-  NOT-covered list (Keychain "Chromium Safe Storage", IOPlatformUUID,
-  hostname, MAC, and the chat-bearing memories/canvas/knowledges stores).
-  **`ghost/platform.py`** gains an opt-in `"macos"` column (qoder rows:
-  config/qoder_dir/installation_id/auth_machine_id, all unverified), a live
-  `sys.platform` three-way selector, and a LOUD error for a darwin host
-  asking for an unmapped slug (never a silent linux fallback); the platform
-  integrity test now allows macos as a third column and pins the qoder macOS
-  rows + the darwin selector (mock-based, CI-OS-independent). Three shared
-  bugs the macOS smoke fixture caught are fixed in
-  **`src/linux/id_reset_common.sh`**: `verify_json_keys` now falls back to a
-  flat-literal key read when the nested walk misses (Chromium storage.json
-  holds LITERAL dotted keys — the nested-only verify would have failed every
-  correct storage.json write on Linux too), `emit_restore_script` guards the
-  empty-RESTORE_ENTRIES iteration (macOS's stock bash 3.2 treats
-  `"${arr[@]}"` under `set -u` as a fatal unbound-variable error), and the
-  `ensure_not_running` prompt drops the bash-4-only `${var,,}` lowercase
-  (macOS ships bash 3.2). The macOS smoke ran the full 9-step pipeline
-  against a seeded fake home on the dev host: Pass 13 / Fail 0, 56-assertion
-  post-check ALL PASS (identity cross-consistency, zero secret survivors
-  with the chat key preserved, JSONC comment survival, every deletion,
-  backups + audit + restore.sh), idempotent re-run all-skips, and the
-  not-installed abort path exits 1 before any mutation. CI shell lint and
-  README/docs now cover `src/macos/*.sh`. Live macOS acceptance remains
-  user-supervised (all rows stay provenance-flagged until then).
+- **Cline light headless worker (2026-11-17)** — the Cline suite gains the
+  ZCode/OpenCode light-worker capability: `src\windows\launch_cline_cli_light.ps1`
+  (Cline [22] / gid 122; [23] / gid 123 = the one-time CLI account login row)
+  runs the desktop install's OWN standalone CLI (`cline-cli.exe`, a Bun SEA,
+  v3.0.74 — the same engine the desktop app spawns as its hub/sidecar
+  daemons) on the clone's own `CLINE_DIR` state with the clone's frozen
+  `CLINE_HUB_PORT`/`CLINE_SIDECAR_PORT` (port-table drift tripwired to
+  `launch_cline_clone.ps1` by `tests/cline_cli_light.Tests.ps1`, 18).
+  Modes: interactive CLI session (default; the CLI's own act-mode +
+  auto-approval defaults are loud in the banner), `-Prompt` one-shot
+  (`-Json` = `--json` headless output, `-Timeout`, `-Model`,
+  `-NoAutoApprove` = `--auto-approve false`, `-Yolo` = the CLI's limited
+  `-y` set), `-Auth` = the interactive `auth` flow (exit-code gated — no
+  file-verified persistence check exists yet). Honest limits in the header:
+  a held desktop hub lock WARNs (never blocks — shared-home semantics; the
+  CLI is expected to attach to the running hub, UNVERIFIED) and login
+  persistence location is UNVERIFIED (the desktop web login may not cover
+  the CLI). Phase-0 evidence recorded in the header: `--help` captured
+  2026-11-17 (positional prompt = one-shot; `--json`/piped stdin =
+  headless). GHOST.bat dispatch header corrected to the real range
+  (1-123; **5 unused** — the carried "63 unused" figure was arithmetically
+  wrong; the integrity test only pins the upper bound). Live acceptance
+  (hub attach while the desktop clone runs, CLI login persistence) recorded
+  in TASK_BACKLOG.
 - **OpenCode definitions-only Primary→clone config sync (CS-1, 2026-11-16)** —
   the scrub design in `docs\OPENCODE_CONFIG_SYNC_PLAN.md` is implemented
   (D2 = the doc's default, developer-picked: sync provider definitions

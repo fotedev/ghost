@@ -12,15 +12,10 @@ Provenance rules (ground truth #5 - never guess silently):
   repo and CI since 2026-09; Windows paths carry the reset scripts' live
   provenance).
 - ``"verified": False`` = derived from the Windows layout + the app's
-  documented platform conventions (Electron apps keep their userData under
-  ~/.config/<App> on Linux and ~/Library/Application Support/<App> on
-  macOS; XDG_DATA_HOME for CLI data). Every unverified row is listed in
-  the ``paths`` verb output so a caller can print the caveat loudly -
-  live Linux/macOS verification is the follow-up.
-
-A ``"macos"`` column is opt-in per slug (2026-11-17, issue #36): only apps
-with a shipped macOS resetter map it, and a darwin host asking for an
-unmapped slug is a LOUD error - never a silent linux fallback.
+  documented Linux conventions (Electron apps keep their userData under
+  ~/.config/<App> on Linux, XDG_DATA_HOME for CLI data). Every unverified
+  row is listed in the ``paths`` verb output so a caller can print the
+  caveat loudly - live Linux verification is the follow-up.
 
 The Windows column exists so the same verb can serve cross-platform callers
 and future PS adoption; the PS scripts do NOT consume it yet (their inline
@@ -29,6 +24,8 @@ paths stay the proven source until a migration says otherwise).
 
 import os
 import sys
+
+IS_WINDOWS = sys.platform.startswith("win")
 
 
 def _home(rel):
@@ -87,16 +84,6 @@ STORE_PATHS = {
         },
         "linux": {
             "config": {"path": _home(".config/Qoder"), "verified": False},
-            "qoder_dir": {"path": _home(".qoder"), "verified": False},
-            "installation_id": {"path": _home(".qoder/installation_id"), "verified": False},
-            "auth_machine_id": {"path": _home(".qoder/.auth/machine_id"), "verified": False},
-        },
-        "macos": {
-            # DERIVED (2026-11-17, issue #36): Electron userData lives under
-            # ~/Library/Application Support/<App> on macOS; the dot-dir is
-            # platform-agnostic per the Linux wave. All rows stay unverified
-            # until a live Mac verifies them (reset_qoder.sh under src/macos).
-            "config": {"path": _home("Library/Application Support/Qoder"), "verified": False},
             "qoder_dir": {"path": _home(".qoder"), "verified": False},
             "installation_id": {"path": _home(".qoder/installation_id"), "verified": False},
             "auth_machine_id": {"path": _home(".qoder/.auth/machine_id"), "verified": False},
@@ -170,11 +157,10 @@ SLUG_ALIASES = {
 
 
 def get_store_paths(slug):
-    """Returns {"platform": "windows"|"linux"|"macos", "paths": {...}, "unverified": [labels]}.
+    """Returns {"platform": "windows"|"linux", "paths": {...}, "unverified": [labels]}.
 
     Paths are ~-expanded against the current user's home. Raises ValueError
-    on an unknown slug, or on a platform column the slug does not map
-    (loud, never an empty map or a silent fallback to another platform)."""
+    on an unknown slug (loud, never an empty map)."""
     slug = SLUG_ALIASES.get(slug, slug)
     if slug not in STORE_PATHS:
         raise ValueError(
@@ -182,19 +168,8 @@ def get_store_paths(slug):
                 slug, ", ".join(sorted(STORE_PATHS.keys()))
             )
         )
-    if sys.platform.startswith("win"):
-        platform = "windows"
-    elif sys.platform == "darwin":
-        platform = "macos"
-    else:
-        platform = "linux"
-    per_platform = STORE_PATHS[slug].get(platform)
-    if per_platform is None:
-        raise ValueError(
-            "no {0} store map for app slug '{1}' (mapped: {2})".format(
-                platform, slug, ", ".join(sorted(STORE_PATHS[slug].keys()))
-            )
-        )
+    platform = "windows" if IS_WINDOWS else "linux"
+    per_platform = STORE_PATHS[slug][platform]
     paths = {}
     unverified = []
     for label, entry in sorted(per_platform.items()):
