@@ -138,7 +138,29 @@ src/macos/                     # macOS .sh resetters — the repo's first macOS
                                #   skips; smoke-tested end-to-end on the dev host against
                                #   a seeded fake home (Pass 13/Fail 0 + 56-assertion
                                #   checker + idempotence + abort path); live macOS
-                               #   acceptance = user-supervised
+                               #   acceptance = user-supervised;
+                               #   reset_cursor.sh v0.1 (2026-11-18) = the second macOS
+                               #   resetter, 13 steps on the Windows v0.3 + live-verified
+                               #   Linux v0.2 step maps: machineId files in BOTH spellings
+                               #   (Linux camelCase machineId vs Windows lowercase
+                               #   machineid — the macOS spelling is unverified, whichever
+                               #   exists is rotated; on a case-insensitive APFS default
+                               #   they are one file and the second rotate is an honest
+                               #   same-value rewrite), reset_electron_stores, core
+                               #   delete-secrets with NO config (Cursor defaults; ItemTable
+                               #   only — cursorDiskKV NEVER touched), salt-rotate,
+                               #   json-remove os_crypt.encrypted_key from Local State
+                               #   (Keychain safe-storage = manual), Network transport +
+                               #   DIPS + SharedStorage + Trust Tokens store-deletes,
+                               #   sentry sweep-tree, cache trees sweep-tree, Crashpad +
+                               #   logs, workspaceStorage serviceMachineId upserts, stale
+                               #   .backup sidecar purge, count-keys final probe;
+                               #   PRESERVATION POLICY louder than qoder's: Local Storage,
+                               #   Backups, workspaceStorage files + cursorDiskKV are
+                               #   chat/UI state and NEVER touched (audited); smoke Pass
+                               #   13/Fail 0 + checker ALL PASS (preservation asserted) +
+                               #   idempotence + abort path; live macOS acceptance =
+                               #   user-supervised
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,
