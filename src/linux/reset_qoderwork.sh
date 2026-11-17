@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# QoderWork Machine ID Reset Script for Linux (GHOST v0.1)
+# QoderWork Machine ID Reset Script for Linux (GHOST v0.2)
 #
 # DERIVED-PATH SCOPE (2026-11-14): the Linux store layout is derived from
 # the proven Windows reset_qoderwork.ps1 + Electron conventions
 # (~/.config/QoderWork) - rows are provenance-flagged unverified in
 # ghost/platform.py and this script prints the caveat loudly. Covered on
 # Linux: telemetry keys in storage.json + ItemTable upserts in state.vscdb
-# (core verbs) + the machineid file + the system machine-id. The deeper
-# Windows-side QoderWork stores (agents.db oauth/app_settings scrub,
-# auth.dat, MachineGuid) are NOT covered on Linux yet.
+# (core verbs) + the machineid file + the agents.db oauth/app_settings
+# scrub (core purge-tables: the EXACT Windows v0.2 table whitelist + keyed
+# app_settings deletions; chats NEVER deleted) + the system machine-id
+# (deepened 2026-11-17). NOT covered on Linux yet: auth.dat, MachineGuid
+# (system-level, Windows registry-owned), the status/preferences JSONs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=src/linux/id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
-show_banner "QoderWork Identity Reset" "0.1"
+show_banner "QoderWork Identity Reset" "0.2"
 
 resolve_ghost_cli || {
     err "GHOST Python core unavailable (python3 or src/python/ghost_cli.py missing)."
@@ -66,7 +68,7 @@ dim "  macMachineId:  $MAC_MACHINE_ID"
 dim "  sqmId:         $SQM_ID"
 
 info ""
-info "[1/3] Electron stores (storage.json + state.vscdb)..."
+info "[1/4] Electron stores (storage.json + state.vscdb)..."
 if reset_electron_stores "$CONFIG_ROOT" "$DEV_DEVICE_ID" "$MACHINE_ID" "$MAC_MACHINE_ID" "$SQM_ID"; then
     PASS_COUNT=$((PASS_COUNT + 1))
 else
@@ -99,7 +101,43 @@ else
 fi
 
 info ""
-info "[3/3] System machine-id..."
+info "[3/4] agents.db oauth/app_settings scrub (core: purge-tables; chats preserved)..."
+# The EXACT Windows v0.2 whitelist (reset_qoderwork.ps1 [19/26]): oauth
+# token tables + identity-bearing rows purged; chats/sub_chats/messages/
+# projects are NEVER in the list (chat preservation policy). app_settings
+# is the keyed table: only identity-bearing keys deleted, "proxy" preserved.
+AGENTS_DB="$CONFIG_ROOT/data/agents.db"
+if [[ -f "$AGENTS_DB" ]]; then
+    agents_backup=$(core_backup "$AGENTS_DB" "$BACKUP_ROOT" "agents_db")
+    PURGE_PAYLOAD=$(python3 -c 'import base64, json; print(base64.b64encode(json.dumps({
+        "tables": ["mcp_oauth_tokens", "mcp_oauth_tokens_by_user", "google_oauth_tokens",
+                   "ms365_auth_states", "byok_custom_models", "rc_session_mappings",
+                   "channel_pairings", "channel_pairings_v2", "knowledge_bases",
+                   "voice_input_hotwords", "voice_input_history", "scheduled_tasks",
+                   "task_run_logs", "nudge_logs", "skill_evolution_suggestions"],
+        "key_table": "app_settings",
+        "keys": ["asyncMigrationStatus", "asyncMigrationProgress", "windowBounds",
+                 "channel:xiaoq", "channel:msteams", "channel:slack", "channel:line",
+                 "channel:figma", "channel:google-calendar", "channel:google-maps",
+                 "msConnectorEnabled", "ms365AuthFileMigrationV1"]
+    }).encode()).decode())')
+    if python3 "$GHOST_CLI_PATH" purge-tables "$AGENTS_DB" "$PURGE_PAYLOAD"; then
+        ok "agents.db scrubbed + core-verified (read-only reopen)."
+        audit_line "$AUDIT_FILE" "$AGENTS_DB" "backup=$(basename "${agents_backup:-none}")" "oauth+app_settings purged" 1
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        err "agents.db purge FAILED."
+        audit_line "$AUDIT_FILE" "$AGENTS_DB" "-" "failed" 0
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+else
+    warn "agents.db not present - skipped (first-launch state): $AGENTS_DB"
+    audit_line "$AUDIT_FILE" "$AGENTS_DB" "missing" "skipped" 1
+    PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+info ""
+info "[4/4] System machine-id..."
 reset_system_machine_id
 if [[ "$SYSTEM_MACHINE_ID_SKIPPED" == "true" ]]; then
     audit_line "$AUDIT_FILE" "/etc/machine-id" "-" "skipped-not-root" 1

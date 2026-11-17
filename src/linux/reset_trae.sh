@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Trae IDE Machine ID Reset Script for Linux (GHOST v0.2)
+# Trae IDE Machine ID Reset Script for Linux (GHOST v0.3)
 #
 # Promoted 2026-11-14 from the local-only archive copy
 # (archive/reset_trae_linux-v0.1.sh, never committed) and modernized to the
@@ -14,17 +14,22 @@
 # Linux yet - see ghost/platform.py (unverified rows surfaced by
 # `ghost_cli.py paths trae`). Live Linux verification pending.
 #
-# Steps:
-#   1. storage.json telemetry keys (core: json-patch + verify)
+# Steps (deepened 2026-11-17 toward the Windows v0.3 store map):
+#   1. storage.json telemetry keys + has_device_id_updated_to_aha=false
+#      + iCubeAuthInfo://* top-level removal (core: json-patch/json-set/json-remove)
 #   2. state.vscdb ItemTable upserts (core: sqlite-update + verify)
-#   3. system machine-id (root)
+#   3. ModularData/ckg_server/local_env.json device_id (19-digit) + host_map
+#      removal (core: json-set + json-remove; derived path)
+#   4. system machine-id (root)
+# NOT covered on Linux yet (unverified layouts): the aha dir delete,
+# SharedStorage sweep, Partitions/trae-webview.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=src/linux/id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
-show_banner "Trae Identity Reset" "0.2"
+show_banner "Trae Identity Reset" "0.3"
 
 resolve_ghost_cli || {
     err "GHOST Python core unavailable (python3 or src/python/ghost_cli.py missing)."
@@ -84,7 +89,7 @@ dim "  macMachineId:  $MAC_MACHINE_ID"
 dim "  sqmId:         $SQM_ID"
 
 info ""
-info "[1/3] Updating storage.json (core: json-patch)..."
+info "[1/4] Updating storage.json (core: json-patch + aha flag + iCubeAuthInfo removal)..."
 if [[ ! -f "$STORAGE_JSON" ]]; then
     warn "storage.json not present - creating fresh."
     mkdir -p "$GLOBAL_STORAGE"
@@ -113,8 +118,32 @@ else
     FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
+# Windows v0.3 shape: the aha flag forces the app to re-derive the device id
+# against the aha backend, and the iCubeAuthInfo://* top-level keys carry
+# auth tokens (core json-remove top-level-PREFIX mode).
+if [[ -f "$STORAGE_JSON" ]]; then
+    if core_json_set_kv "$STORAGE_JSON" "storage-aha-flag"         "has_device_id_updated_to_aha" "false"        && verify_json_keys "$STORAGE_JSON" "has_device_id_updated_to_aha=False"; then
+        ok "aha flag reset + verified."
+        audit_line "$AUDIT_FILE" "$STORAGE_JSON" "-" "false" 1 "core json-set"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        err "aha flag update/verify FAILED."
+        audit_line "$AUDIT_FILE" "$STORAGE_JSON" "-" "failed" 0
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+    if core_json_remove "$STORAGE_JSON" "storage-icube-auth"         "[]" '["iCubeAuthInfo://"]'; then
+        ok "iCubeAuthInfo://* top-level keys removed + core-verified."
+        audit_line "$AUDIT_FILE" "$STORAGE_JSON" "-" "icube-cleared" 1
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        err "iCubeAuthInfo removal FAILED."
+        audit_line "$AUDIT_FILE" "$STORAGE_JSON" "-" "failed" 0
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+fi
+
 info ""
-info "[2/3] Updating SQLite database (core: sqlite-update)..."
+info "[2/4] Updating SQLite database (core: sqlite-update)..."
 if [[ -f "$SQLITE_DB" ]]; then
     sqlite_backup=$(core_backup "$SQLITE_DB" "$BACKUP_ROOT" "state_vscdb")
     sqlite_updates="{\"telemetry.devDeviceId\":\"$DEV_DEVICE_ID\",\"telemetry.machineId\":\"$MACHINE_ID\",\"telemetry.macMachineId\":\"$MAC_MACHINE_ID\",\"telemetry.sqmId\":\"$SQM_ID\",\"storage.serviceMachineId\":\"$DEV_DEVICE_ID\"}"
@@ -150,7 +179,30 @@ else
 fi
 
 info ""
-info "[3/3] System machine-id..."
+info "[3/4] ckg_server local_env.json (device_id rotation + host_map removal)..."
+LOCAL_ENV="$TRAE_CONFIG/ModularData/ckg_server/local_env.json"
+if [[ -f "$LOCAL_ENV" ]]; then
+    # 19-digit ckg_server device id, first digit non-zero (the Windows
+    # reset_trae.ps1 generation contract).
+    NEW_CKG_ID=$(python3 -c 'import secrets; print(secrets.randbelow(9 * 10**18) + 10**18)')
+    local_env_backup=$(core_backup "$LOCAL_ENV" "$BACKUP_ROOT" "ckg_local_env")
+    if core_json_set_kv "$LOCAL_ENV" "ckg-local-env" "device_id" "\"$NEW_CKG_ID\""        && core_json_remove "$LOCAL_ENV" "ckg-host-map" '["host_map"]' '[]'        && verify_json_keys "$LOCAL_ENV" "device_id=$NEW_CKG_ID"; then
+        ok "local_env device_id rotated + host_map removed (verified)."
+        audit_line "$AUDIT_FILE" "$LOCAL_ENV" "backup=$(basename "${local_env_backup:-none}")" "$NEW_CKG_ID" 1
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        err "local_env update/verify FAILED."
+        audit_line "$AUDIT_FILE" "$LOCAL_ENV" "-" "failed" 0
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+else
+    warn "local_env.json not present - skipped (first-launch state): $LOCAL_ENV"
+    audit_line "$AUDIT_FILE" "$LOCAL_ENV" "missing" "skipped" 1
+    PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+info ""
+info "[4/4] System machine-id..."
 reset_system_machine_id
 if [[ "$SYSTEM_MACHINE_ID_SKIPPED" == "true" ]]; then
     audit_line "$AUDIT_FILE" "/etc/machine-id" "-" "skipped-not-root" 1
@@ -169,8 +221,8 @@ info "Summary: Pass $PASS_COUNT / Fail $FAIL_COUNT"
 info "Backups: $BACKUP_ROOT"
 info "Audit:   $AUDIT_FILE"
 info "Restore: $RESTORE_SCRIPT"
-info "Note   : Windows-side Trae stores (aha, ModularData ckg_server) are NOT"
-info "         covered on Linux yet - live Linux verification is pending."
+info "Note   : the aha dir delete, SharedStorage sweep and webview partition"
+info "         stay Windows-only (unverified Linux layouts) - see the header."
 
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
     err "Trae reset completed with FAILURES - review the audit JSONL."

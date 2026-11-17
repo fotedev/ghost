@@ -22,7 +22,34 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   global gid jump from the main menu, and
                                              #   [U] Check for updates on the main menu
 src/windows/                        # current .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
-src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters)
+src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters);
+                               #   2026-11-17 DEEPENING WAVE toward the Windows store maps:
+                               #   reset_zcode v0.2 (+~/.zcode/v2 telemetry-state deviceMid,
+                               #     credentials oauth: prefix + zcodejwttoken removal,
+                               #     setting.json deviceSid — all core json-set/json-remove
+                               #     with verify-after), reset_trae v0.3 (+aha flag +
+                               #     iCubeAuthInfo:// top-level-prefix removal + ckg_server
+                               #     local_env 19-digit device_id rotation + host_map
+                               #     removal), reset_qoder v0.2 (+~/.qoder installation_id +
+                               #     .auth/machine_id rotations + .credential-transaction
+                               #     delete), reset_qoderwork v0.2 (+agents.db purge-tables
+                               #     with the EXACT Windows whitelist — chats never deleted),
+                               #     reset_minimax_opencode v0.2 (+mcode-public auth.json/
+                               #     auth-state.json + legacy root auth-state.json deletions +
+                               #     session-handoff device-id rotation), reset_devin v0.3
+                               #     (the LAST inline python3 heredocs migrated onto core
+                               #     replace-text + json-patch); new shared helpers
+                               #     (b64_json_stdin/core_json_set_kv/core_json_remove/
+                               #     rotate_text_file) + LATENT BUG FIXED: reset_electron_
+                               #     stores piped into b64_json which only cursor/trae
+                               #     defined locally — the four consumers (zcode/qoder/
+                               #     qoderwork/minimax) died at step 1 under set -e
+                               #     ("command not found", latent since 2026-11-14; bash -n
+                               #     and shellcheck cannot see a missing function); the
+                               #     stdin builder now lives in the lib; platform.py Linux
+                               #     labels extended for all of the above (all DERIVED-
+                               #     flagged until a live Linux host verifies —
+                               #     test_ghost_platform pins them unverified)
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,

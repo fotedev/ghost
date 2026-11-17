@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# MiniMax Agent / OpenCode Machine ID Reset Script for Linux (GHOST v0.1)
+# MiniMax Agent / OpenCode Machine ID Reset Script for Linux (GHOST v0.2)
 #
 # DERIVED-PATH SCOPE (2026-11-14): the Linux store layout is derived from
 # the proven Windows reset_minimax_opencode.ps1 + Electron/XDG conventions
 # - rows are provenance-flagged unverified in ghost/platform.py and this
 # script prints the caveat loudly. Covered on Linux: telemetry keys in
 # storage.json + ItemTable upserts in state.vscdb (core verbs) + the
-# system machine-id. NOT covered on Linux yet: the v1.3 Windows stores
-# (mcode-public auth.json/auth-state.json deletion - "{}" there blocks the
-# login page, session-handoff device-id rotation, updater IDs,
-# DIPS/SharedStorage sweeps).
+# system machine-id. Deepened 2026-11-17 (the v1.3 Windows stores):
+# the mcode-public auth.json/auth-state.json DELETIONS ("{}" there throws
+# Invalid OAuth state and blocks the login page - absent is the
+# fresh-install state) + the legacy root auth-state.json delete + the
+# session-handoff device-id rotation. NOT covered on Linux yet: updater
+# IDs, DIPS/SharedStorage sweeps.
 #
 # The OpenCode CLI XDG stores (~/.local/share/opencode/auth.json) are
 # deliberately NOT touched by this script: they belong to
@@ -20,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=src/linux/id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
-show_banner "MiniMax/OpenCode Identity Reset" "0.1"
+show_banner "MiniMax/OpenCode Identity Reset" "0.2"
 
 resolve_ghost_cli || {
     err "GHOST Python core unavailable (python3 or src/python/ghost_cli.py missing)."
@@ -71,7 +73,7 @@ dim "  macMachineId:  $MAC_MACHINE_ID"
 dim "  sqmId:         $SQM_ID"
 
 info ""
-info "[1/3] Electron stores (storage.json + state.vscdb)..."
+info "[1/5] Electron stores (storage.json + state.vscdb)..."
 if reset_electron_stores "$CONFIG_ROOT" "$DEV_DEVICE_ID" "$MACHINE_ID" "$MAC_MACHINE_ID" "$SQM_ID"; then
     PASS_COUNT=$((PASS_COUNT + 1))
 else
@@ -104,7 +106,43 @@ else
 fi
 
 info ""
-info "[3/3] System machine-id..."
+info "[3/5] mcode-public auth deletions (fresh-install parity)..."
+MCODE_PUBLIC="$CONFIG_ROOT/auth/prod/en/mcode-public"
+LEGACY_AUTH_STATE="$MINIMAX_DIR/auth/auth-state.json"
+for AUTH_FILE in "$MCODE_PUBLIC/auth.json" "$MCODE_PUBLIC/auth-state.json" "$LEGACY_AUTH_STATE"; do
+    if [[ -f "$AUTH_FILE" ]]; then
+        if python3 "$GHOST_CLI_PATH" store-delete "$AUTH_FILE" "$BACKUP_ROOT" "auth-state" --action delete; then
+            ok "deleted: $AUTH_FILE"
+            audit_line "$AUDIT_FILE" "$AUTH_FILE" "-" "deleted" 1
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            err "auth delete FAILED: $AUTH_FILE"
+            audit_line "$AUDIT_FILE" "$AUTH_FILE" "-" "failed" 0
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    else
+        warn "absent (fresh-install parity) - skipped: $AUTH_FILE"
+        audit_line "$AUTH_FILE" "missing" "skipped" 1
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+done
+
+info ""
+info "[4/5] session-handoff device-id rotation..."
+if [[ -n "$MINIMAX_DIR" ]]; then
+    if rotate_text_file "$MINIMAX_DIR/v2/session-handoff/device-id"         "session-handoff-device-id" "$DEV_DEVICE_ID"; then
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+else
+    warn "~/.minimax not mapped on this platform - session-handoff rotation skipped."
+    audit_line "$AUDIT_FILE" "~/.minimax/v2/session-handoff/device-id" "unmapped" "skipped" 1
+    PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+info ""
+info "[5/5] System machine-id..."
 reset_system_machine_id
 if [[ "$SYSTEM_MACHINE_ID_SKIPPED" == "true" ]]; then
     audit_line "$AUDIT_FILE" "/etc/machine-id" "-" "skipped-not-root" 1

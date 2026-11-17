@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=src/linux/id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
-show_banner "ZCode Identity Reset" "0.1"
+show_banner "ZCode Identity Reset" "0.2"
 
 resolve_ghost_cli || {
     err "GHOST Python core unavailable (python3 or src/python/ghost_cli.py missing)."
@@ -78,8 +78,71 @@ else
     FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
+# Resolve the CLI-side v2 stores (cli_dir is live-verified on Linux; the
+# specific FILES are derived from the Windows layout - surfaced unverified
+# by the paths verb above).
+CLI_DIR=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['paths']['cli_dir'])" "$path_report")
+TELEMETRY_STATE="$CLI_DIR/v2/telemetry-state.json"
+CREDENTIALS_JSON="$CLI_DIR/v2/credentials.json"
+SETTING_JSON="$CLI_DIR/v2/setting.json"
+
 info ""
-info "[2/2] System machine-id..."
+info "[2/5] CLI telemetry state deviceMid (core: json-set)..."
+if [[ -f "$TELEMETRY_STATE" ]]; then
+    if core_json_set_kv "$TELEMETRY_STATE" "telemetry-state" "deviceMid" "\"$DEV_DEVICE_ID\""        && verify_json_keys "$TELEMETRY_STATE" "deviceMid=$DEV_DEVICE_ID"; then
+        ok "telemetry-state.json deviceMid updated + verified."
+        audit_line "$AUDIT_FILE" "$TELEMETRY_STATE" "-" "$DEV_DEVICE_ID" 1 "core json-set"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        err "telemetry-state deviceMid update/verify FAILED."
+        audit_line "$AUDIT_FILE" "$TELEMETRY_STATE" "-" "failed" 0
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+else
+    warn "telemetry-state.json not present - skipped (first-launch state)."
+    audit_line "$AUDIT_FILE" "$TELEMETRY_STATE" "missing" "skipped" 1
+    PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+info ""
+info "[3/5] Credentials OAuth clear (core: json-remove oauth: prefix + zcodejwttoken)..."
+if [[ -f "$CREDENTIALS_JSON" ]]; then
+    cred_backup=$(core_backup "$CREDENTIALS_JSON" "$BACKUP_ROOT" "credentials")
+    if python3 "$GHOST_CLI_PATH" json-remove "$CREDENTIALS_JSON" "$BACKUP_ROOT" "credentials-oauth"         "$(b64_remove_payload '["zcodejwttoken"]' '["oauth:"]')"; then
+        ok "credentials.json OAuth entries removed + core-verified."
+        audit_line "$AUDIT_FILE" "$CREDENTIALS_JSON" "backup=$(basename "${cred_backup:-none}")" "oauth-cleared" 1
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        err "credentials OAuth clear FAILED."
+        audit_line "$AUDIT_FILE" "$CREDENTIALS_JSON" "-" "failed" 0
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+else
+    warn "credentials.json not present - skipped (fresh-install state)."
+    audit_line "$AUDIT_FILE" "$CREDENTIALS_JSON" "missing" "skipped" 1
+    PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+info ""
+info "[4/5] setting.json deviceSid (core: json-set dotted)..."
+if [[ -f "$SETTING_JSON" ]]; then
+    if core_json_set_kv "$SETTING_JSON" "setting-json"         "webRemoteControlExternalRelayDevice.deviceSid" "\"$DEV_DEVICE_ID\""        && verify_json_keys "$SETTING_JSON" "webRemoteControlExternalRelayDevice.deviceSid=$DEV_DEVICE_ID"; then
+        ok "setting.json deviceSid updated + verified."
+        audit_line "$AUDIT_FILE" "$SETTING_JSON" "-" "$DEV_DEVICE_ID" 1 "core json-set"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        err "setting.json deviceSid update/verify FAILED."
+        audit_line "$AUDIT_FILE" "$SETTING_JSON" "-" "failed" 0
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+else
+    warn "setting.json not present - skipped (first-launch state)."
+    audit_line "$AUDIT_FILE" "$SETTING_JSON" "missing" "skipped" 1
+    PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+info ""
+info "[5/5] System machine-id..."
 reset_system_machine_id
 if [[ "$SYSTEM_MACHINE_ID_SKIPPED" == "true" ]]; then
     audit_line "$AUDIT_FILE" "/etc/machine-id" "-" "skipped-not-root" 1

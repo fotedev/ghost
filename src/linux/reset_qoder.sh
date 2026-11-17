@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
-# Qoder Machine ID Reset Script for Linux (GHOST v0.1)
+# Qoder Machine ID Reset Script for Linux (GHOST v0.2)
 #
 # DERIVED-PATH SCOPE (2026-11-14): the Linux store layout is derived from
 # the proven Windows reset_qoder.ps1 + Electron conventions (~/.config/Qoder)
 # - rows are provenance-flagged unverified in ghost/platform.py and this
-# script prints the caveat loudly. Covered on Linux: telemetry keys in
-# storage.json + ItemTable upserts in state.vscdb (core verbs) + the
-# machineid file + the system machine-id. The deeper Windows-side Qoder
-# stores (loginBroadcast, secret.local.machine.variables, webview stores,
-# .qoder installation_id/.auth) are NOT covered on Linux yet.
+# script prints the caveat loudly. Covered on Linux (deepened 2026-11-17):
+# telemetry keys in storage.json + ItemTable upserts in state.vscdb (core
+# verbs) + the machineid file + the ~/.qoder installation_id /
+# .auth/machine_id rotations + the .credential-transaction lock sentinel
+# delete + the system machine-id. NOT covered on Linux yet: loginBroadcast,
+# secret.local.machine.variables, webview stores, CORS_Profile.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=src/linux/id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
-show_banner "Qoder Identity Reset" "0.1"
+show_banner "Qoder Identity Reset" "0.2"
 
 resolve_ghost_cli || {
     err "GHOST Python core unavailable (python3 or src/python/ghost_cli.py missing)."
@@ -67,7 +68,7 @@ dim "  macMachineId:  $MAC_MACHINE_ID"
 dim "  sqmId:         $SQM_ID"
 
 info ""
-info "[1/3] Electron stores (storage.json + state.vscdb)..."
+info "[1/4] Electron stores (storage.json + state.vscdb)..."
 if reset_electron_stores "$CONFIG_ROOT" "$DEV_DEVICE_ID" "$MACHINE_ID" "$MAC_MACHINE_ID" "$SQM_ID"; then
     PASS_COUNT=$((PASS_COUNT + 1))
 else
@@ -100,7 +101,45 @@ else
 fi
 
 info ""
-info "[3/3] System machine-id..."
+info "[3/4] installation_id + .auth/machine_id rotation (36B GUIDs)..."
+if [[ -n "$QODER_DIR" ]]; then
+    INSTALLATION_ID="$QODER_DIR/installation_id"
+    AUTH_MACHINE_ID="$QODER_DIR/.auth/machine_id"
+    if rotate_text_file "$INSTALLATION_ID" "installation_id" "$DEV_DEVICE_ID"; then
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+    if rotate_text_file "$AUTH_MACHINE_ID" "auth-machine-id" "$MACHINE_ID"; then
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+    # The 0-byte credential-transaction lock sentinel: delete with backup
+    # (core store-delete), loudly skipped when absent.
+    if [[ -f "$QODER_DIR/.auth/.credential-transaction" ]]; then
+        if python3 "$GHOST_CLI_PATH" store-delete "$QODER_DIR/.auth/.credential-transaction"             "$BACKUP_ROOT" "credential-transaction" --action delete; then
+            ok "credential-transaction sentinel deleted."
+            audit_line "$AUDIT_FILE" "$QODER_DIR/.auth/.credential-transaction" "-" "deleted" 1
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            err "credential-transaction delete FAILED."
+            audit_line "$AUDIT_FILE" "$QODER_DIR/.auth/.credential-transaction" "-" "failed" 0
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    else
+        warn "credential-transaction sentinel absent - skipped."
+        audit_line "$AUDIT_FILE" "$QODER_DIR/.auth/.credential-transaction" "missing" "skipped" 1
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+else
+    warn "~/.qoder not mapped on this platform - rotations skipped."
+    audit_line "$AUDIT_FILE" "~/.qoder/installation_id" "unmapped" "skipped" 1
+    PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+info ""
+info "[4/4] System machine-id..."
 reset_system_machine_id
 if [[ "$SYSTEM_MACHINE_ID_SKIPPED" == "true" ]]; then
     audit_line "$AUDIT_FILE" "/etc/machine-id" "-" "skipped-not-root" 1
