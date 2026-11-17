@@ -219,6 +219,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   new core-verb chains functionally smoke-tested against %TEMP% fixtures
   (json-set/json-remove prefix/json-patch/purge-tables); shell syntax
   `bash -n` clean; unittest 196 OK. Live Linux runs remain user-supervised.
+- **ZCode Linux clone layer (PR 8, 2026-11-17)** - the Linux debt's second
+  repayment, evidence-first: the vendored ZCode tree PROVES Linux desktop
+  builds exist (electron-builder linux targets, executableName "zcode")
+  and that ALL FIVE isolation levers are platform-independent app code
+  (packages/desktop/src/main/desktopRuntimeEnv.ts + a dedicated
+  `ZCODE_HOME` CLI-root override - cleaner on Linux than the Windows HOME
+  trick). **`src/linux/launch_zcode_clone.sh`** - per-clone launcher
+  (Second..Sixth) on the FROZEN cross-platform layout
+  (`~/ZCode<Name>Home/.zcode` + `~/ZCode-<Name>` userData - same names as
+  the Windows launcher): first-run seed from ~/.zcode (live-lock excludes,
+  the `.zcode-seeding`/`.zcode-seeded` marker gates, Primary-closed gate
+  180s) + identity scrub through the Python core with **fail-closed**
+  semantics (a clone never runs on Primary identity - the Windows seed
+  rule); Linux identity = `ZCODE_INSTANCE_NAME` window title + per-color
+  branding (NO property store - taskbar grouping is not a Linux concept);
+  `--zcode-bin` pins the binary (DERIVED probe: PATH + /opt + user bins).
+  **`src/linux/launch_zcode_cli_light.sh`** - the light headless worker:
+  the Windows five-lever set MINUS the desktop-userData levers (headless =
+  no Electron), `--app-dir` pins the `resources/glm/zcode.cjs` bundle
+  (DERIVED probe), the free-model login recipe printed (the Windows
+  verified limits carried over), refuses an unseeded home.
+  **`reset_zcode.sh --instance`** - clone reset: the SAME v0.2 steps rooted
+  at the clone layout + backup-first `sweep-tree` of the desktop userData
+  (config/session); the Primary path stays fail-closed on an absent store.
+  **ghost.sh options 10-12** wired. Static Pester:
+  `tests\linux_clone_layer.Tests.ps1` (18). Everything DERIVED-flagged;
+  **live acceptance = user-supervised on a Linux host** (recorded as
+  TASK_BACKLOG **LC-1**).
 - **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
   DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
   MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`
