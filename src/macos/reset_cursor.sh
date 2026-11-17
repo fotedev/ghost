@@ -168,14 +168,14 @@ secrets_audit() {
         audit_line "$AUDIT_FILE" "$db" "-" "core-invoke-failed" 0
         return 1
     fi
-    while IFS='|' read -r key marker; do
+    while IFS= read -r key; do
         if [[ -z "$key" ]]; then continue; fi
         audit_line "$AUDIT_FILE" "$db" "present" "deleted" 1 "$key"
     done < <(python3 -c '
 import json, sys
 report = json.loads(sys.argv[1])
 for key in report.get("deleted", []):
-    print("{0}|deleted".format(key))
+    print(key)
 ' "$report")
     local survivors_ok=1 summary="" survivor_lines count
     survivor_lines=$(python3 -c '
