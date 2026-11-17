@@ -76,7 +76,16 @@ timestamp() {
     date +%Y%m%d_%H%M%S
 }
 
-has_python3() {    command -v python3 >/dev/null 2>&1
+has_python3() {
+    # FUNCTIONAL probe (2026-11-17): a bare `command -v python3` passes on
+    # Windows dev hosts where python3 is the Microsoft Store App-Execution
+    # ALIAS stub - every real python3 call then fails while the script
+    # believes the core is available (audit lines were being lost silently
+    # on exactly such a host). Execute a real statement instead; the probe
+    # costs one interpreter spawn and makes the stub case fail LOUD at
+    # resolve_ghost_cli instead of silent data loss mid-run.
+    command -v python3 >/dev/null 2>&1 || return 1
+    python3 -c "print('ghost-python3-probe')" >/dev/null 2>&1
 }
 
 # ── Backup ──────────────────────────────────────────────────────────────

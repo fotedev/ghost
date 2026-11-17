@@ -25,9 +25,10 @@ while true; do
     echo " 10) Launch a ZCode clone (Second..Sixth)"
     echo " 11) Reset a ZCode clone (identity + userData)"
     echo " 12) Launch a light headless worker (clone home)"
+    echo " 13) Sync ZCode MCPs to clones (definitions-only)"
     echo "  0) Exit"
     echo ""
-    read -r -p "Select an option [0-12]: " choice
+    read -r -p "Select an option [0-13]: " choice
     case "$choice" in
         # || true: a child exiting non-zero (declined kill, non-root
         # ResetMachineId, failed reset) must not kill the menu via set -e.
@@ -49,6 +50,9 @@ while true; do
         12)
             read -r -p "Instance (Second|Third|Fourth|Fifth|Sixth): " inst
             bash "$LINUX_DIR/launch_zcode_cli_light.sh" --instance "$inst" || true ;;
+        13)
+            read -r -p "Instance (Second|Third|Fourth|Fifth|Sixth|All): " inst
+            bash "$LINUX_DIR/sync_zcode_assets.sh" --instance "$inst"    || true ;;
         0) info "Goodbye."; exit 0                                     ;;
         *) err "Invalid option: $choice"                               ;;
     esac

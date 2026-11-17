@@ -85,8 +85,34 @@ src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE reset
                                #     layout + backup-first sweep-tree of the desktop
                                #     userData (config/session); Primary stays
                                #     fail-closed on an absent store;
-                               #   ghost.sh options 10-12 wired; static Pester:
-                               #     tests/linux_clone_layer.Tests.ps1 (18)
+                               #   sync_zcode_assets.sh v0.1 — the Linux twin of the
+                               #     Windows MCP area (ghost.sh option 13; 2026-11-17):
+                               #     Primary ~/.zcode/cli/config.json READ-ONLY -> every
+                               #     clone's <CloneHome>/.zcode/cli/config.json via the
+                               #     core json-merge-defs verb (Primary defs win,
+                               #     clone-local enabled survives, clone-only kept);
+                               #     MCP-ONLY scope by design (skills/.agents/plugin-cache
+                               #     ports are Windows-specific mechanics needing LC-1
+                               #     live-layout evidence first); NO running-instance guard
+                               #     (MCP area is the Windows-verified safe one: config
+                               #     re-read per app-server spawn); backup
+                               #     mcp-sync-backups/ + names-only JSONL audit
+                               #     asset-sync-audit.jsonl + --dry-run writes NOTHING
+                               #     (not even audit); config-less clone = loud SKIP;
+                               #     CLONE_HOME_NAME map duplicated from the launcher with
+                               #     a MUST-match comment + a Pester parity tripwire;
+                               #   2026-11-17 LATENT FIX: id_reset_common.sh has_python3()
+                               #     is now a FUNCTIONAL probe (the bare `command -v`
+                               #     passed on Windows dev hosts where python3 is the
+                               #     Microsoft Store App-Execution alias stub - audit
+                               #     lines were being lost silently there; the probe
+                               #     executes a real statement so the stub case fails
+                               #     LOUD at resolve_ghost_cli instead);
+                               #   ghost.sh options 10-13 wired; static Pester:
+                               #     tests/linux_clone_layer.Tests.ps1 (27); functional
+                               #     smoke = fixture HOME + dry-run/real/idempotent/
+                               #     skip paths (the missing-function class is invisible
+                               #     to bash -n/shellcheck)
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,
@@ -97,7 +123,15 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   rows surfaced loudly, exit 2 on unknown slug) — the single
                                #   source of truth the Linux .sh resets resolve paths through
                                #   (provenance-flagged per ground truth #5); CI python-core
-                               #   job now runs a windows+ubuntu matrix
+                               #   job now runs a windows+ubuntu matrix; 2026-11-17:
+                               #   json_merge.py + `ghost_cli.py json-merge-defs` verb = the
+                               #   Primary→clone DEFINITIONS-merge invariant ported from
+                               #   tools/zcode_mcp_merge.ps1 (Primary wins, clone-local
+                               #   --preserve-keys survive, clone-only kept, Primary never
+                               #   mutated; area-scoped via --base-path; names-only report;
+                               #   backup + verify-after deep re-read + --dry-run zero-write)
+                               #   — the generic merge core the Linux syncs ride
+                               #   (tested by tests/python/test_ghost_json_merge.py, 18)
 src/desktop/                   # GHOST.exe desktop launcher sources: GhostHub.cs (single-file
                                #   WinForms hub, C# 5 ONLY for the in-box csc.exe), menu.json
                                #   (runtime-loaded GUI menu data — parity-tested against

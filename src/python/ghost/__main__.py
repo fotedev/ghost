@@ -25,7 +25,7 @@ import base64
 import json
 import sys
 
-from ghost import audit, autoclaw2, backup, filesweep, identity, json_patch, platform, restore, sqlite_keys, winstore
+from ghost import audit, autoclaw2, backup, filesweep, identity, json_merge, json_patch, platform, restore, sqlite_keys, winstore
 
 
 def _decode_updates(b64):
@@ -271,6 +271,16 @@ def _cmd_json_set(args):
     return 0 if report["ok"] else 1
 
 
+def _cmd_json_merge_defs(args):
+    report = json_merge.merge_defs_file(
+        args.primary, args.clone, args.base_path,
+        [k for k in args.preserve_keys.split(",") if k],
+        backup_root=args.backup_root, label=args.label,
+        dry_run=args.dry_run)
+    print(json.dumps(report))
+    return 0 if report["ok"] else 1
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="ghost", description="GHOST Python core CLI")
@@ -422,6 +432,26 @@ def build_parser():
                    help='base64 of {"keys": ["a.b", ...], "prefixes": '
                         '["top-level prefix", ...]} (prefixes optional)')
     p.set_defaults(func=_cmd_json_remove)
+
+    p = sub.add_parser(
+        "json-merge-defs",
+        help="Primary->clone definitions merge (Primary wins, clone-local "
+             "preserve-keys survive, clone-only kept; Primary never mutated)")
+    p.add_argument("primary", help="Primary definitions file (READ-ONLY)")
+    p.add_argument("clone", help="clone definitions file (mutated)")
+    p.add_argument("--base-path", default="mcp.servers",
+                   help="dotted subtree to merge (default mcp.servers)")
+    p.add_argument("--preserve-keys", default="enabled",
+                   help="comma-separated per-entry dotted keys whose "
+                        "clone-local value survives (default 'enabled')")
+    p.add_argument("--backup-root", default=None,
+                   help="backup dir for the clone file before the write "
+                        "(skipped when omitted or --dry-run)")
+    p.add_argument("--label", default="mcp-sync",
+                   help="backup label (default mcp-sync)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="report the plan without writing anything")
+    p.set_defaults(func=_cmd_json_merge_defs)
 
     p = sub.add_parser(
         "store-delete",

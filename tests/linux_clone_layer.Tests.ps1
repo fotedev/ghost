@@ -121,6 +121,67 @@ Describe 'ghost.sh menu wiring' {
     }
 
     It 'the prompt range covers the new options' {
-        ($script:Raw -match 'Select an option \[0-12\]') | Should -BeTrue
+        ($script:Raw -match 'Select an option \[0-13\]') | Should -BeTrue
+        ($script:Raw -match '13\) Sync ZCode MCPs to clones') | Should -BeTrue
+        ($script:Raw -match 'sync_zcode_assets\.sh" --instance "\$inst"') | Should -BeTrue
+    }
+}
+
+Describe 'ZCode Linux MCP sync - contract' {
+    BeforeAll {
+        $script:Raw = [System.IO.File]::ReadAllText((Resolve-Path (Join-Path $PSScriptRoot "..\src\linux\sync_zcode_assets.sh")).Path)
+        $script:LauncherRaw = [System.IO.File]::ReadAllText((Resolve-Path (Join-Path $PSScriptRoot "..\src\linux\launch_zcode_clone.sh")).Path)
+    }
+
+    It 'rides the core json-merge-defs verb with the merge-invariant shape' {
+        ($script:Raw -match 'json-merge-defs') | Should -BeTrue
+        ($script:Raw -match '--base-path mcp\.servers') | Should -BeTrue
+        ($script:Raw -match '--preserve-keys enabled') | Should -BeTrue
+    }
+
+    It 'keeps the Primary config strictly READ-ONLY (no write path to it)' {
+        ($script:Raw -match 'READ-ONLY') | Should -BeTrue
+        ($script:Raw -match 'PRIMARY_CFG') | Should -BeTrue
+        ($script:Raw -match '\$PRIMARY_CFG' + '" >|>>') | Should -BeFalse -Because 'the Primary config must never be a write target'
+    }
+
+    It 'treats a config-less clone as a loud SKIP (first run anonymous)' {
+        ($script:Raw -match 'config-less clone - skipped') | Should -BeTrue
+    }
+
+    It 'backs up before any write and audits names-only into the clone home' {
+        ($script:Raw -match 'mcp-sync-backups') | Should -BeTrue
+        ($script:Raw -match 'asset-sync-audit\.jsonl') | Should -BeTrue
+    }
+
+    It 'skips the backup+audit writes on --dry-run (a dry run writes nothing)' {
+        ($script:Raw -match '--dry-run') | Should -BeTrue
+        $dryBlock = [regex]::Match($script:Raw, 'if \[\[ "\$SYNC_DRY_RUN" -eq 1 \]\]; then[\s\S]*?fi\r?\n    elif').Value
+        ($dryBlock -match 'audit_line') | Should -BeFalse -Because 'a dry run must not append to the audit file'
+    }
+
+    It 'counts verb failures instead of dying mid-loop (set -e safety)' {
+        ($script:Raw -match 'failures=\$\(\(failures \+ 1\)\)') | Should -BeTrue
+        ($script:Raw -match '\|\| true') | Should -BeTrue
+    }
+
+    It 'documents the MCP-only scope honestly (skills/plugins need LC-1 evidence)' {
+        ($script:Raw -match 'MCP-ONLY') | Should -BeTrue
+        ($script:Raw -match 'LC-1') | Should -BeTrue
+    }
+
+    It 'is heredoc-free (repo convention)' {
+        ($script:Raw -match "<<'") | Should -BeFalse
+    }
+}
+
+Describe 'ZCode Linux frozen-layout parity tripwire' {
+    It 'sync_zcode_assets.sh CLONE_HOME_NAME matches launch_zcode_clone.sh exactly' {
+        $sync = [System.IO.File]::ReadAllText((Resolve-Path (Join-Path $PSScriptRoot "..\src\linux\sync_zcode_assets.sh")).Path)
+        $launcher = [System.IO.File]::ReadAllText((Resolve-Path (Join-Path $PSScriptRoot "..\src\linux\launch_zcode_clone.sh")).Path)
+        $syncMap = [regex]::Match($sync, 'declare -A CLONE_HOME_NAME=\((.*?)\)', 'Singleline').Groups[1].Value.Trim()
+        $launcherMap = [regex]::Match($launcher, 'declare -A CLONE_HOME_NAME=\((.*?)\)', 'Singleline').Groups[1].Value.Trim()
+        # normalize whitespace so a pure reflow does not false-positive
+        ($syncMap -replace '\s+', ' ') | Should -Be ($launcherMap -replace '\s+', ' ') -Because 'the sync must target the frozen clone layout the launcher seeds'
     }
 }

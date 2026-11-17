@@ -8,6 +8,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode Linux MCP definitions sync (2026-11-17)** — the Linux twin of the
+  Windows `sync_zcode_assets.ps1` MCP area: `src/linux/sync_zcode_assets.sh`
+  v0.1 (ghost.sh option 13) syncs the Primary's `~/.zcode/cli/config.json`
+  `mcp.servers` definitions (READ-ONLY) onto each clone's
+  `<CloneHome>/.zcode/cli/config.json` — Primary wins, clone-local `enabled`
+  survives, clone-only servers kept. `--instance Second..Sixth|All` +
+  `--dry-run` (writes nothing, not even audit); config-less clone = loud
+  SKIP; no running-instance guard (MCP is the Windows-verified safe area —
+  config re-read per app-server spawn); backup `mcp-sync-backups/` +
+  names-only `asset-sync-audit.jsonl`. **MCP-ONLY scope by design**: the
+  skills/.agents/plugin-cache areas are Windows-specific mechanics
+  (junctions/robocopy) whose Linux ports need LC-1 live-layout evidence
+  first. Rides the NEW core verb `ghost_cli.py json-merge-defs`
+  (`src/python/ghost/json_merge.py`) — the Primary→clone merge invariant
+  ported from `zcode_mcp_merge.ps1`, generic over `--base-path`/
+  `--preserve-keys` so other suites' Linux syncs reuse it
+  (`tests/python/test_ghost_json_merge.py`, 18: the Windows invariant cases
+  + file-level backup/verify/dry-run contracts). Functional smoke ran the
+  fixture HOME through dry-run/real/idempotent/skip paths (the
+  missing-function class is invisible to `bash -n`/shellcheck).
+  **LATENT FIX**: `id_reset_common.sh` `has_python3()` is now a FUNCTIONAL
+  probe — the bare `command -v` passed on Windows dev hosts where `python3`
+  is the Microsoft Store App-Execution alias stub, silently losing audit
+  lines there; the probe executes a real statement so the stub case fails
+  LOUD at `resolve_ghost_cli`. Frozen-layout tripwire: the sync's
+  `CLONE_HOME_NAME` map is pinned to `launch_zcode_clone.sh`'s by
+  `tests/linux_clone_layer.Tests.ps1` (27).
+
 - **Cline light headless worker (2026-11-17)** — the Cline suite gains the
   ZCode/OpenCode light-worker capability: `src\windows\launch_cline_cli_light.ps1`
   (Cline [22] / gid 122; [23] / gid 123 = the one-time CLI account login row)
