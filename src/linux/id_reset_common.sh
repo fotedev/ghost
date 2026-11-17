@@ -252,6 +252,11 @@ core_json_set_kv() {
     # core_json_set_kv <path> <label> <key> <value_json_literal>
     # Backup (caller keeps BACKUP_ROOT set) + json-set + exit-code verdict.
     # Callers verify with verify_json_keys afterwards (never silent).
+    # SC2153 intentional: BACKUP_ROOT is assigned by each caller script
+    # after it sources this shared helper (same shape as the
+    # reset_electron_stores disable below) - shellcheck analyzes one file
+    # at a time and cannot see it.
+    # shellcheck disable=SC2153
     local path="$1" label="$2" key="$3" value="$4"
     local payload
     payload=$(b64_kv_payload "$key" "$value")
@@ -261,6 +266,7 @@ core_json_set_kv() {
 core_json_remove() {
     # core_json_remove <path> <label> <keys_json_array> <prefixes_json_array>
     # Backup + json-remove (verb does its own re-read verify). Callers audit.
+    # shellcheck disable=SC2153
     local path="$1" label="$2" keys="$3" prefixes="$4"
     local payload
     payload=$(b64_remove_payload "$keys" "$prefixes")

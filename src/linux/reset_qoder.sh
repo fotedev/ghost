@@ -133,8 +133,8 @@ if [[ -n "$QODER_DIR" ]]; then
         PASS_COUNT=$((PASS_COUNT + 1))
     fi
 else
-    warn "~/.qoder not mapped on this platform - rotations skipped."
-    audit_line "$AUDIT_FILE" "~/.qoder/installation_id" "unmapped" "skipped" 1
+    warn "$HOME/.qoder not mapped on this platform - rotations skipped."
+    audit_line "$AUDIT_FILE" "$HOME/.qoder/installation_id" "unmapped" "skipped" 1
     PASS_COUNT=$((PASS_COUNT + 1))
 fi
 
