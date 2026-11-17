@@ -146,6 +146,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the only entry point (the suite launchers deliberately do NOT ensure it).
   Pester: `tests\watch_suite_taskbar.Tests.ps1` (17). Live runs =
   user-supervised.
+- **Generic suite pressure report (2026-11-17)** — the portable half of the
+  ZCode diagnostics generalized: **`tools\diagnose_suite_pressure.ps1`** with
+  a MANDATORY `-Suite autoclaw2|cline|opencode` (ZCode keeps its dedicated
+  `diagnose_zcode_freeze`/`diagnose_zcode_throttle`). Read-only, three
+  sections: [1] instance table with honestly-labeled running signals —
+  per-color exe copy = definitive; lockfile probe (opencode
+  `<home>\desktop\lockfile`, cline hub lock) = held = running; opencode
+  title map; autoclaw2 documented as no-lockfile; a stock-exe clone with no
+  signal = **UNCLASSIFIABLE, never guessed**; [2] the live commit/RAM/
+  pagefile block that caught the 2026-09-25 renderer-OOM commit-limit
+  freeze (>=90% commit = the OOM-territory warning); [3] optional `-Days`
+  Electron log scan for `render-process-gone`/`child-process-gone` with
+  DERIVED-provenance dirs skipped loudly when absent — client-side
+  `.log`/`.txt` extension filter + `-Depth 3` bound (the first draft's
+  `-Include` swept a `.sqlite` blob into the scan; fixed and pinned by a
+  test). Smoke-tested read-only against all three suites on the dev host
+  (real output verified: honest unknowns, live commit numbers, log dirs).
+  Menu wiring: AutoClaw2 [24] = **gid 116**, Cline [20] = **gid 117**,
+  OpenCode [24] = **gid 118** (dispatch header → 1-118; hub-test ceiling →
+  118). Pester: `tests\diagnose_suite_pressure.Tests.ps1` (11).
 - **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
   DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
   MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`

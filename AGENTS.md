@@ -14,9 +14,9 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   (IDE Resets [1]-[8] / ZCode Multi-Instance &
                                              #   Clones [1]-[33] / System & GHOST Maintenance
                                              #   [1]-[5] / AutoClaw2 Multi-Instance & Clones
-                                             #   [1]-[23] / Cline Multi-Instance & Clones
-                                             #   [1]-[19] / OpenCode Multi-Instance & Clones
-                                             #   [1]-[23]) + ANSI colors + local chained input
+                                             #   [1]-[24] / Cline Multi-Instance & Clones
+                                             #   [1]-[20] / OpenCode Multi-Instance & Clones
+                                             #   [1]-[24]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
                                              #   global gid jump from the main menu, and
@@ -338,6 +338,23 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     -InstallAutostart/-RemoveAutostart; menu row is the
                                    #     only entry point (launchers do NOT ensure it);
                                    #     Pester: tests/watch_suite_taskbar.Tests.ps1 (17);
+                                   #   diagnose_suite_pressure.ps1 — READ-ONLY per-suite
+                                   #     instance-pressure report (2026-11-17; AutoClaw2 [24] =
+                                   #     gid 116, Cline [20] = gid 117, OpenCode [24] = gid 118;
+                                   #     -Suite autoclaw2|cline|opencode MANDATORY — ZCode keeps
+                                   #     its dedicated diagnose_zcode_freeze/throttle): [1]
+                                   #     instance table with honestly-labeled signals (per-color
+                                   #     exe copy = definitive; lockfile probe opencode/cline =
+                                   #     held = running; opencode title map; autoclaw2 no
+                                   #     lockfile documented; a stock-exe clone with no signal =
+                                   #     UNCLASSIFIABLE, never guessed); [2] the live commit/
+                                   #     RAM/pagefile block that caught the 2026-09-25
+                                   #     renderer-OOM freeze (>=90% commit = OOM territory
+                                   #     warning); [3] optional -Days Electron log scan
+                                   #     (render/child-process-gone; DERIVED layouts skipped
+                                   #     loudly when absent; client-side .log/.txt filter after
+                                   #     -Include swept a .sqlite blob once). Smoke-tested
+                                   #     read-only against all three suites on the dev host;
                                    #   patch_zcode_exe_identity.ps1 (+ pure core
                                    #     zcode_exe_identity_lib.ps1, unit-tested by
                                    #     tests/zcode_exe_identity.Tests.ps1) — per-clone Task

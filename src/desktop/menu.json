@@ -198,7 +198,8 @@
         { "gid": 114, "label": "Taskbar identity watcher", "tail": "- resident - re-stamps window AUMIDs + heals the Primary lnk", "mode": "detached", "title": "AutoClaw2 Taskbar Watcher", "psFlags": "-NoProfile", "script": "tools/watch_suite_taskbar.ps1", "args": ["-Suite", "autoclaw2"], "notes": [
           "Taskbar watcher opened in a separate window - it keeps running; close it to stop.",
           "Re-stamps window AUMIDs + heals the Primary lnk. Log: %LOCALAPPDATA%\\watch-autoclaw2-taskbar\\taskbar.log"
-        ] }
+        ] },
+        { "gid": 116, "label": "Instance pressure report", "tail": "- read-only - instances, commit RAM, log scan", "mode": "inline", "script": "tools/diagnose_suite_pressure.ps1", "args": ["-Suite", "autoclaw2"], "notes": [] }
       ]
     },
     {
@@ -257,7 +258,8 @@
           "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
         ] },
         { "gid": 112, "label": "Sync MCPs to all clones", "tail": "- Primary to c1..c5 - running clones skipped", "mode": "inline", "script": "tools/sync_cline_mcp.ps1", "args": ["-Target", "All"], "notes": [] },
-        { "gid": 113, "label": "Sync MCPs dry-run plan", "tail": "- shows what would change, writes nothing", "mode": "inline", "script": "tools/sync_cline_mcp.ps1", "args": ["-Target", "All", "-DryRun"], "notes": [] }
+        { "gid": 113, "label": "Sync MCPs dry-run plan", "tail": "- shows what would change, writes nothing", "mode": "inline", "script": "tools/sync_cline_mcp.ps1", "args": ["-Target", "All", "-DryRun"], "notes": [] },
+        { "gid": 117, "label": "Instance pressure report", "tail": "- read-only - instances, commit RAM, log scan", "mode": "inline", "script": "tools/diagnose_suite_pressure.ps1", "args": ["-Suite", "cline"], "notes": [] }
       ]
     },
     {
@@ -334,7 +336,8 @@
         { "gid": 115, "label": "Taskbar identity watcher", "tail": "- resident - re-stamps window AUMIDs + heals the Primary lnk", "mode": "detached", "title": "OpenCode Taskbar Watcher", "psFlags": "-NoProfile", "script": "tools/watch_suite_taskbar.ps1", "args": ["-Suite", "opencode"], "notes": [
           "Taskbar watcher opened in a separate window - it keeps running; close it to stop.",
           "Re-stamps window AUMIDs + heals the Primary lnk. Log: %LOCALAPPDATA%\\watch-opencode-taskbar\\taskbar.log"
-        ] }
+        ] },
+        { "gid": 118, "label": "Instance pressure report", "tail": "- read-only - instances, commit RAM, log scan", "mode": "inline", "script": "tools/diagnose_suite_pressure.ps1", "args": ["-Suite", "opencode"], "notes": [] }
       ]
     },
     {
