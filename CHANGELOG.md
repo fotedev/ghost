@@ -119,6 +119,33 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   probe (d) = re-run after a clone restart. Phase-0 live probes + the
   acceptance run are user-supervised (no Cline window was open when
   shipped). Pester: `tests\cline_window_stamp.Tests.ps1` (14).
+- **Generic suite taskbar-identity watcher (2026-11-17)** — the ZCode
+  resident watcher (`watch_zcode_taskbar.ps1`) mechanics generalized to the
+  AutoClaw2 and OpenCode suites: **`tools\watch_suite_taskbar.ps1`** with a
+  MANDATORY `-Suite autoclaw2|opencode` (Cline excluded by its plan — the
+  launcher's one-time CS-2 stamp covers it). Per-suite maps: AUMID base
+  (`com.zhipuai.autoclaw2` / `ai.opencode.desktop`), mutex
+  (`Autoclaw2TaskbarIdentityWatcher` / `OpencodeTaskbarIdentityWatcher`),
+  log (`%LOCALAPPDATA%\watch-<suite>-taskbar\taskbar.log`), Startup `.lnk`
+  name, and the installer repair script. Classification = per-color exe
+  copy on the root command line FIRST (deterministic mid-splash), then argv
+  markers (opencode's `--opencode-clone-home` ONLY — autoclaw2 passes env,
+  not argv), then the opencode title map ("OpenCode `<Color>`"). **Honest
+  limit documented, not hidden**: a stock-exe AutoClaw2 clone is
+  unclassifiable externally (no argv markers, shared "AutoClaw" title) —
+  warned once per hwnd and left alone (a clone-AUMID-vs-Primary-verdict
+  guard never re-stamps a probable clone to base); such clones keep
+  identity via the in-app patch (gid 78) + launcher kick, or gain watcher
+  coverage via the per-color exe copies (gid 105). Whole copy family via
+  the suite WMI filter (`AutoClaw2%`/`OpenCode%`); .kick toggle + read-back
+  verify; primary-lnk hijack guard every ~5 min = clone-AUMID predicate on
+  Shell `ExtendedProperty` + the suite installer's `-RepairPrimaryAumid`
+  console-less child (120s cap) + re-read verify. Menu wiring: AutoClaw2
+  [23] = **gid 114**, OpenCode [23] = **gid 115** (matching `menu.json`
+  rows; dispatch header → 1-115; hub-test ceiling → 115). The menu row is
+  the only entry point (the suite launchers deliberately do NOT ensure it).
+  Pester: `tests\watch_suite_taskbar.Tests.ps1` (17). Live runs =
+  user-supervised.
 - **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
   DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
   MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`
