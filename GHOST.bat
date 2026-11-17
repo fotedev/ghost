@@ -327,6 +327,10 @@ call :Opt 18 "Reset Orange clone" "- chats + repos kept"
 call :Opt 19 "Reset Primary" "- stock profile - chats + repos kept"
 call :Opt 20 "Reset ALL profiles" "- Blue..Orange + Primary - asks first"
 echo.
+call :Div "Config Sync"
+call :Opt 21 "Sync configs to all clones" "- Primary to c1..c5 - running clones skipped"
+call :Opt 22 "Config sync watcher" "- resident - syncs on Primary config change"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto OPENCODE_PROMPT
@@ -531,6 +535,8 @@ rem Clones on the ZCode LIGHT pattern; shortcuts/patch/status/remove shifted
 rem to [9]-[12]. Local ids renumbered, gids 53-62 unchanged (gids NEVER move).
 rem 2026-11-14: locals 13-19 = the Identity Resets section (gids 98-104;
 rem reset_opencode.ps1 -Target c1..c5|Primary|All; the ALL row is gated).
+rem 2026-11-17: locals 21-22 = the Config Sync section (gids 110/111; CS-1 v2
+rem - the one-shot definitions sync row + the resident config sync watcher).
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=53"
 if "%~1"=="2" set "RESOLVED=54"
@@ -552,20 +558,24 @@ if "%~1"=="17" set "RESOLVED=101"
 if "%~1"=="18" set "RESOLVED=102"
 if "%~1"=="19" set "RESOLVED=103"
 if "%~1"=="20" set "RESOLVED=104"
+if "%~1"=="21" set "RESOLVED=110"
+if "%~1"=="22" set "RESOLVED=111"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-109; 63 unused; 74 = the AutoClaw2 MCP sync
+rem Runs one task by global id (1-111; 63 unused; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
 rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
 rem identity; 84-90 = the AutoClaw2 identity resets; 91-97 = the Cline
 rem identity resets; 98-104 = the OpenCode identity resets; 105-107 = the
 rem AutoClaw2/Cline/OpenCode Task-Manager exe-identity rebuilds; 108 = the
-rem ZCode clone status row, appended 2026-11-14).
+rem ZCode clone status row, appended 2026-11-14; 110/111 = the OpenCode
+rem definitions sync row + the OpenCode config sync watcher, CS-1 v2
+rem 2026-11-17).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -672,6 +682,8 @@ if "%~1"=="104" (call :ConfirmOpenCodeReset "Reset ALL profiles" "src\windows\re
 if "%~1"=="105" (call :Run "tools\patch_autoclaw2_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="106" (call :Run "tools\patch_cline_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="107" (call :Run "tools\patch_opencode_exe_identity.ps1" -Target All & exit /b)
+if "%~1"=="110" (call :Run "tools\sync_opencode_config.ps1" -Target All & exit /b)
+if "%~1"=="111" (call :Detached "OpenCode Config Sync Watcher" "-NoProfile" "tools\watch_opencode_config_sync.ps1" "" "Config sync watcher opened in a separate window - it keeps running; close it to stop." "Syncs MCP + provider definitions from the Primary OpenCode config to every clone on change. Log: %LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log" & exit /b)
 if "%~1"=="81" (call :RunWith "tools\build_ghost_exe.ps1" "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or after moving this repo folder." & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)

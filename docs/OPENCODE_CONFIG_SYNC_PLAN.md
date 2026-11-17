@@ -5,7 +5,14 @@ definitions WITHOUT the secret + one loud WARN per clone — developer pick).
 Shipped as `tools\opencode_config_merge.ps1` (pure merge core, 12 Pester
 tests) + `tools\sync_opencode_config.ps1` (the child) + the launcher
 pre-launch step in `src\windows\launch_opencode_clone.ps1` ([2b/5]; a
-failed sync warns and never blocks the launch). In-session acceptance ran
+failed sync warns and never blocks the launch). **CS-1 v2 shipped
+2026-11-17** (PR: the §3/§7 v2 deferrals closed): resident watcher
+`tools\watch_opencode_config_sync.ps1` (mutex `OpencodeConfigSyncWatcher`,
+log `%LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log`,
+launch-ensure step [2c/5], GHOST.bat OpenCode [21]/[22] = gids 110/111,
+19 static Pester tests) — deliberately NO `-ApplyLive` (a running clone's
+re-read timing is unverified; TASK_BACKLOG). §3's "no resident watcher in
+v1" is superseded by this entry. In-session acceptance ran
 the plan's §5 items 1/3/4/5 on %TEMP% fixtures (dry-run zero-write; the
 written clone config AND the audit JSONL Select-String clean for the
 Primary's fake key; lockfile-held SKIP; Primary hash stable) — §6's live

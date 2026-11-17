@@ -203,6 +203,59 @@ if (Test-Path -LiteralPath $SyncScript) {
     Write-Warning "sync child not found: $SyncScript - definitions sync skipped."
 }
 
+# 2c) Ensure the resident config-sync watcher a fresh install needs is alive
+#     AND set to autostart (CS-1 v2, 2026-11-17; the ZCode launcher 2e
+#     pattern): a config edit made while no clone is launching otherwise
+#     never reaches the clones. A user who only installs the clones never
+#     opens GHOST to start it manually - so every legitimate clone launch
+#     (menu, Desktop/Start shortcut, Launch ALL) heals it: start hidden when
+#     not running, and install the Startup .lnk once so future logins are
+#     covered. Running the ensure twice is harmless: the probe is a mutex
+#     test (no WMI), and the watcher's own mutex guard exits any duplicate
+#     copy silently. Best-effort by contract: any failure warns and NEVER
+#     blocks the launch.
+function Test-WatcherRunning([string]$MutexName) {
+    # initiallyOwned=$false: created=$false means someone else holds it.
+    $created = $false
+    $probe = New-Object System.Threading.Mutex($false, $MutexName, [ref]$created)
+    $probe.Close()
+    return (-not $created)
+}
+function Ensure-ResidentWatcher([string]$Name, [string]$ScriptPath, [string]$MutexName, [string]$AutostartLnk) {
+    try {
+        if (Test-WatcherRunning $MutexName) {
+            Write-Host "[watchers] $Name already running."
+            return
+        }
+        # One-time: make sure the Startup .lnk exists so future logins are
+        # covered even if this is the only clone launch of the session. The
+        # watcher script owns the .lnk spec (-InstallAutostart verifies after
+        # writing); we only re-check existence and warn, never fail the launch.
+        if (-not (Test-Path -LiteralPath $AutostartLnk)) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ScriptPath -InstallAutostart | Out-Null
+            if (-not (Test-Path -LiteralPath $AutostartLnk)) {
+                Write-Host "[watchers] $Name autostart install failed (non-fatal - the watcher still starts now)." -ForegroundColor Yellow
+            }
+        }
+        # PS 5.1 ArgumentList joins with spaces WITHOUT quoting: pre-quote the
+        # -File path so repo paths containing spaces survive.
+        $fileArg = '"{0}"' -f $ScriptPath
+        Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', $fileArg)
+        Write-Host "[watchers] started $Name (hidden, autostart ensured)." -ForegroundColor Green
+    } catch {
+        Write-Host "[watchers] $Name could not be ensured ($($_.Exception.Message)) - continuing." -ForegroundColor Yellow
+    }
+}
+$ConfigWatcherScript = Join-Path $PSScriptRoot '..\..\tools\watch_opencode_config_sync.ps1'
+$StartupFolder = [Environment]::GetFolderPath('Startup')
+Write-Host '[2c/5] Ensure resident config-sync watcher'
+if (Test-Path -LiteralPath $ConfigWatcherScript) {
+    Ensure-ResidentWatcher -Name 'OpenCode config sync watcher' -ScriptPath $ConfigWatcherScript `
+        -MutexName 'OpencodeConfigSyncWatcher' -AutostartLnk (Join-Path $StartupFolder 'OpenCode config sync watcher.lnk')
+} else {
+    Write-Host '[watchers] tools\watch_opencode_config_sync.ps1 not found - skipping.' -ForegroundColor Yellow
+}
+
 # Running guard: the per-clone single-instance lock keys off the clone's own
 # userData, so launching a RUNNING clone just focuses it - inform, not block.
 if (Test-LockfileHeld $Lockfile) {

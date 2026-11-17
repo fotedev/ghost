@@ -40,6 +40,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   paths; Primary hash stable; idempotence ("already in sync" on run 2).
   Pester 250/250, parse 0, both new files PSSA-clean. §6 live runs stay
   user-supervised. GHOST.bat/menu wiring deferred to v2 per the plan.
+- **OpenCode config sync v2 — resident watcher + menu wiring (CS-1 v2,
+  2026-11-17)** — the v2 deferrals closed. **`tools\watch_opencode_config_sync.ps1`**
+  (new): resident watcher stat-guarding the Primary
+  `~\.config\opencode\opencode.jsonc` (mtime+size, JSONC parse-guard through
+  the merge core's `ConvertFrom-JsoncText` — a torn config skips the pass,
+  never syncs) and on every change spawning `sync_opencode_config.ps1
+  -Target All` as a console-less child (600s kill cap, the ZCode
+  MCP-watcher mechanics); the watcher writes nothing itself; first pass
+  converges drift, deep re-verify every 60 passes, log at
+  `%LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log`, single
+  instance via mutex `OpencodeConfigSyncWatcher` + startup process scan;
+  `-RunOnce/-DryRun/-IntervalSeconds/-InstallAutostart/-RemoveAutostart`;
+  **NO `-ApplyLive` by design** (a running OpenCode clone's config re-read
+  timing is unverified — recorded as a TASK_BACKLOG item). **Launcher** —
+  `launch_opencode_clone.ps1` gains step `[2c/5]`: ensure the watcher is
+  running hidden + install the Startup `.lnk` once (mutex probe, best-effort,
+  never blocks the launch — the ZCode-2e pattern). **Menu wiring** —
+  GHOST.bat OpenCode submenu gains the Config Sync section ([21] one-shot
+  sync = gid 110, [22] resident watcher = gid 111) with matching
+  `src\desktop\menu.json` rows; dispatch range header → 1-111; hub-test gid
+  ceiling → 111. **Tests** — `tests\watch_opencode_config_sync.Tests.ps1`
+  (19): hygiene, param surface (incl. the deliberately-absent
+  `-ApplyLive`/`-Target`), wiring contract (child, mutex, log, .lnk,
+  DryRun passthrough, JSONC guard, 60-pass deep verify) + launcher 2c +
+  gid 110/111 wiring assertions. Pester hub 17 + integrity 11 + watcher 19
+  green.
 - **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
   DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
   MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`

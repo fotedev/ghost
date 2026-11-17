@@ -319,6 +319,11 @@
         ] },
         { "gid": 104, "label": "Reset ALL profiles", "tail": "- Blue..Orange + Primary - asks first", "mode": "confirm-reset", "confirmTitle": "Reset ALL profiles", "confirmText": "This tree-kills the affected profiles and rewrites their identity stores.", "script": "src/windows/reset_opencode.ps1", "args": ["-Target", "All"], "notes": [
           "NOTE: relaunch via the OpenCode Blue/Yellow/Green/Red/Orange shortcuts or the launcher - a bare OpenCode.exe opens the PRIMARY profile."
+        ] },
+        { "gid": 110, "label": "Sync configs to all clones", "tail": "- Primary to c1..c5 - running clones skipped", "mode": "inline", "script": "tools/sync_opencode_config.ps1", "args": ["-Target", "All"], "notes": [] },
+        { "gid": 111, "label": "Config sync watcher", "tail": "- resident - syncs on Primary config change", "mode": "detached", "title": "OpenCode Config Sync Watcher", "psFlags": "-NoProfile", "script": "tools/watch_opencode_config_sync.ps1", "args": [], "notes": [
+          "Config sync watcher opened in a separate window - it keeps running; close it to stop.",
+          "Syncs MCP + provider definitions from the Primary OpenCode config to every clone on change. Log: %LOCALAPPDATA%\\watch-opencode-config-sync\\config-sync.log"
         ] }
       ]
     },
