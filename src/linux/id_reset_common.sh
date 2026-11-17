@@ -256,10 +256,13 @@ core_json_set_kv() {
     # after it sources this shared helper (same shape as the
     # reset_electron_stores disable below) - shellcheck analyzes one file
     # at a time and cannot see it.
-    # shellcheck disable=SC2153
     local path="$1" label="$2" key="$3" value="$4"
     local payload
     payload=$(b64_kv_payload "$key" "$value")
+    # SC2153 intentional: BACKUP_ROOT is assigned by each caller script after
+    # it sources this shared helper - shellcheck analyzes one file at a time
+    # and cannot see it (same shape as reset_electron_stores' disable).
+    # shellcheck disable=SC2153
     python3 "$GHOST_CLI_PATH" json-set "$path" "$BACKUP_ROOT" "$label" "$payload"
 }
 
@@ -270,6 +273,7 @@ core_json_remove() {
     local path="$1" label="$2" keys="$3" prefixes="$4"
     local payload
     payload=$(b64_remove_payload "$keys" "$prefixes")
+    # shellcheck disable=SC2153
     python3 "$GHOST_CLI_PATH" json-remove "$path" "$BACKUP_ROOT" "$label" "$payload"
 }
 
