@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Devin (formerly Windsurf) Machine ID Reset Script for Linux (GHOST v0.2)
+# Devin (formerly Windsurf) Machine ID Reset Script for Linux (GHOST v0.3)
 #
 # Renamed 2026-11-14 from reset_windsurf.sh: Windsurf rebranded to Devin
 # Desktop 2026-06-02 (the Windows reset_devin.ps1 v0.4 carries the same
@@ -10,6 +10,14 @@
 # v0.2 (2026-11-14): modernized to the Windows-side standard - timestamped
 # ID_Backups/<ts> dirs, JSONL audit, verify-after re-reads on every write,
 # and a self-contained restore script emission. Every file mutation is
+# v0.3 (2026-11-17): the LAST inline python3 heredocs migrated onto the
+# shared core verbs (repo convention: no heredocs):
+#   json_replace_username heredoc  -> core replace-text (the
+#                                     Set-UsernameScrubbedFile twin;
+#                                     the grep-sweep verify stays)
+#   update_codeium_config heredoc  -> core json-patch (keyed upsert keeps
+#                                     unknown config keys - strictly
+#                                     safer than v0.2's whole-file rewrite)
 # verified by RE-READING the file; username scrubs re-read via a grep sweep.
 #
 # Steps (unchanged order):
@@ -25,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=src/linux/id_reset_common.sh
 source "$SCRIPT_DIR/id_reset_common.sh"
 
-show_banner "Devin Identity Reset" "0.2"
+show_banner "Devin Identity Reset" "0.3"
 
 USERNAME="${USER:-$(whoami)}"
 DEVIN_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/Windsurf"
@@ -39,43 +47,22 @@ generate_ids() {
 }
 
 json_replace_username() {
+    # v0.3: the deep-walk heredoc is gone - the core replace-text verb does
+    # the same username->RESET scrub as a raw-text pass with absence verify.
     local file="$1"
     [[ -f "$file" ]] || return 0
-    if ! has_python3; then
-        warn "python3 not found; skipping JSON update for $file"
+    if [[ -z "$GHOST_CLI_PATH" ]]; then
+        warn "GHOST core unavailable; skipping username scrub for $file"
         return 1
     fi
-    python3 - "$file" "$USERNAME" <<'PY'
-import json, sys
-path, username = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as f:
-    raw = f.read().lstrip("\ufeff").strip()
-if not raw:
-    sys.exit(0)
-data = json.loads(raw)
-count = 0
-def walk(obj):
-    global count
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if isinstance(v, str) and username in v:
-                obj[k] = v.replace(username, "RESET")
-                count += 1
-            else:
-                walk(v)
-    elif isinstance(obj, list):
-        for i, item in enumerate(obj):
-            if isinstance(item, str) and username in item:
-                obj[i] = item.replace(username, "RESET")
-                count += 1
-            else:
-                walk(item)
-walk(data)
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-print(count)
-PY
+    local payload
+    payload=$(python3 -c 'import base64, json, sys; print(base64.b64encode(json.dumps({"find": sys.argv[1], "replacement": "RESET"}).encode()).decode())' "$USERNAME")
+    if python3 "$GHOST_CLI_PATH" replace-text "$file" "$BACKUP_ROOT" "username-scrub" "$payload"; then
+        echo "scrubbed (core replace-text)"
+        return 0
+    fi
+    echo "replace-text core step FAILED for $file"
+    return 1
 }
 
 verify_username_scrubbed() {
@@ -96,21 +83,16 @@ update_codeium_config() {
     new_device=$(generate_uuid)
     local backup
     backup=$(core_backup "$config" "$BACKUP_ROOT" "codeium_config")
-    if has_python3; then
-        python3 - "$config" "$new_device" <<'PY'
-import json, sys
-path, device_id = sys.argv[1], sys.argv[2]
-cfg = {
-    "device_id": device_id,
-    "api_key": "",
-    "portal_url": "https://www.codeium.com",
-    "inference_url": "https://server.codeium.com",
-}
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(cfg, f, indent=2)
-    f.write("\n")
-print(device_id)
-PY
+    if [[ -n "$GHOST_CLI_PATH" ]]; then
+        # v0.3: keyed json-patch instead of the whole-file rewrite heredoc -
+        # unknown top-level keys survive (strictly safer for schema evolution).
+        local payload
+        payload=$(python3 -c 'import base64, json, sys; print(base64.b64encode(json.dumps({"device_id": sys.argv[1], "api_key": "", "portal_url": "https://www.codeium.com", "inference_url": "https://server.codeium.com"}).encode()).decode())' "$new_device")
+        if ! python3 "$GHOST_CLI_PATH" json-patch "$config" "$payload"; then
+            err "Codeium config json-patch core step FAILED."
+            audit_line "$AUDIT_FILE" "$config" "-" "core-failed" 0
+            return 1
+        fi
         # Verify-after (the codeium.com/waitlist manager_url is DEAD - the
         # pre-Devin-era script wrote it back on every reset).
         if verify_json_keys "$config" "device_id=$new_device" "api_key="; then
@@ -122,7 +104,7 @@ PY
         audit_line "$AUDIT_FILE" "$config" "-" "verify-failed" 0
         return 1
     fi
-    warn "python3 not found; could not update Codeium config."
+    warn "GHOST core unavailable; could not update Codeium config."
     audit_line "$AUDIT_FILE" "$config" "-" "skipped-no-python3" 1
     return 1
 }
@@ -186,7 +168,7 @@ info "[2/5] Updating Preferences file..."
 if [[ -f "$PREFERENCES_PATH" ]]; then
     pref_backup=$(core_backup "$PREFERENCES_PATH" "$BACKUP_ROOT" "Preferences")
     if out=$(json_replace_username "$PREFERENCES_PATH") && verify_username_scrubbed "$PREFERENCES_PATH"; then
-        ok "Preferences scrubbed + verified ($out replacement(s))."
+        ok "Preferences scrubbed + verified ($out)."
         audit_line "$AUDIT_FILE" "$PREFERENCES_PATH" "backup=$(basename "${pref_backup:-none}")" "$out replacements" 1
         PASS_COUNT=$((PASS_COUNT + 1))
     else
@@ -205,7 +187,7 @@ info "[3/5] Updating Local State file..."
 if [[ -f "$LOCAL_STATE_PATH" ]]; then
     ls_backup=$(core_backup "$LOCAL_STATE_PATH" "$BACKUP_ROOT" "LocalState")
     if out=$(json_replace_username "$LOCAL_STATE_PATH") && verify_username_scrubbed "$LOCAL_STATE_PATH"; then
-        ok "Local State scrubbed + verified ($out replacement(s))."
+        ok "Local State scrubbed + verified ($out)."
         audit_line "$AUDIT_FILE" "$LOCAL_STATE_PATH" "backup=$(basename "${ls_backup:-none}")" "$out replacements" 1
         PASS_COUNT=$((PASS_COUNT + 1))
     else
@@ -224,7 +206,7 @@ info "[4/5] Updating argv.json file..."
 if [[ -f "$ARGV_PATH" ]]; then
     argv_backup=$(core_backup "$ARGV_PATH" "$BACKUP_ROOT" "argv")
     if out=$(json_replace_username "$ARGV_PATH") && verify_username_scrubbed "$ARGV_PATH"; then
-        ok "argv.json scrubbed + verified ($out replacement(s))."
+        ok "argv.json scrubbed + verified ($out)."
         audit_line "$AUDIT_FILE" "$ARGV_PATH" "backup=$(basename "${argv_backup:-none}")" "$out replacements" 1
         PASS_COUNT=$((PASS_COUNT + 1))
     else

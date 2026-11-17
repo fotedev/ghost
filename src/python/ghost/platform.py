@@ -70,6 +70,11 @@ STORE_PATHS = {
         "linux": {
             "config": {"path": _home(".config/Trae"), "verified": False},
             "trae_dir": {"path": _home(".trae"), "verified": False},
+            "machineid_file": {"path": _home(".config/Trae/machineId"), "verified": False},
+            "local_env": {
+                "path": _home(".config/Trae/ModularData/ckg_server/local_env.json"),
+                "verified": False,
+            },
         },
     },
     "qoder": {
@@ -80,6 +85,8 @@ STORE_PATHS = {
         "linux": {
             "config": {"path": _home(".config/Qoder"), "verified": False},
             "qoder_dir": {"path": _home(".qoder"), "verified": False},
+            "installation_id": {"path": _home(".qoder/installation_id"), "verified": False},
+            "auth_machine_id": {"path": _home(".qoder/.auth/machine_id"), "verified": False},
         },
     },
     "qoderwork": {
@@ -90,6 +97,7 @@ STORE_PATHS = {
         "linux": {
             "config": {"path": _home(".config/QoderWork"), "verified": False},
             "qoderwork_dir": {"path": _home(".qoderwork"), "verified": False},
+            "agents_db": {"path": _home(".config/QoderWork/data/agents.db"), "verified": False},
         },
     },
     "zcode": {
@@ -104,6 +112,9 @@ STORE_PATHS = {
             "cli_dir": {"path": _home(".zcode"), "verified": True},
             "cli_config": {"path": _home(".zcode/cli/config.json"), "verified": False},
             "cli_db": {"path": _home(".zcode/cli/db/db.sqlite"), "verified": False},
+            "telemetry_state": {"path": _home(".zcode/v2/telemetry-state.json"), "verified": False},
+            "credentials": {"path": _home(".zcode/v2/credentials.json"), "verified": False},
+            "setting_json": {"path": _home(".zcode/v2/setting.json"), "verified": False},
         },
     },
     "minimax": {
@@ -114,6 +125,14 @@ STORE_PATHS = {
         "linux": {
             "config": {"path": _home(".config/MiniMax"), "verified": False},
             "minimax_dir": {"path": _home(".minimax"), "verified": False},
+            "mcode_public": {
+                "path": _home(".config/MiniMax/auth/prod/en/mcode-public"),
+                "verified": False,
+            },
+            "session_handoff_device_id": {
+                "path": _home(".minimax/v2/session-handoff/device-id"),
+                "verified": False,
+            },
         },
     },
     "opencode-cli": {

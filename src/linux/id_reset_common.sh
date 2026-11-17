@@ -221,6 +221,87 @@ core_backup() {
     echo "$dest"
 }
 
+# ── Core payload builders (2026-11-17 deepening wave) ───────────────────
+b64_json_stdin() {
+    # Compact JSON on STDIN -> base64 (no line breaks). Lives HERE because
+    # the shared reset_electron_stores below pipes into it - the four
+    # derived scripts that consume that helper (zcode/qoder/qoderwork/
+    # minimax) never defined a local b64_json, so every one of their step-1
+    # calls died with "command not found" under set -e (latent since
+    # 2026-11-14; bash -n and shellcheck cannot see a missing function).
+    # reset_cursor.sh keeps its own ARGV-style b64_json (different contract,
+    # defined after sourcing, shadows this one); reset_trae.sh keeps its
+    # local stdin twin.
+    python3 -c "import base64, json, sys; print(base64.b64encode(json.dumps(json.loads(sys.stdin.read()), separators=(',', ':')).encode()).decode())"
+}
+b64_kv_payload() {
+    # b64_kv_payload <key> <value> -> base64 of {"key": ..., "value": ...}
+    # for the core json-set verb (value JSON-encoded by python, so any
+    # scalar type is safe).
+    python3 -c 'import base64, json, sys; print(base64.b64encode(json.dumps({"key": sys.argv[1], "value": json.loads(sys.argv[2])}).encode()).decode())' "$1" "$2"
+}
+
+b64_remove_payload() {
+    # b64_remove_payload <keys_json_array> <prefixes_json_array> -> base64
+    # of {"keys": [...], "prefixes": [...]} for the core json-remove verb.
+    # Both args are literal JSON arrays (pass '[]' when unused).
+    python3 -c 'import base64, json, sys; print(base64.b64encode(json.dumps({"keys": json.loads(sys.argv[1]), "prefixes": json.loads(sys.argv[2])}).encode()).decode())' "$1" "$2"
+}
+
+core_json_set_kv() {
+    # core_json_set_kv <path> <label> <key> <value_json_literal>
+    # Backup (caller keeps BACKUP_ROOT set) + json-set + exit-code verdict.
+    # Callers verify with verify_json_keys afterwards (never silent).
+    # SC2153 intentional: BACKUP_ROOT is assigned by each caller script
+    # after it sources this shared helper (same shape as the
+    # reset_electron_stores disable below) - shellcheck analyzes one file
+    # at a time and cannot see it.
+    local path="$1" label="$2" key="$3" value="$4"
+    local payload
+    payload=$(b64_kv_payload "$key" "$value")
+    # SC2153 intentional: BACKUP_ROOT is assigned by each caller script after
+    # it sources this shared helper - shellcheck analyzes one file at a time
+    # and cannot see it (same shape as reset_electron_stores' disable).
+    # shellcheck disable=SC2153
+    python3 "$GHOST_CLI_PATH" json-set "$path" "$BACKUP_ROOT" "$label" "$payload"
+}
+
+core_json_remove() {
+    # core_json_remove <path> <label> <keys_json_array> <prefixes_json_array>
+    # Backup + json-remove (verb does its own re-read verify). Callers audit.
+    # shellcheck disable=SC2153
+    local path="$1" label="$2" keys="$3" prefixes="$4"
+    local payload
+    payload=$(b64_remove_payload "$keys" "$prefixes")
+    # shellcheck disable=SC2153
+    python3 "$GHOST_CLI_PATH" json-remove "$path" "$BACKUP_ROOT" "$label" "$payload"
+}
+
+rotate_text_file() {
+    # rotate_text_file <path> <label> <new_value>
+    # Plain-text identity file rotation (installation_id / .auth machine_id /
+    # session-handoff device-id): backup via the core, write, verify-after
+    # re-read, audit. An ABSENT file is a loud skip (first-launch state),
+    # never a failure. Returns 0 ok/skip, 1 failed - caller counts.
+    local path="$1" label="$2" new_value="$3"
+    if [[ ! -f "$path" ]]; then
+        warn "not present - skipped (first-launch state): $path"
+        audit_line "$AUDIT_FILE" "$path" "missing" "skipped" 1
+        return 0
+    fi
+    local backup
+    backup=$(core_backup "$path" "$BACKUP_ROOT" "$label")
+    printf '%s\n' "$new_value" > "$path"
+    if verify_file_value "$path" "$new_value"; then
+        ok "rotated + verified: $path"
+        audit_line "$AUDIT_FILE" "$path" "backup=$(basename "${backup:-none}")" "$new_value" 1
+        return 0
+    fi
+    err "VERIFY FAILED after rotation: $path"
+    audit_line "$AUDIT_FILE" "$path" "-" "verify-failed" 0
+    return 1
+}
+
 # ── Audit (JSONL) ───────────────────────────────────────────────────────
 AUDIT_FILE=""
 
@@ -338,7 +419,7 @@ reset_electron_stores() {
     local sqlite_db="$config_root/User/globalStorage/state.vscdb"
     local updates="{\"telemetry.devDeviceId\":\"$dev_id\",\"telemetry.machineId\":\"$mach_id\",\"telemetry.macMachineId\":\"$mac_id\",\"telemetry.sqmId\":\"$sqm_id\",\"storage.serviceMachineId\":\"$dev_id\"}"
     local updates_b64
-    updates_b64=$(printf '%s' "$updates" | b64_json)
+    updates_b64=$(printf '%s' "$updates" | b64_json_stdin)
 
     if [[ ! -f "$storage_json" && ! -f "$sqlite_db" ]]; then
         warn "no storage.json / state.vscdb under $config_root - skipped (first launch creates them)"

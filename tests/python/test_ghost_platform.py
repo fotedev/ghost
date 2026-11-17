@@ -80,6 +80,33 @@ class MapIntegrityTests(unittest.TestCase):
         # flagged until a Linux host verifies it
         self.assertFalse(linux["cli_db"]["verified"])
 
+    def test_deepened_linux_labels_exist_and_stay_unverified(self):
+        # 2026-11-17 deepening wave: the Linux resets resolve the deeper
+        # Windows-proven stores through these labels. They are DERIVED
+        # (Windows layout + Electron/XDG conventions) and MUST stay flagged
+        # until a live Linux host verifies them (ground truth #5).
+        expected = {
+            "trae": {"machineid_file", "local_env"},
+            "qoder": {"installation_id", "auth_machine_id"},
+            "qoderwork": {"agents_db"},
+            "zcode": {"telemetry_state", "credentials", "setting_json"},
+            "minimax": {"mcode_public", "session_handoff_device_id"},
+        }
+        for slug, labels in expected.items():
+            linux = platform.STORE_PATHS[slug]["linux"]
+            for label in labels:
+                self.assertIn(label, linux, "slug '%s' missing label '%s'" % (slug, label))
+                self.assertFalse(linux[label]["verified"],
+                                 "label '%s' of '%s' must stay unverified until live-checked"
+                                 % (label, slug))
+
+    def test_deepened_linux_labels_resolve_under_home(self):
+        for slug in ("trae", "qoder", "qoderwork", "zcode", "minimax"):
+            report = platform.get_store_paths(slug)
+            home = os.path.expanduser("~")
+            for path in report["paths"].values():
+                self.assertTrue(path.startswith(home))
+
 
 if __name__ == "__main__":
     unittest.main()

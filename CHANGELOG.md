@@ -181,6 +181,44 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`reset_<app>.ps1 -Target All -DryRun`, matching `menu.json` rows;
   dispatch header → 1-121; hub-test ceiling → 121). Pester:
   `tests\suite_launcher_2f.Tests.ps1` (9).
+- **Linux resetter depth (2026-11-17)** — the Linux debt's first big
+  repayment: the six .sh resets deepened toward their Windows store maps,
+  every mutation through the shared Python core with backup + verify-after
+  + JSONL audit + restore emission. **`platform.py`** — Linux labels added
+  for the new stores (trae machineid_file/local_env, qoder
+  installation_id/auth_machine_id, qoderwork agents_db, zcode
+  telemetry_state/credentials/setting_json, minimax mcode_public/
+  session_handoff_device_id) — ALL DERIVED-flagged until a live Linux host
+  verifies (ground truth #5); `test_ghost_platform.py` pins them unverified.
+  **reset_zcode v0.2** — ~/.zcode/v2 telemetry-state deviceMid (json-set),
+  credentials OAuth clear (json-remove "oauth:" top-level prefix + exact
+  zcodejwttoken — the Windows v1.5 shape), setting.json deviceSid (dotted
+  json-set); **reset_trae v0.3** — has_device_id_updated_to_aha=false +
+  iCubeAuthInfo://* top-level-prefix removal + ckg_server local_env.json
+  19-digit device_id rotation + host_map removal; **reset_qoder v0.2** —
+  ~/.qoder installation_id + .auth/machine_id 36B-GUID rotations +
+  .credential-transaction sentinel delete; **reset_qoderwork v0.2** —
+  agents.db purge-tables with the EXACT Windows v0.2 table whitelist + keyed
+  app_settings deletions (chats NEVER deleted, "proxy" preserved);
+  **reset_minimax_opencode v0.2** — mcode-public auth.json/auth-state.json +
+  legacy root auth-state.json deletions ("{}" blocks the login page —
+  absent = fresh-install parity) + session-handoff device-id rotation;
+  **reset_devin v0.3** — the repo's LAST inline python3 heredocs migrated
+  onto core replace-text (username scrub, grep-sweep verify stays) + json-
+  patch (Codeium config keyed upsert — unknown keys survive, strictly safer
+  than the old whole-file rewrite). **Shared lib** — new helpers
+  (b64_json_stdin, b64_kv_payload, b64_remove_payload, core_json_set_kv,
+  core_json_remove, rotate_text_file). **LATENT BUG FIXED**:
+  reset_electron_stores piped into `b64_json`, which only reset_cursor/
+  reset_trae defined locally — the four consumers (zcode/qoder/qoderwork/
+  minimax) died at step 1 with "command not found" under set -e (latent
+  since 2026-11-14; `bash -n` and shellcheck cannot see a missing
+  function); the stdin builder now lives in the shared lib. The roaming-
+  equivalent deep stores (RUM, webview partitions, aha dir, SharedStorage)
+  stay Windows-only with the unverified-layout caveat printed loudly. All
+  new core-verb chains functionally smoke-tested against %TEMP% fixtures
+  (json-set/json-remove prefix/json-patch/purge-tables); shell syntax
+  `bash -n` clean; unittest 196 OK. Live Linux runs remain user-supervised.
 - **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
   DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
   MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`
