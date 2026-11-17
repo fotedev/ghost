@@ -79,12 +79,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: ShellCheck
-        run: shellcheck src/linux/*.sh ghost.sh
+        run: shellcheck src/linux/*.sh src/macos/*.sh ghost.sh
 
       - name: bash -n (syntax)
         run: |
           set -e
-          for f in src/linux/*.sh ghost.sh; do
+          for f in src/linux/*.sh src/macos/*.sh ghost.sh; do
             echo ":: checking $f"
             bash -n "$f"
           done

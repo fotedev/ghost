@@ -113,6 +113,32 @@ src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE reset
                                #     smoke = fixture HOME + dry-run/real/idempotent/
                                #     skip paths (the missing-function class is invisible
                                #     to bash -n/shellcheck)
+src/macos/                     # macOS .sh resetters — the repo's first macOS
+                               #   platform (issue #36, 2026-11-17): reset_qoder.sh
+                               #   v0.1 = a full-attempt 9-step Qoder resetter (Electron
+                               #   stores via reset_electron_stores, the exact Windows [3b]
+                               #   purge-keys list with per-key count audits, salt-rotate,
+                               #   machineid-file x2, rotate_text_file installation_id/
+                               #   .auth machine_id, credential-transaction delete,
+                               #   patch-argv, workspaceStorage sqlite-update, ~/Library
+                               #   sweep with bundle-id globs, webview partitions +
+                               #   Chromium network/cache stores + SharedClientCache,
+                               #   sweep-tree run-state trees); ALL paths DERIVED
+                               #   (platform.py macos column, unverified until a live Mac
+                               #   verifies) and ABSENCE-TOLERANT (loud audited skip, never
+                               #   a guess); bash 3.2-safe (macOS ships /bin/bash 3.2 —
+                               #   no ${var,,}/mapfile/empty-array "${arr[@]}" under
+                               #   set -u); sources ../linux/id_reset_common.sh and
+                               #   FIXES it for macOS (verify_json_keys flat-literal
+                               #   fallback for Chromium's literal-dotted storage.json
+                               #   keys — the nested-only verify failed every correct
+                               #   flat write; emit_restore_script empty-array guard;
+                               #   prompt lowercase without ${var,,}); system identity
+                               #   (IOPlatformUUID/Keychain/hostname/MAC) = loud audited
+                               #   skips; smoke-tested end-to-end on the dev host against
+                               #   a seeded fake home (Pass 13/Fail 0 + 56-assertion
+                               #   checker + idempotence + abort path); live macOS
+                               #   acceptance = user-supervised
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,
@@ -132,6 +158,9 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   + rotate + audit + verify_json_keys end-to-end (bash -n
                                #   and shellcheck cannot see a MISSING function — the
                                #   b64_json latent-bug class); 2026-11-17:
+                               #   opt-in "macos" column (qoder rows, all DERIVED) + live
+                               #   sys.platform three-way selector + LOUD error for a
+                               #   darwin host asking for an unmapped slug (issue #36);
                                #   json_merge.py + `ghost_cli.py json-merge-defs` verb = the
                                #   Primary→clone DEFINITIONS-merge invariant ported from
                                #   tools/zcode_mcp_merge.ps1 (Primary wins, clone-local

@@ -2,6 +2,7 @@
 
 import os
 import unittest
+from unittest import mock
 
 from ghost import platform
 
@@ -38,8 +39,16 @@ class SlugResolutionTests(unittest.TestCase):
 class MapIntegrityTests(unittest.TestCase):
     def test_every_entry_has_both_platforms_and_verified_flag(self):
         for slug, platforms in platform.STORE_PATHS.items():
-            self.assertEqual(set(platforms.keys()), {"windows", "linux"},
-                             "slug '%s' must map both platforms" % slug)
+            # windows + linux are required for every slug; "macos" is an
+            # opt-in third column (2026-11-17, issue #36) - only apps with a
+            # shipped macOS resetter map it. Anything else is unknown.
+            self.assertIn("windows", platforms,
+                          "slug '%s' must map windows" % slug)
+            self.assertIn("linux", platforms,
+                          "slug '%s' must map linux" % slug)
+            self.assertLessEqual(
+                set(platforms.keys()), {"windows", "linux", "macos"},
+                "slug '%s' has an unknown platform column" % slug)
             for plat, entries in platforms.items():
                 self.assertTrue(entries, "slug '%s' platform '%s' empty" % (slug, plat))
                 for label, entry in entries.items():
@@ -106,6 +115,50 @@ class MapIntegrityTests(unittest.TestCase):
             home = os.path.expanduser("~")
             for path in report["paths"].values():
                 self.assertTrue(path.startswith(home))
+
+    def test_qoder_macos_rows_exist_and_stay_derived(self):
+        # 2026-11-17 macOS wave (issue #36): Electron userData on macOS lives
+        # under ~/Library/Application Support/<App>; the dot-dir is
+        # platform-agnostic per the Linux wave. Every row is DERIVED
+        # (Windows layout + documented platform conventions) and MUST stay
+        # flagged until a live Mac verifies it (ground truth #5).
+        macos = platform.STORE_PATHS["qoder"]["macos"]
+        self.assertEqual(set(macos.keys()),
+                         {"config", "qoder_dir", "installation_id", "auth_machine_id"})
+        for label, entry in macos.items():
+            self.assertFalse(entry["verified"],
+                             "macos label '%s' of 'qoder' must stay unverified "
+                             "until a live Mac verifies it" % label)
+        home = os.path.expanduser("~")
+        for entry in macos.values():
+            expanded = os.path.expanduser(entry["path"])
+            self.assertTrue(expanded.startswith(home),
+                            "macos path %r must live under %r"
+                            % (expanded, home))
+        self.assertIn("Library", macos["config"]["path"].replace("\\", "/"))
+
+    def test_darwin_selects_macos_rows_and_surfaces_unverified(self):
+        # The selector reads sys.platform live, so the darwin branch is
+        # testable on any CI OS.
+        with mock.patch.object(platform.sys, "platform", "darwin"):
+            report = platform.get_store_paths("qoder")
+        self.assertEqual(report["platform"], "macos")
+        self.assertEqual(report["slug"], "qoder")
+        self.assertTrue(report["paths"])
+        self.assertTrue(report["unverified"],
+                        "derived macOS rows must surface as unverified")
+
+    def test_darwin_unmapped_slug_is_a_loud_error(self):
+        # Only qoder maps macOS today - a darwin host asking for anything
+        # else gets an honest error, NEVER a silent linux fallback.
+        with mock.patch.object(platform.sys, "platform", "darwin"):
+            with self.assertRaises(ValueError):
+                platform.get_store_paths("cursor")
+
+    def test_linux_selector_still_resolves_after_macos_column(self):
+        with mock.patch.object(platform.sys, "platform", "linux"):
+            report = platform.get_store_paths("qoder")
+        self.assertEqual(report["platform"], "linux")
 
 
 if __name__ == "__main__":
