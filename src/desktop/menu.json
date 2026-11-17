@@ -251,7 +251,9 @@
         ] },
         { "gid": 97, "label": "Reset ALL profiles", "tail": "- Blue..Orange + Primary - asks first", "mode": "confirm-reset", "confirmTitle": "Reset ALL profiles", "confirmText": "This tree-kills the affected profiles and rewrites their identity stores.", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "All"], "notes": [
           "NOTE: relaunch via the Cline Blue/Yellow/Green/Red/Orange shortcuts or the launcher - the Primary is the stock Cline.exe launch."
-        ] }
+        ] },
+        { "gid": 112, "label": "Sync MCPs to all clones", "tail": "- Primary to c1..c5 - running clones skipped", "mode": "inline", "script": "tools/sync_cline_mcp.ps1", "args": ["-Target", "All"], "notes": [] },
+        { "gid": 113, "label": "Sync MCPs dry-run plan", "tail": "- shows what would change, writes nothing", "mode": "inline", "script": "tools/sync_cline_mcp.ps1", "args": ["-Target", "All", "-DryRun"], "notes": [] }
       ]
     },
     {

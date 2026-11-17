@@ -66,6 +66,39 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   DryRun passthrough, JSONC guard, 60-pass deep verify) + launcher 2c +
   gid 110/111 wiring assertions. Pester hub 17 + integrity 11 + watcher 19
   green.
+- **Cline MCP settings sync (2026-11-17)** — the Cline suite's missing sync
+  capability (the audit gap: Cline had NO MCP story at all). Store verified
+  on the dev host: `<profile>\data\settings\cline_mcp_settings.json`
+  (container `mcpServers`, Claude-Desktop format) is AUTH-FREE — the
+  Primary's file is exactly `{"mcpServers": {}}`, login lives in
+  secrets.json/providers.json. **`tools\cline_mcp_merge.ps1`** — pure merge
+  core, the zcode invariant adapted to Cline's per-server `disabled` flag:
+  Primary definitions win, the clone's LOCAL disabled state survives, a new
+  server carries the Primary's disabled value (absent on both = enabled),
+  clone-only servers never removed, Primary never mutated.
+  **`tools\sync_cline_mcp.ps1`** — the child: `-Instance cN | -Target All`,
+  `-DryRun`, `-Quiet` (launcher path), fixture overrides; hub-lock-held
+  clone = RUNNING → SKIP + WARN; missing store = CREATE (deliberate
+  deviation from the OpenCode config-less SKIP — this store is auth-free
+  and the app only creates it on first MCP-panel use, so waiting would
+  mean definitions never reach a fresh clone); backup
+  `cline_mcp_settings-pre-sync-<ts>.json` + verify-after re-read +
+  deep-compare + JSONL audit `<CloneHome>\mcp-sync-audit.jsonl` (server
+  NAMES only); Primary READ-ONLY with a hash re-check. **Launcher** —
+  `launch_cline_clone.ps1` gains the `[2b]` pre-launch step (`-Quiet`
+  child, `-SkipMcpSync` escape hatch, failed sync warns and NEVER blocks;
+  runs before the single-instance neutralize) + an `mcp settings:` line in
+  `-Status`. **Menu wiring** — GHOST.bat Cline submenu gains the Config
+  Sync section ([18] sync = gid 112, [19] dry-run plan = gid 113) with
+  matching `menu.json` rows; dispatch range header → 1-113; hub-test gid
+  ceiling → 113. **Tests** — `tests\cline_mcp_sync.Tests.ps1` (23): the
+  invariant cases + FUNCTIONAL %TEMP% fixture runs of the child (fresh
+  clone create+apply+audit, disabled survival + clone-only keep + backup,
+  dry-run zero-write, idempotence, RUNNING skip via a held lock handle,
+  missing-home skip, unparseable-Primary fail-loud) + launcher/gid wiring.
+  Also AGENTS.md: the stale "NO reset script in this suite" bullet
+  rewritten (reset_cline.ps1 shipped 2026-11-14). Pester cline-sync 23
+  green.
 - **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
   DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
   MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`
