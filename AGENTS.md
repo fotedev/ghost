@@ -14,9 +14,9 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   (IDE Resets [1]-[8] / ZCode Multi-Instance &
                                              #   Clones [1]-[33] / System & GHOST Maintenance
                                              #   [1]-[5] / AutoClaw2 Multi-Instance & Clones
-                                             #   [1]-[24] / Cline Multi-Instance & Clones
-                                             #   [1]-[20] / OpenCode Multi-Instance & Clones
-                                             #   [1]-[24]) + ANSI colors + local chained input
+                                             #   [1]-[25] / Cline Multi-Instance & Clones
+                                             #   [1]-[21] / OpenCode Multi-Instance & Clones
+                                             #   [1]-[25]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
                                              #   global gid jump from the main menu, and

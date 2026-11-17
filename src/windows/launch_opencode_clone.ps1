@@ -300,6 +300,28 @@ $verify = Get-Content -LiteralPath $IdentityJson -Raw | ConvertFrom-Json
 if ($verify.aumidSuffix -ne $InstanceDefs[$Instance].AumidSuffix) { throw "identity marker verify FAILED: re-read mismatch" }
 Write-Host "      aumidSuffix=$($verify.aumidSuffix) title='$($verify.title)'"
 
+# --- [2f/5] Task Manager identity - per-color exe copy (2026-11-17) -----------
+# The ZCode launcher step-2f pattern (see the AutoClaw2 launcher for the full
+# rationale; the 2026-11-14 repo-only opt-in decision is REVERSED by the
+# parity build-out plan). Best-effort by contract: any failure falls back to
+# the stock exe with a loud warning - never blocks the launch.
+$ExeIdentityTool = Join-Path $PSScriptRoot '..\..\tools\patch_opencode_exe_identity.ps1'
+$ExeColorCap = @{ c1 = 'Blue'; c2 = 'Yellow'; c3 = 'Green'; c4 = 'Red'; c5 = 'Orange' }[$Instance]
+$LaunchExe = $ExePath
+$CloneExe = Join-Path (Split-Path -Parent $ExePath) "OpenCode-$ExeColorCap.exe"
+Write-Host '[2f/5] Task Manager identity - per-color exe copy'
+if (Test-Path -LiteralPath $ExeIdentityTool) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExeIdentityTool -Target $Instance -InstallDir (Split-Path -Parent $ExePath)
+    if (($LASTEXITCODE -eq 0) -and (Test-Path -LiteralPath $CloneExe)) {
+        $LaunchExe = $CloneExe
+        Write-Host "[launch] starting from OpenCode-$ExeColorCap.exe (colored Task Manager group)." -ForegroundColor Green
+    } else {
+        Write-Host "[launch] exe copy unavailable (tool exit $LASTEXITCODE) - starting from the stock OpenCode.exe; Task Manager keeps the stock row." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host '[launch] tools\patch_opencode_exe_identity.ps1 not found - starting from the stock OpenCode.exe.' -ForegroundColor Yellow
+}
+
 # --- Launch --------------------------------------------------------------------
 # Start-Process is detached and env-inheriting; the app is asInvoker so the
 # argv flags (the isolation channel) survive untouched. Identity rides argv
@@ -314,7 +336,7 @@ $launchArgs = @(
 )
 if ($identity.title) { $launchArgs += "`"--opencode-clone-title=$($identity.title)`"" }
 if ($identity.iconPath) { $launchArgs += "`"--opencode-clone-icon=$($identity.iconPath)`"" }
-$proc = Start-Process -FilePath $ExePath -WorkingDirectory $installDir -ArgumentList $launchArgs -PassThru
+$proc = Start-Process -FilePath $LaunchExe -WorkingDirectory $installDir -ArgumentList $launchArgs -PassThru
 Write-Host ("      started pid {0}" -f $proc.Id)
 
 Write-Host "[5/5] Verify-after-launch (up to 60s)..."

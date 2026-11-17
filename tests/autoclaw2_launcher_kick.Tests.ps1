@@ -29,7 +29,10 @@ Describe 'AutoClaw2 launcher taskbar kick' {
     }
 
     It 'spawns with -PassThru so the kick can target the started PID' {
-        $script:Text.Contains('Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath) -PassThru') |
+        # 2026-11-17: the 2f exe-identity step renamed the spawn variable - the
+        # launcher now starts from $LaunchExe (the per-color copy, stock
+        # fallback); -PassThru is the pinned intent (kick targets the started PID).
+        $script:Text.Contains('Start-Process -FilePath $LaunchExe -WorkingDirectory (Split-Path $LaunchExe) -PassThru') |
             Should -BeTrue
     }
 
