@@ -22,7 +22,7 @@
 | [Task backlog](TASK_BACKLOG.md) | The single tracked index of every open task (2026-10-28 survey): bug-sweep remediation state incl. the write-guard-blocked diffs, ZCode W1 items, thin-manifest queue, clone-suite future work, ops backlog |
 | [Bug-sweep remediation plan](BUG_SWEEP_REMEDIATION_PLAN.md) | Finishing the 2026-10-24 ~196-finding sweep: the re-verify-before-apply rule, the five blocked files' staged diffs, pending scopes (qoder, watchers, trae, installers), the core SELECT probe, acceptance gates |
 | [OpenCode config sync plan](OPENCODE_CONFIG_SYNC_PLAN.md) | Definitions-only Primary→clone `opencode.jsonc` sync (secrets never copied): the scrub design, merge invariant, launcher pre-launch placement, dry-run, acceptance; v2 = resident watcher + menu rows (2026-11-17) |
-| [Cline window identity plan](CLINE_WINDOW_IDENTITY_PLAN.md) | Window-level taskbar identity for the Tauri clones (launcher-side stamping — no patch surface): Phase 0 probes, design, acceptance; developer-deferred, design-ready |
+| [Cline window identity plan](CLINE_WINDOW_IDENTITY_PLAN.md) | Window-level taskbar identity for the Tauri clones (launcher-side stamping — no patch surface): Phase 0 probes, design, acceptance; IMPLEMENTED 2026-11-17 (live probes via tools/probe_cline_window.ps1, user-supervised) |
 | [Thin-manifest migration queue](THIN_MANIFEST_MIGRATION_QUEUE_PLAN.md) | Per-script execution breakdown for the remaining five resetters (trae → qoderwork → minimax → qoder → zcode) with the fix-before-migrate sequencing gate |
 
 The top-level [README](../README.md) is the quick-start entry point.

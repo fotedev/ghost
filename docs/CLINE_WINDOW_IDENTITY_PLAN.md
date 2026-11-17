@@ -1,9 +1,17 @@
 # Cline Window-Level Taskbar Identity Plan (deferred option — design-ready)
 
-Status: DEFERRED-BY-DECISION. The developer chose shortcut-AUMIDs-only
-(degraded) on 2026-10-24 (CLINE_CLONES_SPEC §7). This spec captures the design
-so that a later go costs exactly one session. **Do not implement without the
-developer's explicit go.** Backlog ID: CS-2.
+Status: **IMPLEMENTED 2026-11-17** (the developer go came with the parity
+build-out plan; backlog CS-2 flipped). `launch_cline_clone.ps1` implements
+§3 exactly: the proven ZCode step-4 property-store interop (ole32
+`PropVariantClear`) stamps `bot.cline.app.cN` onto the launched process's
+main window + `SetWindowTextW` "Cline `<Color>` vN" (exe VERSIONINFO),
+re-stamps on handle change inside the existing poll, verifies by read-back,
+and degrades to a loud WARN WITHOUT blocking (acceptance 3). NO resident
+watcher (§3.5). `-Status` reports the live window AUMID. **§4 Phase-0 live
+probes are PENDING** — no Cline window was running at implementation time;
+run the read-only `tools/probe_cline_window.ps1` with a window open (probe
+d = re-run after a clone restart). Original design text below is
+historical; §2/§3/§5/§7 remain normative.
 
 ## 1. Current state (accepted degraded)
 

@@ -99,6 +99,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Also AGENTS.md: the stale "NO reset script in this suite" bullet
   rewritten (reset_cline.ps1 shipped 2026-11-14). Pester cline-sync 23
   green.
+- **Cline window-level taskbar identity (CS-2 IMPLEMENTED, 2026-11-17)** —
+  the 2026-10-24 DEGRADED decision closed with the developer go. Tauri has
+  no patchable surface, so it is the plan's launcher-side stamp
+  (`docs\CLINE_WINDOW_IDENTITY_PLAN.md` §3, verbatim): `launch_cline_clone.ps1`
+  stamps `bot.cline.app.cN` (EQUAL to the shortcut AUMID so the running
+  button resolves the clone's colored icon) onto the launched process's
+  main-window property store — the proven ZCode step-4 interop block,
+  `PropVariantClear` imported from **ole32** (oleaut32 dropped it in Win10
+  19041.7548, ground truth #6) — plus the distinct "Cline `<Color>` vN"
+  title from the exe VERSIONINFO (the pin-collision guard). Re-stamps on
+  main-window handle change inside the post-launch poll (splash-swap
+  tolerant); verify-after read-back; any mismatch = loud WARN and the
+  launch STANDS (identity is cosmetic, acceptance 3). `-Status` reports
+  the live window AUMID. NO resident watcher (plan §3.5). **`tools\probe_cline_window.ps1`**
+  (new, read-only, off-menu): the §4 Phase-0 probes (a)-(c) as a runnable
+  tool — per-window anatomy (class/title/hwnd), live store AUMID, WebView2
+  child census, and the `SetCurrentProcessExplicitAppUserModelID` exe scan;
+  probe (d) = re-run after a clone restart. Phase-0 live probes + the
+  acceptance run are user-supervised (no Cline window was open when
+  shipped). Pester: `tests\cline_window_stamp.Tests.ps1` (14).
 - **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
   DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
   MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`
