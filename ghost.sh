@@ -21,9 +21,13 @@ while true; do
     echo "  --- System ---"
     echo "  8) Generate hardware fingerprint (JSON)"
     echo "  9) Reset system machine-id only (requires root)"
+    echo "  --- ZCode Multi-Instance (PR 8, derived - see notes) ---"
+    echo " 10) Launch a ZCode clone (Second..Sixth)"
+    echo " 11) Reset a ZCode clone (identity + userData)"
+    echo " 12) Launch a light headless worker (clone home)"
     echo "  0) Exit"
     echo ""
-    read -r -p "Select an option [0-9]: " choice
+    read -r -p "Select an option [0-12]: " choice
     case "$choice" in
         # || true: a child exiting non-zero (declined kill, non-root
         # ResetMachineId, failed reset) must not kill the menu via set -e.
@@ -36,6 +40,15 @@ while true; do
         7) bash "$LINUX_DIR/reset_minimax_opencode.sh"          || true ;;
         8) bash "$LINUX_DIR/change_device_id.sh" Fingerprint    || true ;;
         9) bash "$LINUX_DIR/change_device_id.sh" ResetMachineId || true ;;
+        10)
+            read -r -p "Instance (Second|Third|Fourth|Fifth|Sixth): " inst
+            bash "$LINUX_DIR/launch_zcode_clone.sh" --instance "$inst"    || true ;;
+        11)
+            read -r -p "Instance (Second|Third|Fourth|Fifth|Sixth): " inst
+            bash "$LINUX_DIR/reset_zcode.sh" --instance "$inst"           || true ;;
+        12)
+            read -r -p "Instance (Second|Third|Fourth|Fifth|Sixth): " inst
+            bash "$LINUX_DIR/launch_zcode_cli_light.sh" --instance "$inst" || true ;;
         0) info "Goodbye."; exit 0                                     ;;
         *) err "Invalid option: $choice"                               ;;
     esac

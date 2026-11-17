@@ -15,7 +15,32 @@
 # The shared CLI session store (~/.zcode/cli/db/db.sqlite) is deliberately
 # NOT touched here: on Windows the reset script treats it the same way
 # (clone resets do not scrub the shared db - reset-menu hardening plan).
+#
+# Usage (PR 8, 2026-11-17):
+#   ./reset_zcode.sh                     # the Primary (default profile)
+#   ./reset_zcode.sh --instance Second   # clone reset: roots the SAME v0.2
+#       steps at the frozen clone layout (~/ZCode<Name>Home/.zcode +
+#       ~/ZCode-<Name> userData, mirroring the Windows launcher), then
+#       backs up + sweeps the desktop userData tree.
 set -euo pipefail
+
+RESET_INSTANCE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --instance) RESET_INSTANCE="$2"; shift 2 ;;
+        *) err "unknown argument: $1"; exit 1 ;;
+    esac
+done
+declare -A CLONE_HOME_NAME=( [Second]=ZCodeSecondHome [Third]=ZCodeThirdHome [Fourth]=ZCodeFourthHome [Fifth]=ZCodeFifthHome [Sixth]=ZCodeSixthHome )
+declare -A CLONE_USERDATA_NAME=( [Second]=ZCode-Second [Third]=ZCode-Third [Fourth]=ZCode-Fourth [Fifth]=ZCode-Fifth [Sixth]=ZCode-Sixth )
+IS_CLONE=0
+if [[ -n "$RESET_INSTANCE" ]]; then
+    if [[ -z "${CLONE_HOME_NAME[$RESET_INSTANCE]:-}" ]]; then
+        err "unknown --instance '$RESET_INSTANCE' (known: Second Third Fourth Fifth Sixth)"
+        exit 1
+    fi
+    IS_CLONE=1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=src/linux/id_reset_common.sh
@@ -31,6 +56,16 @@ resolve_ghost_cli || {
 
 path_report=$(python3 "$GHOST_CLI_PATH" paths zcode)
 CONFIG_ROOT=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['paths']['config'])" "$path_report")
+CLI_DIR_OVERRIDE=""
+if [[ "$IS_CLONE" -eq 1 ]]; then
+    # Clone reset (PR 8): the SAME v0.2 steps rooted at the frozen clone
+    # layout. The desktop clone does NOT use ~/.config/ZCode - its Electron
+    # store lives in ~/ZCode-<Name> (USER_DATA_DIR), so the electron-stores
+    # step below re-targets the clone userData.
+    CONFIG_ROOT="$HOME/${CLONE_USERDATA_NAME[$RESET_INSTANCE]}"
+    CLI_DIR_OVERRIDE="$HOME/${CLONE_HOME_NAME[$RESET_INSTANCE]}/.zcode"
+    ok "clone reset: $RESET_INSTANCE (userData $CONFIG_ROOT, cli $CLI_DIR_OVERRIDE)"
+fi
 UNVERIFIED=$(python3 -c "import json,sys; print(', '.join(json.loads(sys.argv[1])['unverified']))" "$path_report")
 if [[ -n "$UNVERIFIED" ]]; then
     warn "PROVENANCE: the following paths are DERIVED (Windows layout + Linux"
@@ -51,8 +86,13 @@ generate_ids() {
 ensure_not_running "zcode"
 
 if [[ ! -d "$CONFIG_ROOT" ]]; then
-    err "ZCode installation not found at: $CONFIG_ROOT (store may live elsewhere on this distro - live verification pending)."
-    exit 1
+    if [[ "$IS_CLONE" -eq 1 ]]; then
+        warn "clone userData dir absent ($CONFIG_ROOT) - creating (the launcher pre-creates it; a fresh clone here = the identity scrub runs on .zcode only)."
+        mkdir -p "$CONFIG_ROOT"
+    else
+        err "ZCode installation not found at: $CONFIG_ROOT (store may live elsewhere on this distro - live verification pending)."
+        exit 1
+    fi
 fi
 
 BACKUP_ROOT="$CONFIG_ROOT/ID_Backups/$(timestamp)"
@@ -82,6 +122,7 @@ fi
 # specific FILES are derived from the Windows layout - surfaced unverified
 # by the paths verb above).
 CLI_DIR=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['paths']['cli_dir'])" "$path_report")
+if [[ "$IS_CLONE" -eq 1 ]]; then CLI_DIR="$CLI_DIR_OVERRIDE"; fi
 TELEMETRY_STATE="$CLI_DIR/v2/telemetry-state.json"
 CREDENTIALS_JSON="$CLI_DIR/v2/credentials.json"
 SETTING_JSON="$CLI_DIR/v2/setting.json"
@@ -150,6 +191,32 @@ if [[ "$SYSTEM_MACHINE_ID_SKIPPED" == "true" ]]; then
 else
     audit_line "$AUDIT_FILE" "/etc/machine-id" "-" "reset" 1
     PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+# Clone-only: back up + sweep the desktop userData tree (config/session) -
+# the Windows clone-reset contract (a fresh relaunch rebuilds it).
+if [[ "$IS_CLONE" -eq 1 ]]; then
+    info ""
+    info "[6/6] Clone userData cleanup (backup-first)..."
+    USERDATA_ROOT="$HOME/${CLONE_USERDATA_NAME[$RESET_INSTANCE]}"
+    for SUB in config session; do
+        SUB_DIR="$USERDATA_ROOT/$SUB"
+        if [[ -d "$SUB_DIR" ]]; then
+            if python3 "$GHOST_CLI_PATH" sweep-tree "$SUB_DIR" "$BACKUP_ROOT" "userdata-$SUB"; then
+                ok "userData/$SUB cleared (backed up)."
+                audit_line "$AUDIT_FILE" "$SUB_DIR" "-" "swept" 1
+                PASS_COUNT=$((PASS_COUNT + 1))
+            else
+                err "userData/$SUB sweep FAILED."
+                audit_line "$AUDIT_FILE" "$SUB_DIR" "-" "failed" 0
+                FAIL_COUNT=$((FAIL_COUNT + 1))
+            fi
+        else
+            warn "userData/$SUB absent - skipped."
+            audit_line "$AUDIT_FILE" "$SUB_DIR" "missing" "skipped" 1
+            PASS_COUNT=$((PASS_COUNT + 1))
+        fi
+    done
 fi
 
 RESTORE_SCRIPT=$(emit_restore_script "$BACKUP_ROOT")

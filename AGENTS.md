@@ -49,7 +49,44 @@ src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE reset
                                #     stdin builder now lives in the lib; platform.py Linux
                                #     labels extended for all of the above (all DERIVED-
                                #     flagged until a live Linux host verifies —
-                               #     test_ghost_platform pins them unverified)
+                               #     test_ghost_platform pins them unverified);
+                               #   PR 8 - ZCODE LINUX CLONE LAYER (2026-11-17,
+                               #     live acceptance = user-supervised on a Linux
+                               #     host; Phase-0 research EVIDENCE-CITED in the
+                               #     launcher header: Linux desktop builds are real
+                               #     [electron-builder linux targets, executableName
+                               #     "zcode"] and ALL FIVE isolation levers are
+                               #     platform-independent app code
+                               #     [packages/desktop/src/main/desktopRuntimeEnv.ts +
+                               #     ZCODE_HOME for the CLI root]):
+                               #   launch_zcode_clone.sh — per-clone launcher
+                               #     (Second..Sixth; FROZEN cross-platform layout
+                               #     ~/ZCode<Name>Home/.zcode + ~/ZCode-<Name>
+                               #     userData mirroring the Windows launcher); first-
+                               #     run seed from ~/.zcode (live-lock excludes, the
+                               #     .zcode-seeding/.zcode-seeded marker gates) +
+                               #     identity scrub via the Python core — FAILS CLOSED
+                               #     without it (a clone never runs on Primary
+                               #     identity); Primary-closed gate (180s wait);
+                               #     identity on Linux = ZCODE_INSTANCE_NAME title +
+                               #     per-color branding (NO property store — taskbar
+                               #     grouping is not a Linux concept); --zcode-bin
+                               #     pins the binary (DERIVED probe: PATH + /opt + user
+                               #     bins); --no-seed-scrub = dev escape hatch only;
+                               #   launch_zcode_cli_light.sh — the light headless
+                               #     worker (the Windows five-lever set MINUS the
+                               #     desktop-userData levers, headless = no Electron);
+                               #     --app-dir pins the install root (the
+                               #     resources/glm/zcode.cjs bundle; DERIVED probe);
+                               #     the free-model login recipe printed per the
+                               #     Windows verified limits; refuses an unseeded home;
+                               #   reset_zcode.sh --instance Second..Sixth — clone
+                               #     reset: the SAME v0.2 steps rooted at the clone
+                               #     layout + backup-first sweep-tree of the desktop
+                               #     userData (config/session); Primary stays
+                               #     fail-closed on an absent store;
+                               #   ghost.sh options 10-12 wired; static Pester:
+                               #     tests/linux_clone_layer.Tests.ps1 (18)
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,
