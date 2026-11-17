@@ -8,6 +8,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Cline light headless worker (2026-11-17)** — the Cline suite gains the
+  ZCode/OpenCode light-worker capability: `src\windows\launch_cline_cli_light.ps1`
+  (Cline [22] / gid 122; [23] / gid 123 = the one-time CLI account login row)
+  runs the desktop install's OWN standalone CLI (`cline-cli.exe`, a Bun SEA,
+  v3.0.74 — the same engine the desktop app spawns as its hub/sidecar
+  daemons) on the clone's own `CLINE_DIR` state with the clone's frozen
+  `CLINE_HUB_PORT`/`CLINE_SIDECAR_PORT` (port-table drift tripwired to
+  `launch_cline_clone.ps1` by `tests/cline_cli_light.Tests.ps1`, 18).
+  Modes: interactive CLI session (default; the CLI's own act-mode +
+  auto-approval defaults are loud in the banner), `-Prompt` one-shot
+  (`-Json` = `--json` headless output, `-Timeout`, `-Model`,
+  `-NoAutoApprove` = `--auto-approve false`, `-Yolo` = the CLI's limited
+  `-y` set), `-Auth` = the interactive `auth` flow (exit-code gated — no
+  file-verified persistence check exists yet). Honest limits in the header:
+  a held desktop hub lock WARNs (never blocks — shared-home semantics; the
+  CLI is expected to attach to the running hub, UNVERIFIED) and login
+  persistence location is UNVERIFIED (the desktop web login may not cover
+  the CLI). Phase-0 evidence recorded in the header: `--help` captured
+  2026-11-17 (positional prompt = one-shot; `--json`/piped stdin =
+  headless). GHOST.bat dispatch header corrected to the real range
+  (1-123; **5 unused** — the carried "63 unused" figure was arithmetically
+  wrong; the integrity test only pins the upper bound). Live acceptance
+  (hub attach while the desktop clone runs, CLI login persistence) recorded
+  in TASK_BACKLOG.
 - **OpenCode definitions-only Primary→clone config sync (CS-1, 2026-11-16)** —
   the scrub design in `docs\OPENCODE_CONFIG_SYNC_PLAN.md` is implemented
   (D2 = the doc's default, developer-picked: sync provider definitions

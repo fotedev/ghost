@@ -340,6 +340,25 @@ manual sign-in. Menu equivalents: launch c1/c2/c3/c4/c5 = Cline
 [1]/[2]/[3]/[4]/[5]; all five = Cline [6]; status = Cline [8];
 shortcuts = Cline [7] (`-Remove` = [9]).
 
+### Cline light headless worker (Cline [22] / [23])
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_cline_cli_light.ps1" -Instance c1
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_cline_cli_light.ps1" -Instance c1 -Prompt "fix the failing tests" -Json   # one-shot, machine output
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_cline_cli_light.ps1" -Instance c2 -Prompt "review this diff" -Timeout 300 -NoAutoApprove
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_cline_cli_light.ps1" -Instance c1 -Auth   # one-time CLI account login
+```
+
+Runs `cline-cli.exe` (the desktop install's own standalone CLI, a Bun SEA —
+the same engine the desktop app spawns as its hub/sidecar daemons) on the
+clone's own `CLINE_DIR` state with the clone's fixed
+`CLINE_HUB_PORT`/`CLINE_SIDECAR_PORT`. The interactive mode and one-shot
+`-Prompt` runs default to ACT MODE with tool auto-approval ON (the CLI's
+own defaults — use `-NoAutoApprove` to gate approvals). A running desktop
+clone only WARNS (shared home; the CLI is expected to attach to its hub).
+The desktop web login may not cover the CLI — if a headless run reports an
+auth error, run the [23] login row once for that clone.
+
 ### Cline identity reset (Cline [10]-[16])
 
 ```powershell

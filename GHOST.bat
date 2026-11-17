@@ -292,6 +292,10 @@ call :Div "Watchers"
 call :Opt 20 "Instance pressure report" "- read-only - instances, commit RAM, log scan"
 call :Opt 21 "Dry-run reset plan" "- what a reset would touch - writes nothing"
 echo.
+call :Div "Light Worker"
+call :Opt 22 "Launch light headless worker" "- CLI only - no desktop window - low RAM"
+call :Opt 23 "CLI account login" "- one-time setup for the light worker"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto CLINE_PROMPT
@@ -548,6 +552,10 @@ if "%~1"=="18" set "RESOLVED=112"
 if "%~1"=="19" set "RESOLVED=113"
 if "%~1"=="20" set "RESOLVED=117"
 if "%~1"=="21" set "RESOLVED=120"
+rem 2026-11-17: locals 22-23 = the Light Worker section (gids 122/123; the
+rem cline-cli.exe headless worker + its one-time CLI account login row).
+if "%~1"=="22" set "RESOLVED=122"
+if "%~1"=="23" set "RESOLVED=123"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -595,7 +603,7 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-121; 63 unused; 74 = the AutoClaw2 MCP sync
+rem Runs one task by global id (1-123; 5 unused; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
 rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
@@ -604,7 +612,9 @@ rem identity resets; 98-104 = the OpenCode identity resets; 105-107 = the
 rem AutoClaw2/Cline/OpenCode Task-Manager exe-identity rebuilds; 108 = the
 rem ZCode clone status row, appended 2026-11-14; 110/111 = the OpenCode
 rem definitions sync row + the OpenCode config sync watcher, CS-1 v2
-rem 2026-11-17).
+rem 2026-11-17; 112/113 = the Cline MCP sync rows; 117 = the Cline pressure
+rem report; 120/121 = the Cline/OpenCode dry-run reset plans; 122/123 = the
+rem Cline light worker + its CLI account login, 2026-11-17).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -712,6 +722,8 @@ if "%~1"=="105" (call :Run "tools\patch_autoclaw2_exe_identity.ps1" -Target All 
 if "%~1"=="106" (call :Run "tools\patch_cline_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="112" (call :Run "tools\sync_cline_mcp.ps1" -Target All & exit /b)
 if "%~1"=="113" (call :Run "tools\sync_cline_mcp.ps1" -Target All -DryRun & exit /b)
+if "%~1"=="122" (call :Detached "Cline Light Worker" "-NoProfile" "src\windows\launch_cline_cli_light.ps1" "" "Light worker opened in a separate window - type tasks there, exit the CLI to stop." "Headless cline-cli on the clone's own state. ACT MODE + tool auto-approval are the CLI's defaults - review before Enter." & exit /b)
+if "%~1"=="123" (call :Detached "Cline Clone CLI Login" "-NoProfile" "src\windows\launch_cline_cli_light.ps1" "-Auth" "Login window opened - follow the interactive flow for THIS clone's account." "One-time per clone home: runs the CLI's own auth flow. The desktop web login may not cover the CLI - if a headless run reports an auth error, use this row." & exit /b)
 if "%~1"=="107" (call :Run "tools\patch_opencode_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="110" (call :Run "tools\sync_opencode_config.ps1" -Target All & exit /b)
 if "%~1"=="111" (call :Detached "OpenCode Config Sync Watcher" "-NoProfile" "tools\watch_opencode_config_sync.ps1" "" "Config sync watcher opened in a separate window - it keeps running; close it to stop." "Syncs MCP + provider definitions from the Primary OpenCode config to every clone on change. Log: %LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log" & exit /b)

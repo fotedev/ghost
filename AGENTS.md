@@ -15,7 +15,7 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   Clones [1]-[33] / System & GHOST Maintenance
                                              #   [1]-[5] / AutoClaw2 Multi-Instance & Clones
                                              #   [1]-[25] / Cline Multi-Instance & Clones
-                                             #   [1]-[21] / OpenCode Multi-Instance & Clones
+                                             #   [1]-[23] / OpenCode Multi-Instance & Clones
                                              #   [1]-[25]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
@@ -1267,6 +1267,34 @@ launch_cline_clone.ps1             # Cline desktop clone launcher -Instance c1..
                                    #   running-guard ABORTS (app-level guard is neutralized),
                                    #   post-launch checks: state dir + both ports + window gone
 launch_cline_clones_all.ps1        # sequential all-five (fixed 12s stagger)
+launch_cline_cli_light.ps1         # Cline LIGHT headless worker -Instance c1..c5 (Cline
+                                   #   [22] / gid 122; + [23] / gid 123 = -Auth login row;
+                                   #   2026-11-17): runs the desktop install's OWN standalone
+                                   #   CLI binary (cline-cli.exe, a Bun SEA 3.0.74 = the same
+                                   #   engine the desktop spawns as its hub/sidecar daemons;
+                                   #   ladder = -ClineBin override -> %LOCALAPPDATA%\Cline\
+                                   #   cline-cli.exe -> `cline` on PATH, functional --version
+                                   #   probe = bare semver) on the clone's own state via the
+                                   #   SAME env levers the desktop launcher sets (CLINE_DIR=
+                                   #   ClineClonesHome\cN + the frozen per-clone
+                                   #   CLINE_HUB_PORT/CLINE_SIDECAR_PORT 25471..25475/
+                                   #   3131..3135 - a drift tripwire test pins the port table
+                                   #   to launch_cline_clone.ps1's). Modes: interactive CLI
+                                   #   session (default; the CLI's own defaults apply and are
+                                   #   loud: act mode + tool auto-approval ON), -Prompt one-shot
+                                   #   (positional prompt = the CLI's one-shot contract;
+                                   #   -Json = --json headless output, -Timeout = -t,
+                                   #   -Model = -m, -NoAutoApprove = --auto-approve false,
+                                   #   -Yolo = the CLI's limited-set -y), -Auth = interactive
+                                   #   `auth` flow exit-code-gated. HONEST LIMITS (header,
+                                   #   DERIVED): a held desktop hub lock WARNs (never blocks -
+                                   #   shared-home semantics; the CLI is expected to ATTACH to
+                                   #   the running hub, unverified) and login persistence has
+                                   #   no file-verified check yet (the desktop web login may
+                                   #   not cover the CLI - the [23] row is the fix; live
+                                   #   acceptance). Phase-0 evidence: --help captured 2026-11-17
+                                   #   (positional prompt one-shot, --json headless);
+                                   #   Pester: tests/cline_cli_light.Tests.ps1 (18)
 launch_opencode_clone.ps1          # OpenCode desktop clone launcher -Instance c1..c5 + -Status
                                    #   (Electron 2.0.32, asInvoker; see the OpenCode conventions
                                    #   section): argv isolation --opencode-clone-home=<home> consumed

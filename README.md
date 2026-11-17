@@ -43,6 +43,7 @@ touches, and emits an audit log plus a self-contained restore script.
 | ZCode Primary (stock profile, never elevated) | `launch_zcode_primary.ps1` (explorer spawn, verify-after) | — |
 | ZCode light headless worker (no desktop window) | `launch_zcode_cli_light.ps1 -Instance Second\|...\|Sixth` (`-Prompt` / `-Server`) | `launch_zcode_cli_light.sh --instance Second\|...\|Sixth` (`-p` one-shot; PR 8, derived) |
 | OpenCode light headless worker (CLI only, clone XDG state) | `launch_opencode_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` / `-Server` / `-Login` / `-StopService`) | — |
+| Cline light headless worker (cline-cli.exe on the clone's CLINE_DIR state) | `launch_cline_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` one-shot / `-Json` / `-Auth`) | — |
 | Reset AutoClaw2 (Primary + clones, chats/work kept) | `reset_autoclaw2.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
 | Reset Cline (Primary + clones, chats/tasks kept) | `reset_cline.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
 | Reset OpenCode desktop (Primary + clones, chats/repos kept) | `reset_opencode.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — |
