@@ -326,6 +326,28 @@ if (-not $SkipMcpSync) {
     Write-Host '[2b] MCP sync skipped (-SkipMcpSync).'
 }
 
+# --- [2f] Task Manager identity - per-color exe copy (2026-11-17) -------------
+# The ZCode launcher step-2f pattern (see the AutoClaw2 launcher for the full
+# rationale; the 2026-11-14 repo-only opt-in decision is REVERSED by the
+# parity build-out plan). Best-effort by contract: any failure falls back to
+# the stock exe with a loud warning - never blocks the launch.
+$ExeIdentityTool = Join-Path $PSScriptRoot '..\..\tools\patch_cline_exe_identity.ps1'
+$ExeColorCap = @{ c1 = 'Blue'; c2 = 'Yellow'; c3 = 'Green'; c4 = 'Red'; c5 = 'Orange' }[$Instance]
+$LaunchExe = $ExePath
+$CloneExe = Join-Path (Split-Path -Parent $ExePath) "Cline-$ExeColorCap.exe"
+Write-Host '[2f] Task Manager identity - per-color exe copy'
+if (Test-Path -LiteralPath $ExeIdentityTool) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExeIdentityTool -Target $Instance -InstallDir (Split-Path -Parent $ExePath)
+    if (($LASTEXITCODE -eq 0) -and (Test-Path -LiteralPath $CloneExe)) {
+        $LaunchExe = $CloneExe
+        Write-Host "[launch] starting from Cline-$ExeColorCap.exe (colored Task Manager group)." -ForegroundColor Green
+    } else {
+        Write-Host "[launch] exe copy unavailable (tool exit $LASTEXITCODE) - starting from the stock cline-app.exe; Task Manager keeps the stock row." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host '[launch] tools\patch_cline_exe_identity.ps1 not found - starting from the stock cline-app.exe.' -ForegroundColor Yellow
+}
+
 # --- Neutralize the single-instance window (pre-launch) ---------------------
 # Covers a stock Cline that started earlier and created the window.
 if (-not (Neutralize-SingleInstanceWindow)) {
@@ -345,7 +367,7 @@ Write-Host "  WEBVIEW2_USER_DATA_FOLDER = $env:WEBVIEW2_USER_DATA_FOLDER"
 Write-Host "  CLINE_HUB_PORT            = $env:CLINE_HUB_PORT"
 Write-Host "  CLINE_SIDECAR_PORT        = $env:CLINE_SIDECAR_PORT"
 
-$proc = Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath) -PassThru
+$proc = Start-Process -FilePath $LaunchExe -WorkingDirectory (Split-Path $LaunchExe) -PassThru
 Write-Host "spawned pid $($proc.Id)."
 
 # Window-level identity targets (CS-2): the AUMID must EQUAL the shortcut's

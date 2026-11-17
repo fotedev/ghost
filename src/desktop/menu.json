@@ -199,7 +199,8 @@
           "Taskbar watcher opened in a separate window - it keeps running; close it to stop.",
           "Re-stamps window AUMIDs + heals the Primary lnk. Log: %LOCALAPPDATA%\\watch-autoclaw2-taskbar\\taskbar.log"
         ] },
-        { "gid": 116, "label": "Instance pressure report", "tail": "- read-only - instances, commit RAM, log scan", "mode": "inline", "script": "tools/diagnose_suite_pressure.ps1", "args": ["-Suite", "autoclaw2"], "notes": [] }
+        { "gid": 116, "label": "Instance pressure report", "tail": "- read-only - instances, commit RAM, log scan", "mode": "inline", "script": "tools/diagnose_suite_pressure.ps1", "args": ["-Suite", "autoclaw2"], "notes": [] },
+        { "gid": 119, "label": "Dry-run reset plan", "tail": "- what a reset would touch - writes nothing", "mode": "inline", "script": "src/windows/reset_autoclaw2.ps1", "args": ["-Target", "All", "-DryRun"], "notes": [] }
       ]
     },
     {
@@ -259,7 +260,8 @@
         ] },
         { "gid": 112, "label": "Sync MCPs to all clones", "tail": "- Primary to c1..c5 - running clones skipped", "mode": "inline", "script": "tools/sync_cline_mcp.ps1", "args": ["-Target", "All"], "notes": [] },
         { "gid": 113, "label": "Sync MCPs dry-run plan", "tail": "- shows what would change, writes nothing", "mode": "inline", "script": "tools/sync_cline_mcp.ps1", "args": ["-Target", "All", "-DryRun"], "notes": [] },
-        { "gid": 117, "label": "Instance pressure report", "tail": "- read-only - instances, commit RAM, log scan", "mode": "inline", "script": "tools/diagnose_suite_pressure.ps1", "args": ["-Suite", "cline"], "notes": [] }
+        { "gid": 117, "label": "Instance pressure report", "tail": "- read-only - instances, commit RAM, log scan", "mode": "inline", "script": "tools/diagnose_suite_pressure.ps1", "args": ["-Suite", "cline"], "notes": [] },
+        { "gid": 120, "label": "Dry-run reset plan", "tail": "- what a reset would touch - writes nothing", "mode": "inline", "script": "src/windows/reset_cline.ps1", "args": ["-Target", "All", "-DryRun"], "notes": [] }
       ]
     },
     {
@@ -337,7 +339,8 @@
           "Taskbar watcher opened in a separate window - it keeps running; close it to stop.",
           "Re-stamps window AUMIDs + heals the Primary lnk. Log: %LOCALAPPDATA%\\watch-opencode-taskbar\\taskbar.log"
         ] },
-        { "gid": 118, "label": "Instance pressure report", "tail": "- read-only - instances, commit RAM, log scan", "mode": "inline", "script": "tools/diagnose_suite_pressure.ps1", "args": ["-Suite", "opencode"], "notes": [] }
+        { "gid": 118, "label": "Instance pressure report", "tail": "- read-only - instances, commit RAM, log scan", "mode": "inline", "script": "tools/diagnose_suite_pressure.ps1", "args": ["-Suite", "opencode"], "notes": [] },
+        { "gid": 121, "label": "Dry-run reset plan", "tail": "- what a reset would touch - writes nothing", "mode": "inline", "script": "src/windows/reset_opencode.ps1", "args": ["-Target", "All", "-DryRun"], "notes": [] }
       ]
     },
     {

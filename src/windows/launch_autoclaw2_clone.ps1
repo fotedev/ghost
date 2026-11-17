@@ -340,6 +340,33 @@ if (Test-Path -LiteralPath $identityMarker) {
     Write-Warning "$identityNote. One-time fix: GHOST.bat > AutoClaw2 > [13] (tools\patch_autoclaw2_identity.ps1)."
 }
 
+# --- [2f] Task Manager identity - per-color exe copy (2026-11-17) -------------
+# The ZCode launcher step-2f pattern: ensure the AutoClaw2-<Color>.exe copy in
+# the install dir is present and fresh (the patcher's marker fast-check makes
+# a fresh copy cost ~nothing per launch), then launch THIS clone from the
+# copy. Task Manager renders background-process groups from the executable
+# IMAGE itself, so every instance on the stock AutoClaw2.exe renders as an
+# identical stock "AutoClaw2 (N)" row. The 2026-11-14 repo-only opt-in
+# decision is REVERSED by the parity build-out plan. Best-effort by contract:
+# any failure falls back to the stock exe with a loud warning - never blocks
+# the launch.
+$ExeIdentityTool = Join-Path $PSScriptRoot '..\..\tools\patch_autoclaw2_exe_identity.ps1'
+$ExeColorCap = @{ c1 = 'Blue'; c2 = 'Yellow'; c3 = 'Green'; c4 = 'Red'; c5 = 'Orange' }[$Instance]
+$LaunchExe = $ExePath
+$CloneExe = Join-Path (Split-Path -Parent $ExePath) "AutoClaw2-$ExeColorCap.exe"
+Write-Host '[2f] Task Manager identity - per-color exe copy'
+if (Test-Path -LiteralPath $ExeIdentityTool) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExeIdentityTool -Target $Instance -InstallDir (Split-Path -Parent $ExePath)
+    if (($LASTEXITCODE -eq 0) -and (Test-Path -LiteralPath $CloneExe)) {
+        $LaunchExe = $CloneExe
+        Write-Host "[launch] starting from AutoClaw2-$ExeColorCap.exe (colored Task Manager group)." -ForegroundColor Green
+    } else {
+        Write-Host "[launch] exe copy unavailable (tool exit $LASTEXITCODE) - starting from the stock AutoClaw2.exe; Task Manager keeps the stock row." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host '[launch] tools\patch_autoclaw2_exe_identity.ps1 not found - starting from the stock AutoClaw2.exe.' -ForegroundColor Yellow
+}
+
 Write-Host "launching AutoClaw2 clone '$Instance' ..."
 Write-Host "  ZWORK_USER_DATA       = $env:ZWORK_USER_DATA"
 Write-Host "  AUTOCLAW_PROFILE_ROOT = $env:AUTOCLAW_PROFILE_ROOT"
@@ -347,7 +374,7 @@ Write-Host "  ZWORK_AUMID           = $env:ZWORK_AUMID"
 Write-Host "  ZWORK_CLONE_ICON      = $(if ($env:ZWORK_CLONE_ICON) { $env:ZWORK_CLONE_ICON } else { '<unset>' })"
 Write-Host "  $identityNote"
 
-$launched = Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath) -PassThru
+$launched = Start-Process -FilePath $LaunchExe -WorkingDirectory (Split-Path $LaunchExe) -PassThru
 
 # Verify-after-launch (never-silent-success): Start-Process proves spawn, not
 # survival - the v1 suite's 2026-10-15 crash class died within seconds on a

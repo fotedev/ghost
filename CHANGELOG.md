@@ -166,6 +166,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Menu wiring: AutoClaw2 [24] = **gid 116**, Cline [20] = **gid 117**,
   OpenCode [24] = **gid 118** (dispatch header → 1-118; hub-test ceiling →
   118). Pester: `tests\diagnose_suite_pressure.Tests.ps1` (11).
+- **Launcher 2f exe-identity wiring + per-suite dry-run rows (2026-11-17)** —
+  the last parity deltas. **Launcher step 2f** ported to all three suites
+  (`launch_autoclaw2_clone.ps1` `[2f]`, `launch_cline_clone.ps1` `[2f]`,
+  `launch_opencode_clone.ps1` `[2f/5]`): marker fast-check → spawn
+  `patch_<app>_exe_identity.ps1 -Target <instance> -InstallDir ...` on drift
+  → launch from `<App>-<Color>.exe` with the STOCK-exe fallback + loud
+  warning on any failure (never blocks the launch) — the ZCode step-2f
+  pattern verbatim-adapted. **The 2026-11-14 "repo-only opt-in" decision is
+  REVERSED by the parity build-out plan** (~1.2 GB disk per suite; copies
+  lose Authenticode validity — the SmartScreen caveat stays hedged in
+  docs). **Dry-run reset plan rows** (the gid-109 pattern): AutoClaw2 [25] =
+  **gid 119**, Cline [21] = **gid 120**, OpenCode [25] = **gid 121**
+  (`reset_<app>.ps1 -Target All -DryRun`, matching `menu.json` rows;
+  dispatch header → 1-121; hub-test ceiling → 121). Pester:
+  `tests\suite_launcher_2f.Tests.ps1` (9).
 - **Scaffold/icon LOWs — bug-sweep report 20 walk (BS-10 part 3 +
   DT-4, 2026-11-16)**: of report 20's findings, 5 were genuinely open (3
   MEDIUMs already fixed; one target fixed). `new_clone_suite.ps1`

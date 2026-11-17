@@ -237,6 +237,7 @@ echo.
 call :Div "Watchers"
 call :Opt 23 "Taskbar identity watcher" "- resident - re-stamps window AUMIDs + heals the Primary lnk"
 call :Opt 24 "Instance pressure report" "- read-only - instances, commit RAM, log scan"
+call :Opt 25 "Dry-run reset plan" "- what a reset would touch - writes nothing"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -289,6 +290,7 @@ call :Opt 19 "Sync MCPs dry-run plan" "- shows what would change, writes nothing
 echo.
 call :Div "Watchers"
 call :Opt 20 "Instance pressure report" "- read-only - instances, commit RAM, log scan"
+call :Opt 21 "Dry-run reset plan" "- what a reset would touch - writes nothing"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -345,6 +347,7 @@ echo.
 call :Div "Watchers"
 call :Opt 23 "Taskbar identity watcher" "- resident - re-stamps window AUMIDs + heals the Primary lnk"
 call :Opt 24 "Instance pressure report" "- read-only - instances, commit RAM, log scan"
+call :Opt 25 "Dry-run reset plan" "- what a reset would touch - writes nothing"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -513,6 +516,7 @@ if "%~1"=="21" set "RESOLVED=89"
 if "%~1"=="22" set "RESOLVED=90"
 if "%~1"=="23" set "RESOLVED=114"
 if "%~1"=="24" set "RESOLVED=116"
+if "%~1"=="25" set "RESOLVED=119"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -543,6 +547,7 @@ if "%~1"=="17" set "RESOLVED=97"
 if "%~1"=="18" set "RESOLVED=112"
 if "%~1"=="19" set "RESOLVED=113"
 if "%~1"=="20" set "RESOLVED=117"
+if "%~1"=="21" set "RESOLVED=120"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -583,13 +588,14 @@ if "%~1"=="21" set "RESOLVED=110"
 if "%~1"=="22" set "RESOLVED=111"
 if "%~1"=="23" set "RESOLVED=115"
 if "%~1"=="24" set "RESOLVED=118"
+if "%~1"=="25" set "RESOLVED=121"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-118; 63 unused; 74 = the AutoClaw2 MCP sync
+rem Runs one task by global id (1-121; 63 unused; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
 rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
@@ -714,6 +720,9 @@ if "%~1"=="115" (call :Detached "OpenCode Taskbar Watcher" "-NoProfile" "tools\w
 if "%~1"=="116" (call :Run "tools\diagnose_suite_pressure.ps1" -Suite autoclaw2 & exit /b)
 if "%~1"=="117" (call :Run "tools\diagnose_suite_pressure.ps1" -Suite cline & exit /b)
 if "%~1"=="118" (call :Run "tools\diagnose_suite_pressure.ps1" -Suite opencode & exit /b)
+if "%~1"=="119" (call :Run "src\windows\reset_autoclaw2.ps1" -Target All -DryRun & exit /b)
+if "%~1"=="120" (call :Run "src\windows\reset_cline.ps1" -Target All -DryRun & exit /b)
+if "%~1"=="121" (call :Run "src\windows\reset_opencode.ps1" -Target All -DryRun & exit /b)
 if "%~1"=="81" (call :RunWith "tools\build_ghost_exe.ps1" "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or after moving this repo folder." & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)
