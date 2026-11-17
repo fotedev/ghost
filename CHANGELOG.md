@@ -8,6 +8,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **CI Linux helper-contract lane (2026-11-17)** — a new `linux-helpers`
+  ubuntu job that closes the bug class `bash -n` + shellcheck cannot see:
+  a MISSING shared function (the `b64_json` latent bug — a helper consumed
+  by the shared `reset_electron_stores` but defined only in cursor/trae —
+  killed four reset scripts at step 1 under `set -e` and passed every
+  static gate). The job sources `id_reset_common.sh` and (1) asserts a
+  29-name contract list of shared helpers is DEFINED (new shared helpers
+  must be added to the list — the workflow comment says so), (2)
+  fixture-exercises the core helpers end-to-end: `b64_json_stdin` round
+  trip, `b64_kv_payload`→`json-set`, `b64_remove_payload`→`json-remove`,
+  the `core_json_remove` wrapper + backup dir, `rotate_text_file` +
+  verify-after + audit line, and `verify_json_keys` positive AND negative
+  honesty. Runs with a functional `has_python3` probe (the PR-#97 fix) so
+  a stub interpreter can never pass the lane.
+
 - **ZCode Linux MCP definitions sync (2026-11-17)** — the Linux twin of the
   Windows `sync_zcode_assets.ps1` MCP area: `src/linux/sync_zcode_assets.sh`
   v0.1 (ghost.sh option 13) syncs the Primary's `~/.zcode/cli/config.json`
