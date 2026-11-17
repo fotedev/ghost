@@ -8,6 +8,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **macOS platform maps for every slug (2026-11-18)** — the follow-up to the
+  macOS Qoder wave (issue #36): `ghost/platform.py` now carries a `macos`
+  column for ALL slugs (cursor, devin, trae, qoderwork, zcode, minimax,
+  opencode-cli join qoder), so `ghost_cli.py paths <slug>` on a darwin host
+  returns honest derived paths for every app instead of a loud "unmapped"
+  error. Conventions: Electron userData under
+  `~/Library/Application Support/<App>` (devin keeps the Windsurf product
+  name, matching its linux column), platform-agnostic CLI dot-dirs per the
+  Linux wave, and opencode's XDG rows keep their unset-env defaults
+  (`~/.config`, `~/.local/share`) rather than `~/Library`. Every macOS row
+  is `verified: False` (no live Mac has confirmed any of them — ground
+  truth #5); the platform-integrity test now REQUIRES all three columns per
+  slug, pins every macOS row unverified + home-resolved, and asserts darwin
+  resolves every slug (mock-based, CI-OS-independent). Resetter scope is
+  unchanged: only `src/macos/reset_qoder.sh` ships; a future per-app
+  macOS resetter flips its own rows' provenance explicitly.
+
 - **CI Linux helper-contract lane (2026-11-17)** — a new `linux-helpers`
   ubuntu job that closes the bug class `bash -n` + shellcheck cannot see:
   a MISSING shared function (the `b64_json` latent bug — a helper consumed

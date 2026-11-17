@@ -161,6 +161,12 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   opt-in "macos" column (qoder rows, all DERIVED) + live
                                #   sys.platform three-way selector + LOUD error for a
                                #   darwin host asking for an unmapped slug (issue #36);
+                               #   2026-11-18: the macos column now covers ALL slugs
+                               #   (groundwork for future macOS resetters — Electron
+                               #   ~/Library/Application Support/<App> rows + platform-
+                               #   agnostic dot-dirs + unset-env XDG defaults; all
+                               #   verified: False until a live Mac verifies; integrity
+                               #   test requires all three columns per slug);
                                #   json_merge.py + `ghost_cli.py json-merge-defs` verb = the
                                #   Primary→clone DEFINITIONS-merge invariant ported from
                                #   tools/zcode_mcp_merge.ps1 (Primary wins, clone-local

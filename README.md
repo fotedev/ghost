@@ -32,13 +32,13 @@ touches, and emits an audit log plus a self-contained restore script.
 
 | Task | Windows | Linux | macOS |
 |------|---------|-------|-------|
-| Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` | — |
-| Reset Windsurf\Devin | `reset_devin.ps1` | `reset_devin.sh` | — |
-| Reset Trae | `reset_trae.ps1` | `reset_trae.sh` (v0.3: aha flag + iCubeAuthInfo removal + ckg_server local_env rotation; derived paths) | — |
+| Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` | platform map only (resetter pending, derived paths) |
+| Reset Windsurf\Devin | `reset_devin.ps1` | `reset_devin.sh` | platform map only (resetter pending, derived paths) |
+| Reset Trae | `reset_trae.ps1` | `reset_trae.sh` (v0.3: aha flag + iCubeAuthInfo removal + ckg_server local_env rotation; derived paths) | platform map only (resetter pending, derived paths) |
 | Reset Qoder | `reset_qoder.ps1` | `reset_qoder.sh` (v0.2: installation_id/.auth rotations; derived paths) | `reset_qoder.sh` (v0.1: full-attempt 9 steps - Electron stores, secret purge, salt, machineid files, ~/.qoder rotations, Library sweep, webview partitions; ALL paths DERIVED - live verification pending) |
-| Reset QoderWork | `reset_qoderwork.ps1` | `reset_qoderwork.sh` (v0.2: agents.db purge-tables; derived paths) | — |
-| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | `reset_zcode.sh` (v0.2: CLI v2 telemetry-state/credentials/setting scrubs; `--instance` = clone reset; shared CLI db untouched - matches Windows) | — |
-| Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | `reset_minimax_opencode.sh` (v0.2: mcode-public auth deletions + session-handoff device-id; derived paths; CLI XDG auth untouched) | — |
+| Reset QoderWork | `reset_qoderwork.ps1` | `reset_qoderwork.sh` (v0.2: agents.db purge-tables; derived paths) | platform map only (resetter pending, derived paths) |
+| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | `reset_zcode.sh` (v0.2: CLI v2 telemetry-state/credentials/setting scrubs; `--instance` = clone reset; shared CLI db untouched - matches Windows) | platform map only (resetter pending, derived paths) |
+| Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | `reset_minimax_opencode.sh` (v0.2: mcode-public auth deletions + session-handoff device-id; derived paths; CLI XDG auth untouched) | platform map only (resetter pending, derived paths) |
 | ZCode clones (Primary + 5 branded clones) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | `launch_zcode_clone.sh --instance Second\|...\|Sixth` (PR 8, derived - live acceptance pending) | — |
 | ZCode clone MCP sync (definitions-only) | `sync_zcode_assets.ps1 -McpOnly -Target Second\|...\|All` | `sync_zcode_assets.sh --instance Second\|...\|All\|--dry-run` (v0.1 MCP-only: core json-merge-defs verb; skills/plugins areas need LC-1 evidence) | — |
 | ZCode Primary (stock profile, never elevated) | `launch_zcode_primary.ps1` (explorer spawn, verify-after) | — | — |
@@ -74,13 +74,14 @@ Python 3 on `PATH` (SQLite writes run through the bundled stdlib-only core in
 `/proc/sys/kernel/random/uuid` · `openssl` or `xxd` · `sudo` only for
 `/etc/machine-id`.
 
-**macOS** (Qoder reset only, issue #36): stock `/bin/bash` 3.2 works (the
-scripts stay bash-3.2-safe) · python3 (ships with the Command Line Tools) ·
-`uuidgen` (ships with macOS) · the script runs unprivileged — system-level
-sources (IOPlatformUUID, Keychain safe-storage, hostname, MAC) are skipped
-loudly. All macOS store paths are DERIVED from the Windows layout until a
-live Mac verifies them (see the DERIVED-PATH SCOPE header in
-`src/macos/reset_qoder.sh`).
+**macOS** (issue #36): stock `/bin/bash` 3.2 works (the scripts stay
+bash-3.2-safe) · python3 (ships with the Command Line Tools) · `uuidgen`
+(ships with macOS) · the scripts run unprivileged — system-level sources
+(IOPlatformUUID, Keychain safe-storage, hostname, MAC) are skipped loudly.
+Every app's store paths are mapped for macOS in `ghost/platform.py` (all
+DERIVED from the Windows layout until a live Mac verifies them); the Qoder
+resetter is the only macOS reset script so far (see the DERIVED-PATH SCOPE
+header in `src/macos/reset_qoder.sh`).
 
 ```bash
 git clone https://github.com/fotedev/ghost.git
