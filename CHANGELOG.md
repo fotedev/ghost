@@ -8,6 +8,39 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **macOS Trae reset (2026-11-19)** — the third macOS resetter (issue #36
+  follow-up; Qoder + Cursor shipped first). **`src/macos/reset_trae.sh`**
+  (v0.1): 15 steps on the Windows `reset_trae.ps1` v0.3 + Linux
+  `reset_trae.sh` v0.3 step maps, all DERIVED-flagged and
+  absence-tolerant — machineId files in BOTH spellings, Electron stores
+  via the shared `reset_electron_stores`, the `iCubeAuthInfo://`
+  top-level-prefix removal from storage.json (json-remove prefixes mode;
+  the prefixed keys embed full URLs so dotted-path walking cannot address
+  them), the `has_device_id_updated_to_aha` = STRING `"false"` flag in
+  BOTH storage.json and state.vscdb (the Windows payload semantics; a
+  JSON string keeps the verify-after comparison deterministic), the aha
+  tree delete, the `ModularData/ckg_server/local_env.json` 19-digit
+  device_id rotation (the CSPRNG twin: python3 `secrets.randbelow(9 *
+  10**18) + 10**18`, first digit non-zero) + whole-`host_map` removal
+  (the Linux v0.3 decision vs Windows' `host_map.default=""`), the
+  `env_codekg.db` delete, the `ModularData/ai-agent` IDENTITY-ROWS-ONLY
+  scrub (core `scrub-rows` with its Trae defaults — key NAMES only,
+  values never inspected, chat rows survive; tree backed up first, every
+  `*.db` scrubbed with a per-DB zero-survivor gate), the Preferences
+  `device_id_salt` + Local State os_crypt pointer, the Network transport +
+  DIPS + SharedStorage + Trust Tokens sweeps, the webview/cache trees
+  (incl. `Partitions/trae-webview`, `WebStorage`, `Shared Dictionary`),
+  Crashpad + logs, and the workspaceStorage `serviceMachineId` upserts.
+  **Preservation policy**: Local Storage, the Backups tree, every
+  workspaceStorage file, and all ai-agent chat rows are NEVER touched
+  (loudly audited). Smoke-tested end-to-end on the dev host against a
+  seeded fake home: Pass 15 / Fail 0 first try, checker ALL PASS (53
+  assertions — identity cross-consistency, the fresh 19-digit device_id
+  format, the iCube prefix-anchoring decoy kept, chat rows intact, every
+  deletion and preservation), idempotent re-run all-skips, not-installed
+  abort exits 1 before any mutation. Live macOS acceptance remains
+  user-supervised.
+
 - **Gmail MCP server in the registry (2026-11-18)** — `master-mcp.json`
   gains `gmail` [only:zcode]: the local Go server
   (`rajesh-chettiar-insightgen/gmail-mcp-server`, built at
