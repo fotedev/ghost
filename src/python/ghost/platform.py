@@ -18,9 +18,14 @@ Provenance rules (ground truth #5 - never guess silently):
   the ``paths`` verb output so a caller can print the caveat loudly -
   live Linux/macOS verification is the follow-up.
 
-A ``"macos"`` column is opt-in per slug (2026-11-17, issue #36): only apps
-with a shipped macOS resetter map it, and a darwin host asking for an
-unmapped slug is a LOUD error - never a silent linux fallback.
+Every slug maps a ``"macos"`` column (2026-11-17 groundwork, issue #36,
+completed 2026-11-18): Electron userData lives under
+~/Library/Application Support/<App> on macOS, the CLI dot-dirs are
+platform-agnostic per the Linux wave, and XDG rows keep their unset-env
+defaults (~/.config, ~/.local/share). All macOS rows are DERIVED
+(``"verified": False``) until a live Mac verifies them; the selector still
+raises a LOUD error if a future slug ever misses a column - never a silent
+fallback to another platform.
 
 The Windows column exists so the same verb can serve cross-platform callers
 and future PS adoption; the PS scripts do NOT consume it yet (their inline
@@ -52,6 +57,11 @@ STORE_PATHS = {
             "storage_json": {"path": _home(".config/Cursor/User/globalStorage/storage.json"), "verified": True},
             "state_vscdb": {"path": _home(".config/Cursor/User/globalStorage/state.vscdb"), "verified": True},
         },
+        "macos": {
+            "config": {"path": _home("Library/Application Support/Cursor"), "verified": False},
+            "storage_json": {"path": _home("Library/Application Support/Cursor/User/globalStorage/storage.json"), "verified": False},
+            "state_vscdb": {"path": _home("Library/Application Support/Cursor/User/globalStorage/state.vscdb"), "verified": False},
+        },
     },
     "devin": {
         "windows": {
@@ -63,6 +73,13 @@ STORE_PATHS = {
             "config": {"path": _home(".config/Windsurf"), "verified": True},
             "windsurf_dir": {"path": _home(".windsurf"), "verified": True},
             "codeium_dir": {"path": _home(".codeium"), "verified": True},
+        },
+        "macos": {
+            # The userData keeps the Windsurf product name, matching the
+            # linux column's precedent.
+            "config": {"path": _home("Library/Application Support/Windsurf"), "verified": False},
+            "windsurf_dir": {"path": _home(".windsurf"), "verified": False},
+            "codeium_dir": {"path": _home(".codeium"), "verified": False},
         },
     },
     "trae": {
@@ -76,6 +93,15 @@ STORE_PATHS = {
             "machineid_file": {"path": _home(".config/Trae/machineId"), "verified": False},
             "local_env": {
                 "path": _home(".config/Trae/ModularData/ckg_server/local_env.json"),
+                "verified": False,
+            },
+        },
+        "macos": {
+            "config": {"path": _home("Library/Application Support/Trae"), "verified": False},
+            "trae_dir": {"path": _home(".trae"), "verified": False},
+            "machineid_file": {"path": _home("Library/Application Support/Trae/machineId"), "verified": False},
+            "local_env": {
+                "path": _home("Library/Application Support/Trae/ModularData/ckg_server/local_env.json"),
                 "verified": False,
             },
         },
@@ -112,6 +138,11 @@ STORE_PATHS = {
             "qoderwork_dir": {"path": _home(".qoderwork"), "verified": False},
             "agents_db": {"path": _home(".config/QoderWork/data/agents.db"), "verified": False},
         },
+        "macos": {
+            "config": {"path": _home("Library/Application Support/QoderWork"), "verified": False},
+            "qoderwork_dir": {"path": _home(".qoderwork"), "verified": False},
+            "agents_db": {"path": _home("Library/Application Support/QoderWork/data/agents.db"), "verified": False},
+        },
     },
     "zcode": {
         "windows": {
@@ -123,6 +154,18 @@ STORE_PATHS = {
         "linux": {
             "config": {"path": _home(".config/ZCode"), "verified": False},
             "cli_dir": {"path": _home(".zcode"), "verified": True},
+            "cli_config": {"path": _home(".zcode/cli/config.json"), "verified": False},
+            "cli_db": {"path": _home(".zcode/cli/db/db.sqlite"), "verified": False},
+            "telemetry_state": {"path": _home(".zcode/v2/telemetry-state.json"), "verified": False},
+            "credentials": {"path": _home(".zcode/v2/credentials.json"), "verified": False},
+            "setting_json": {"path": _home(".zcode/v2/setting.json"), "verified": False},
+        },
+        "macos": {
+            # The CLI dot-dir rows mirror the linux column (platform-agnostic
+            # per the docs); all stay unverified - no live Mac has confirmed
+            # any of them.
+            "config": {"path": _home("Library/Application Support/ZCode"), "verified": False},
+            "cli_dir": {"path": _home(".zcode"), "verified": False},
             "cli_config": {"path": _home(".zcode/cli/config.json"), "verified": False},
             "cli_db": {"path": _home(".zcode/cli/db/db.sqlite"), "verified": False},
             "telemetry_state": {"path": _home(".zcode/v2/telemetry-state.json"), "verified": False},
@@ -147,6 +190,18 @@ STORE_PATHS = {
                 "verified": False,
             },
         },
+        "macos": {
+            "config": {"path": _home("Library/Application Support/MiniMax"), "verified": False},
+            "minimax_dir": {"path": _home(".minimax"), "verified": False},
+            "mcode_public": {
+                "path": _home("Library/Application Support/MiniMax/auth/prod/en/mcode-public"),
+                "verified": False,
+            },
+            "session_handoff_device_id": {
+                "path": _home(".minimax/v2/session-handoff/device-id"),
+                "verified": False,
+            },
+        },
     },
     "opencode-cli": {
         "windows": {
@@ -157,6 +212,13 @@ STORE_PATHS = {
             "xdg_data": {"path": _home(".local/share/opencode"), "verified": True},
             "xdg_config": {"path": _home(".config/opencode"), "verified": True},
             "auth_json": {"path": _home(".local/share/opencode/auth.json"), "verified": True},
+        },
+        "macos": {
+            # XDG rows mirror the linux paths (NOT ~/Library): opencode reads
+            # the unset-env XDG defaults (~/.config, ~/.local/share) on macOS.
+            "xdg_data": {"path": _home(".local/share/opencode"), "verified": False},
+            "xdg_config": {"path": _home(".config/opencode"), "verified": False},
+            "auth_json": {"path": _home(".local/share/opencode/auth.json"), "verified": False},
         },
     },
     # Desktop clone suites (AutoClaw2 / Cline / OpenCode desktop): no Linux

@@ -22,6 +22,51 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ephemeral port (Google requires exact-match registered Web-client
   redirect URIs) and sends no offline-access/refresh params.
 
+- **macOS Cursor reset (2026-11-18)** — the second macOS resetter (issue #36
+  follow-up; Qoder shipped first). **`src/macos/reset_cursor.sh`** (v0.1):
+  13 steps on the Windows `reset_cursor.ps1` v0.3 + live-verified Linux
+  `reset_cursor.sh` v0.2 step maps, all DERIVED-flagged and
+  absence-tolerant — machineId files in BOTH spellings (Linux writes
+  camelCase `machineId`, Windows lowercase `machineid`; the macOS spelling
+  is unverified so whichever file exists is rotated — on the default
+  case-insensitive APFS they are one file and the second rotate is an
+  honest same-value rewrite), Electron stores via the shared
+  `reset_electron_stores`, the state.vscdb auth secrets via core
+  `delete-secrets` with NO config (the Cursor defaults:
+  `secret://aicoding.auth.%`, `secret://blackbox.%`, `gituser` — ItemTable
+  only, per-key audit + zero-survivor verdict), the Preferences
+  `device_id_salt`, the Local State `os_crypt.encrypted_key` pointer
+  (`json-remove`; the Keychain "Chromium Safe Storage" entry itself stays
+  a manual step), the Network transport + DIPS + SharedStorage + Trust
+  Tokens sweeps, the sentry tree, the cache trees, Crashpad + logs, the
+  workspaceStorage `serviceMachineId` upserts, and the stale `.backup`
+  sidecar purge. **Preservation policy is Cursor's, not Qoder's**: Local
+  Storage, the Backups tree, workspaceStorage files, and the chat-bearing
+  `cursorDiskKV` table are NEVER touched (loudly audited). Smoke-tested
+  end-to-end on the dev host against a seeded fake home: Pass 13 / Fail 0,
+  checker ALL PASS (identity cross-consistency, zero secret survivors,
+  every deletion, AND every preservation), idempotent re-run all-skips,
+  not-installed abort exits 1 before any mutation. One `set -u` bug caught
+  by the smoke (`local summary` without an initializer is an unbound
+  variable on every bash). Live macOS acceptance remains user-supervised.
+
+- **macOS platform maps for every slug (2026-11-18)** — the follow-up to the
+  macOS Qoder wave (issue #36): `ghost/platform.py` now carries a `macos`
+  column for ALL slugs (cursor, devin, trae, qoderwork, zcode, minimax,
+  opencode-cli join qoder), so `ghost_cli.py paths <slug>` on a darwin host
+  returns honest derived paths for every app instead of a loud "unmapped"
+  error. Conventions: Electron userData under
+  `~/Library/Application Support/<App>` (devin keeps the Windsurf product
+  name, matching its linux column), platform-agnostic CLI dot-dirs per the
+  Linux wave, and opencode's XDG rows keep their unset-env defaults
+  (`~/.config`, `~/.local/share`) rather than `~/Library`. Every macOS row
+  is `verified: False` (no live Mac has confirmed any of them — ground
+  truth #5); the platform-integrity test now REQUIRES all three columns per
+  slug, pins every macOS row unverified + home-resolved, and asserts darwin
+  resolves every slug (mock-based, CI-OS-independent). Resetter scope is
+  unchanged: only `src/macos/reset_qoder.sh` ships; a future per-app
+  macOS resetter flips its own rows' provenance explicitly.
+
 - **CI Linux helper-contract lane (2026-11-17)** — a new `linux-helpers`
   ubuntu job that closes the bug class `bash -n` + shellcheck cannot see:
   a MISSING shared function (the `b64_json` latent bug — a helper consumed

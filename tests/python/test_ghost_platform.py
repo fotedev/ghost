@@ -39,16 +39,12 @@ class SlugResolutionTests(unittest.TestCase):
 class MapIntegrityTests(unittest.TestCase):
     def test_every_entry_has_both_platforms_and_verified_flag(self):
         for slug, platforms in platform.STORE_PATHS.items():
-            # windows + linux are required for every slug; "macos" is an
-            # opt-in third column (2026-11-17, issue #36) - only apps with a
-            # shipped macOS resetter map it. Anything else is unknown.
-            self.assertIn("windows", platforms,
-                          "slug '%s' must map windows" % slug)
-            self.assertIn("linux", platforms,
-                          "slug '%s' must map linux" % slug)
-            self.assertLessEqual(
+            # Every slug maps all three platforms (the macOS groundwork
+            # completed the column for every slug, 2026-11-18); anything
+            # else is unknown.
+            self.assertEqual(
                 set(platforms.keys()), {"windows", "linux", "macos"},
-                "slug '%s' has an unknown platform column" % slug)
+                "slug '%s' must map exactly windows+linux+macos" % slug)
             for plat, entries in platforms.items():
                 self.assertTrue(entries, "slug '%s' platform '%s' empty" % (slug, plat))
                 for label, entry in entries.items():
@@ -148,12 +144,36 @@ class MapIntegrityTests(unittest.TestCase):
         self.assertTrue(report["unverified"],
                         "derived macOS rows must surface as unverified")
 
-    def test_darwin_unmapped_slug_is_a_loud_error(self):
-        # Only qoder maps macOS today - a darwin host asking for anything
-        # else gets an honest error, NEVER a silent linux fallback.
-        with mock.patch.object(platform.sys, "platform", "darwin"):
-            with self.assertRaises(ValueError):
-                platform.get_store_paths("cursor")
+    def test_darwin_resolves_every_slug(self):
+        # The macOS groundwork maps every slug, so a darwin host resolves
+        # all of them to macos rows - never a silent linux fallback, and
+        # never an "unmapped" error for a shipped slug.
+        for slug in platform.STORE_PATHS:
+            with mock.patch.object(platform.sys, "platform", "darwin"):
+                report = platform.get_store_paths(slug)
+            self.assertEqual(report["platform"], "macos",
+                             "slug '%s' must resolve on darwin" % slug)
+            self.assertEqual(report["slug"], slug)
+            self.assertTrue(report["paths"])
+
+    def test_all_macos_rows_exist_and_stay_derived(self):
+        # 2026-11-18 macOS map groundwork: every slug carries macos rows and
+        # every one of them is DERIVED (Windows layout + documented platform
+        # conventions) and MUST stay flagged until a live Mac verifies it
+        # (ground truth #5). No macOS resetter ships for these slugs yet -
+        # a resetter landing flips its rows' provenance explicitly.
+        home = os.path.expanduser("~")
+        for slug, platforms in platform.STORE_PATHS.items():
+            macos = platforms["macos"]
+            self.assertTrue(macos, "slug '%s' has no macos rows" % slug)
+            for label, entry in macos.items():
+                self.assertFalse(entry["verified"],
+                                 "macos label '%s' of '%s' must stay unverified "
+                                 "until a live Mac verifies it" % (label, slug))
+                expanded = os.path.expanduser(entry["path"])
+                self.assertTrue(expanded.startswith(home),
+                                "macos path %r of '%s' must live under %r"
+                                % (expanded, slug, home))
 
     def test_linux_selector_still_resolves_after_macos_column(self):
         with mock.patch.object(platform.sys, "platform", "linux"):
