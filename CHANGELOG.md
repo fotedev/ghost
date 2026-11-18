@@ -8,6 +8,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Gmail MCP server in the registry (2026-11-18)** — `master-mcp.json`
+  gains `gmail` [only:zcode]: the local Go server
+  (`rajesh-chettiar-insightgen/gmail-mcp-server`, built at
+  `Tools\gmail-mcp\gmail-mcp-server.exe`) over stdio with
+  `${GMAIL_CLIENT_ID}`/`${GMAIL_CLIENT_SECRET}`/`${OPENAI_API_KEY}`
+  env-guard placeholders (scopes `gmail.readonly` + `gmail.compose`;
+  drafts-only — no send/delete; OAuth token cached at
+  `%APPDATA%\Roaming\auto-gmail\token.json`; `OPENAI_API_KEY` powers the
+  optional style-guide feature only). The official remote
+  `gmailmcp.googleapis.com` was evaluated and REJECTED for ZCode:
+  ZCode's built-in MCP OAuth binds its loopback callback to an
+  ephemeral port (Google requires exact-match registered Web-client
+  redirect URIs) and sends no offline-access/refresh params.
+
 - **macOS Cursor reset (2026-11-18)** — the second macOS resetter (issue #36
   follow-up; Qoder shipped first). **`src/macos/reset_cursor.sh`** (v0.1):
   13 steps on the Windows `reset_cursor.ps1` v0.3 + live-verified Linux
