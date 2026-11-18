@@ -160,7 +160,31 @@ src/macos/                     # macOS .sh resetters — the repo's first macOS
                                #   chat/UI state and NEVER touched (audited); smoke Pass
                                #   13/Fail 0 + checker ALL PASS (preservation asserted) +
                                #   idempotence + abort path; live macOS acceptance =
-                               #   user-supervised
+                               #   user-supervised;
+                               #   reset_trae.sh v0.1 (2026-11-19) = the third macOS
+                               #   resetter, 15 steps on the Windows v0.3 + Linux v0.3 step
+                               #   maps (BOTH trae templates are themselves DERIVED — no
+                               #   live host has verified trae off Windows): machineId files
+                               #   in BOTH spellings, reset_electron_stores, iCubeAuthInfo://
+                               #   top-level-prefix removal FIRST (its backup = the pre-run
+                               #   restore point), the aha flag as a JSON STRING "false" in
+                               #   BOTH storage.json + state.vscdb (deterministic verify),
+                               #   aha tree delete, the ckg_server local_env.json 19-digit
+                               #   device_id rotation (python3 secrets twin, first digit
+                               #   non-zero) + whole-host_map removal (the Linux v0.3
+                               #   decision), env_codekg.db delete, the ai-agent
+                               #   IDENTITY-ROWS-ONLY scrub (core scrub-rows bare = the Trae
+                               #   defaults; key NAMES only, chat rows survive; tree backed
+                               #   up first + per-DB zero-survivor gate), salt + os_crypt
+                               #   pointer, Network/DIPS/SharedStorage/Trust Tokens sweeps,
+                               #   webview/cache trees (trae-webview + WebStorage +
+                               #   Shared Dictionary), Crashpad + logs, workspaceStorage
+                               #   upserts; PRESERVATION: Local Storage/Backups/
+                               #   workspaceStorage files/ai-agent chat rows NEVER touched
+                               #   (audited); smoke Pass 15/Fail 0 first try + checker ALL
+                               #   PASS (53 assertions incl. the 19-digit format + the
+                               #   prefix-anchoring decoy) + idempotence + abort path; live
+                               #   macOS acceptance = user-supervised
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,

@@ -532,15 +532,17 @@ sudo ./src/linux/change_device_id.sh ResetMachineId  # /etc/machine-id (root)
 
 ## macOS
 
-Qoder + Cursor (issue #36 follow-ups). Every store path is DERIVED from the
-Windows layout until a live Mac verifies it — each script prints the
-provenance caveat and skips any store it does not find. System-level
+Qoder + Cursor + Trae (issue #36 follow-ups). Every store path is DERIVED
+from the Windows layout until a live Mac verifies it — each script prints
+the provenance caveat and skips any store it does not find. System-level
 sources (IOPlatformUUID, Keychain "Chromium Safe Storage", hostname, MAC)
 are skipped loudly. The Cursor resetter PRESERVES chat state (Local
-Storage, Backups, cursorDiskKV, workspaceStorage files).
+Storage, Backups, cursorDiskKV, workspaceStorage files); the Trae
+resetter's ai-agent scrub is identity-ROWS-only (chat rows preserved).
 
 ```bash
 chmod +x src/macos/*.sh
 ./src/macos/reset_qoder.sh    # close Qoder first; runs unprivileged
 ./src/macos/reset_cursor.sh   # close Cursor first; keeps chats
+./src/macos/reset_trae.sh     # close Trae first; keeps ai-agent chats
 ```
