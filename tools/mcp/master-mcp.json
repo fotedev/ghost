@@ -249,6 +249,18 @@
         "NETLIFY_PERSONAL_ACCESS_TOKEN": "${NETLIFY_PERSONAL_ACCESS_TOKEN}"
       },
       "enabled": true
+    },
+    "gmail": {
+      "type": "stdio",
+      "command": "C:/Users/FOTE/Tools/gmail-mcp/gmail-mcp-server.exe",
+      "args": [],
+      "env": {
+        "GMAIL_CLIENT_ID": "${GMAIL_CLIENT_ID}",
+        "GMAIL_CLIENT_SECRET": "${GMAIL_CLIENT_SECRET}",
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}"
+      },
+      "enabled": true,
+      "only": ["zcode"]
     }
   }
 }

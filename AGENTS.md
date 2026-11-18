@@ -761,12 +761,19 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     cursor|windsurf|vscode|zcode|minimax|opencode|
                                    #     claude-code|codex|all — LIVE is the default
                                    #     without -DryRun): pushes the single source of
-                                   #     truth tools/mcp/master-mcp.json (29 servers,
+                                   #     truth tools/mcp/master-mcp.json (31 servers,
                                    #     Claude-Desktop mcpServers format; 25 + 2026-11-07
                                    #     adds supabase-My-portfolio [only:zcode], node_repl
                                    #     [only:codex], computer-use [dormant, scoped to the
                                    #     never-target copilot-computer-use]; 2026-11-08 adds
-                                   #     netlify-mcp) + the gitignored
+                                   #     netlify-mcp; 2026-11-18 adds gmail [only:zcode] —
+                                   #     the local Go gmail-mcp-server built at
+                                   #     Tools\gmail-mcp, OAuth token cached at
+                                   #     %APPDATA%\Roaming\auto-gmail, official remote
+                                   #     gmailmcp.googleapis.com REJECTED for ZCode: ZCode's
+                                   #     MCP OAuth loopback uses an EPHEMERAL port vs
+                                   #     Google's exact-match Web-client redirect URIs +
+                                   #     no offline-access param) + the gitignored
                                    #     overlay master-mcp.local.json (device values, local
                                    #     wins) into each app's own config in its own shape
                                    #     (windsurf serverUrl, minimax streamable-http, opencode
