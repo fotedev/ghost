@@ -532,17 +532,22 @@ sudo ./src/linux/change_device_id.sh ResetMachineId  # /etc/machine-id (root)
 
 ## macOS
 
-Qoder + Cursor + Trae (issue #36 follow-ups). Every store path is DERIVED
-from the Windows layout until a live Mac verifies it — each script prints
-the provenance caveat and skips any store it does not find. System-level
-sources (IOPlatformUUID, Keychain "Chromium Safe Storage", hostname, MAC)
-are skipped loudly. The Cursor resetter PRESERVES chat state (Local
-Storage, Backups, cursorDiskKV, workspaceStorage files); the Trae
-resetter's ai-agent scrub is identity-ROWS-only (chat rows preserved).
+Qoder + Cursor + Trae + Devin/Windsurf (issue #36 follow-ups). Every store
+path is DERIVED from the Windows layout until a live Mac verifies it — each
+script prints the provenance caveat and skips any store it does not find.
+System-level sources (IOPlatformUUID, Keychain "Chromium Safe Storage",
+hostname, MAC) are skipped loudly. The Cursor resetter PRESERVES chat state
+(Local Storage, Backups, cursorDiskKV, workspaceStorage files); the Trae
+resetter's ai-agent scrub is identity-ROWS-only (chat rows preserved); the
+Devin/Windsurf resetter keeps Local Storage/Backups/WebStorage/IndexedDB,
+upserts workspaceStorage, and deliberately does NOT probe a Devin-named
+Application Support sibling (it cannot be told apart from the devin CLI
+home on a case-insensitive volume).
 
 ```bash
 chmod +x src/macos/*.sh
 ./src/macos/reset_qoder.sh    # close Qoder first; runs unprivileged
 ./src/macos/reset_cursor.sh   # close Cursor first; keeps chats
 ./src/macos/reset_trae.sh     # close Trae first; keeps ai-agent chats
+./src/macos/reset_devin.sh    # close Windsurf/Devin first; keeps chats
 ```
