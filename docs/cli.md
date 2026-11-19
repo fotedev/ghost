@@ -532,8 +532,8 @@ sudo ./src/linux/change_device_id.sh ResetMachineId  # /etc/machine-id (root)
 
 ## macOS
 
-Qoder + Cursor + Trae + Devin/Windsurf + QoderWork + MiniMax/OpenCode
-(issue #36 follow-ups). Every store path is DERIVED from the Windows layout
+Qoder + Cursor + Trae + Devin/Windsurf + QoderWork + MiniMax/OpenCode +
+ZCode (issue #36 follow-ups - the wave is COMPLETE, every slug covered). Every store path is DERIVED from the Windows layout
 until a live Mac verifies it — each script prints the provenance caveat and
 skips any store it does not find. System-level sources (IOPlatformUUID,
 Keychain "Chromium Safe Storage", hostname, MAC) are skipped loudly. The
@@ -546,7 +546,9 @@ cannot be told apart from the devin CLI home on a case-insensitive volume);
 the QoderWork resetter's agents.db scrub is the EXACT whitelist purge (chat
 tables + the proxy setting survive); the MiniMax resetter is MiniMax-only —
 the OpenCode CLI XDG stores belong to the opencode-cli login and are never
-touched, and sessions/sqlite.db/credentials are preserved.
+touched, and sessions/sqlite.db/credentials are preserved; the ZCode
+resetter is the Linux v0.2 map verbatim and PRESERVES the shared CLI
+session db + cli/config.json.
 
 ```bash
 chmod +x src/macos/*.sh
@@ -556,4 +558,5 @@ chmod +x src/macos/*.sh
 ./src/macos/reset_devin.sh    # close Windsurf/Devin first; keeps chats
 ./src/macos/reset_qoderwork.sh         # close QoderWork first; whitelist purge
 ./src/macos/reset_minimax_opencode.sh  # close MiniMax first; CLI auth untouched
+./src/macos/reset_zcode.sh             # close ZCode first; shared CLI db preserved
 ```

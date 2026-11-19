@@ -8,6 +8,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **macOS ZCode reset (2026-11-19)** — the SEVENTH and last macOS resetter;
+  the wave is COMPLETE (issue #36 — every slug now has a macOS resetter).
+  **`src/macos/reset_zcode.sh`** (v0.1): the Linux `reset_zcode.sh` v0.2
+  map VERBATIM — no invented steps, hence NO machineid-file step
+  (platform.py has no zcode machineid_file row, unlike cursor/qoder; the
+  Electron identity rides storage.json/state.vscdb). 6 steps: the Electron
+  identity stores (storage.json flat telemetry keys + serviceMachineId +
+  state.vscdb ItemTable upserts via the shared `reset_electron_stores`),
+  `~/.zcode/v2/telemetry-state.json` deviceMid (core json-set + verify),
+  the `~/.zcode/v2/credentials.json` OAuth clear (zcodejwttoken exact +
+  every `oauth:`-prefixed key), `~/.zcode/v2/setting.json`
+  webRemoteControlExternalRelayDevice.deviceSid (dotted json-set + verify),
+  the `~/Library` sweep (Caches/Logs/ZCode delete_store + `com.zhipuai*`
+  Preferences + `*[Zz][Cc]ode*` savedState/HTTPStorages nullglob globs —
+  DERIVED, the bundle id is unverified on a real Mac; NOTE the `[Zz][Cc]ode`
+  shape: `*[Zz]ode` would MISS "ZCode" — smoke-caught), and the final probe
+  (storage.json + telemetry-state + setting.json re-verified). PRESERVATION
+  (matches Windows/Linux): the shared CLI session db
+  (`~/.zcode/cli/db/db.sqlite`) + `cli/config.json` are NEVER touched
+  (loudly audited); no clone mode (the Linux `--instance` layout is a
+  Linux-launcher concept). Smoke-tested end-to-end on the dev host against
+  a seeded fake home: Pass 6 / Fail 0 + checker ALL PASS (22 assertions incl.
+  the FLAT-key shape the macOS Electron storage.json actually holds — the
+  same shape the #95 flat-fallback fix serves), idempotent re-run exit 0
+  (the Library deletions skip loudly), abort path exits 1 before any
+  mutation. Live macOS acceptance = user-supervised.
 - **macOS QoderWork + MiniMax resets (2026-11-19)** — the fifth and sixth
   macOS resetters (issue #36 follow-up; Qoder + Cursor + Trae +
   Devin/Windsurf shipped first), one PR, both DERIVED-flagged and

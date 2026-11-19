@@ -264,7 +264,31 @@ src/macos/                     # macOS .sh resetters — the repo's first macOS
                                #   with a loud PROVENANCE warn (never silent); smoke Pass
                                #   13/Fail 0 + checker ALL PASS (77 assertions incl. the
                                #   XDG byte-identical preservation) + idempotence + abort;
-                               #   live macOS acceptance = user-supervised
+                               #   live macOS acceptance = user-supervised;
+                               #   reset_zcode.sh v0.1 (2026-11-19) = the SEVENTH and last
+                               #   macOS resetter — the wave is COMPLETE (issue #36): the
+                               #   Linux v0.2 map VERBATIM (no invented steps, hence NO
+                               #   machineid-file step — platform.py has no zcode
+                               #   machineid_file row, unlike cursor/qoder; the Electron
+                               #   identity rides storage.json/state.vscdb), 6 steps:
+                               #   reset_electron_stores + telemetry-state deviceMid
+                               #   (core json-set + verify) + credentials.json OAuth clear
+                               #   (zcodejwttoken exact + oauth: prefix) + setting.json
+                               #   webRemoteControlExternalRelayDevice.deviceSid + the
+                               #   ~/Library sweep (Caches/Logs/ZCode delete_store +
+                               #   com.zhipuai* Preferences + *[Zz][Cc]ode* savedState/
+                               #   HTTPStorages nullglob globs — NOTE the [Zz][Cc]ode
+                               #   shape: *[Zz]ode would miss "ZCode", smoke-caught) +
+                               #   the final probe (storage.json + telemetry-state +
+                               #   setting.json re-verified). PRESERVATION: the shared CLI
+                               #   db (~/.zcode/cli/db/db.sqlite) + cli/config.json NEVER
+                               #   touched (audited — matches Windows/Linux); NO clone
+                               #   mode (the Linux --instance layout is a Linux-launcher
+                               #   concept); smoke Pass 6/Fail 0 + checker ALL PASS (22
+                               #   assertions incl. the flat-key shape the macOS Electron
+                               #   storage.json actually holds) + idempotence (run 2 = the
+                               #   Library deletions skip loudly) + abort exits 1 before
+                               #   any mutation; live macOS acceptance = user-supervised
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,

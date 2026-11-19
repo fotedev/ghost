@@ -37,7 +37,7 @@ touches, and emits an audit log plus a self-contained restore script.
 | Reset Trae | `reset_trae.ps1` | `reset_trae.sh` (v0.3: aha flag + iCubeAuthInfo removal + ckg_server local_env rotation; derived paths) | `reset_trae.sh` (v0.1: 15 steps - Electron stores, iCubeAuthInfo removal, aha flag in both stores, aha tree, ckg 19-digit device_id + host_map, env_codekg.db, ai-agent identity-rows-only scrub, salt, os_crypt pointer, sweeps; Local Storage/Backups/workspaceStorage/ai-agent chats PRESERVED; ALL paths DERIVED - live verification pending) |
 | Reset Qoder | `reset_qoder.ps1` | `reset_qoder.sh` (v0.2: installation_id/.auth rotations; derived paths) | `reset_qoder.sh` (v0.1: full-attempt 9 steps - Electron stores, secret purge, salt, machineid files, ~/.qoder rotations, Library sweep, webview partitions; ALL paths DERIVED - live verification pending) |
 | Reset QoderWork | `reset_qoderwork.ps1` | `reset_qoderwork.sh` (v0.2: agents.db purge-tables; derived paths) | `reset_qoderwork.sh` (v0.1: 16 steps - Electron stores, machineId files in 3 spellings, installation_id, .status.json logged-out patch, registry commands=[], cache/log sweeps, rum store, Local State delete, partition salt/network/storage, cache trees, the agents.db purge-tables whitelist (chats + proxy preserved), auth.dat deletes; ALL paths DERIVED - live verification pending) |
-| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | `reset_zcode.sh` (v0.2: CLI v2 telemetry-state/credentials/setting scrubs; `--instance` = clone reset; shared CLI db untouched - matches Windows) | platform map only (resetter pending, derived paths) |
+| Reset ZCode (+Qoder stores) | `reset_zcode.ps1` (`-Target Primary\|Secondary\|Third\|Fourth\|Fifth\|Sixth\|Both\|All`) | `reset_zcode.sh` (v0.2: CLI v2 telemetry-state/credentials/setting scrubs; `--instance` = clone reset; shared CLI db untouched - matches Windows) | `reset_zcode.sh` (v0.1: the Linux v0.2 map verbatim, 6 steps - Electron stores, telemetry-state deviceMid, credentials OAuth clear, setting.json deviceSid, ~/Library sweep (DERIVED globs), final probe; shared CLI db + cli/config.json PRESERVED; ALL paths DERIVED - live verification pending) |
 | Reset MiniMax/OpenCode | `reset_minimax_opencode.ps1` | `reset_minimax_opencode.sh` (v0.2: mcode-public auth deletions + session-handoff device-id; derived paths; CLI XDG auth untouched) | `reset_minimax_opencode.sh` (v0.1: 13 steps, MiniMax-only - Electron stores, machineId files in 3 spellings, mcode-public auth deletions, session-handoff device-id, local-runtime wipe, agent-config user/sharedUser removal, remote-control desktop_device_id, updaterId, Chromium sweeps, mavis-browser Local Storage, misc run-state; sessions/sqlite.db/credentials + OpenCode CLI XDG auth PRESERVED; ALL paths DERIVED - live verification pending) |
 | ZCode clones (Primary + 5 branded clones) | `launch_zcode_second_instance.ps1 -Instance Second\|Third\|Fourth\|Fifth\|Sixth` + `Launch-ZCode-*.bat` | `launch_zcode_clone.sh --instance Second\|...\|Sixth` (PR 8, derived - live acceptance pending) | — |
 | ZCode clone MCP sync (definitions-only) | `sync_zcode_assets.ps1 -McpOnly -Target Second\|...\|All` | `sync_zcode_assets.sh --instance Second\|...\|All\|--dry-run` (v0.1 MCP-only: core json-merge-defs verb; skills/plugins areas need LC-1 evidence) | — |
@@ -81,7 +81,8 @@ bash-3.2-safe) · python3 (ships with the Command Line Tools) · `uuidgen`
 Every app's store paths are mapped for macOS in `ghost/platform.py` (all
 DERIVED from the Windows layout until a live Mac verifies them); macOS
 reset scripts so far: Qoder + Cursor + Trae + Devin/Windsurf + QoderWork +
-MiniMax/OpenCode (each header carries its DERIVED-PATH SCOPE + preservation
+MiniMax/OpenCode + ZCode — the wave is COMPLETE, every slug has a macOS
+resetter (each header carries its DERIVED-PATH SCOPE + preservation
 policy).
 
 ```bash
@@ -125,6 +126,8 @@ chmod +x src/macos/*.sh
                               #   purge: chats + proxy preserved)
 ./src/macos/reset_minimax_opencode.sh  # close MiniMax first (MiniMax-only;
                               #   sessions/CLI XDG auth untouched)
+./src/macos/reset_zcode.sh    # close ZCode first (shared CLI db +
+                              #   cli/config.json preserved)
 ```
 
 ### Desktop app (optional)
