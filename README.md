@@ -33,7 +33,7 @@ touches, and emits an audit log plus a self-contained restore script.
 | Task | Windows | Linux | macOS |
 |------|---------|-------|-------|
 | Reset Cursor | `reset_cursor.ps1` | `reset_cursor.sh` | `reset_cursor.sh` (v0.1: 13 steps - Electron stores, delete-secrets purge, salt, os_crypt pointer, network/tracking sweeps, sentry, caches, Crashpad/logs, workspaceStorage upserts; Local Storage/Backups/cursorDiskKV PRESERVED; ALL paths DERIVED - live verification pending) |
-| Reset Windsurf\Devin | `reset_devin.ps1` | `reset_devin.sh` | platform map only (resetter pending, derived paths) |
+| Reset Windsurf\Devin | `reset_devin.ps1` | `reset_devin.sh` | `reset_devin.sh` (v0.1: 17 steps - Electron stores, the Windows v0.4 ESCAPE'd windsurf/devin secret DELETE, salt + os_crypt pointer + username scrub, network sweeps, the EXTENDED rebrand-era cache sweep, credentials.toml + org_id blanking, codeium device_id, argv.json crash-reporter-id in both homes, installation_ids, updater trees; Local Storage/Backups/WebStorage/IndexedDB PRESERVED, workspaceStorage upsert-only; ALL paths DERIVED - live verification pending) |
 | Reset Trae | `reset_trae.ps1` | `reset_trae.sh` (v0.3: aha flag + iCubeAuthInfo removal + ckg_server local_env rotation; derived paths) | `reset_trae.sh` (v0.1: 15 steps - Electron stores, iCubeAuthInfo removal, aha flag in both stores, aha tree, ckg 19-digit device_id + host_map, env_codekg.db, ai-agent identity-rows-only scrub, salt, os_crypt pointer, sweeps; Local Storage/Backups/workspaceStorage/ai-agent chats PRESERVED; ALL paths DERIVED - live verification pending) |
 | Reset Qoder | `reset_qoder.ps1` | `reset_qoder.sh` (v0.2: installation_id/.auth rotations; derived paths) | `reset_qoder.sh` (v0.1: full-attempt 9 steps - Electron stores, secret purge, salt, machineid files, ~/.qoder rotations, Library sweep, webview partitions; ALL paths DERIVED - live verification pending) |
 | Reset QoderWork | `reset_qoderwork.ps1` | `reset_qoderwork.sh` (v0.2: agents.db purge-tables; derived paths) | platform map only (resetter pending, derived paths) |
@@ -80,8 +80,8 @@ bash-3.2-safe) · python3 (ships with the Command Line Tools) · `uuidgen`
 (IOPlatformUUID, Keychain safe-storage, hostname, MAC) are skipped loudly.
 Every app's store paths are mapped for macOS in `ghost/platform.py` (all
 DERIVED from the Windows layout until a live Mac verifies them); macOS
-reset scripts so far: Qoder + Cursor + Trae (each header carries its
-DERIVED-PATH SCOPE + preservation policy).
+reset scripts so far: Qoder + Cursor + Trae + Devin/Windsurf (each header
+carries its DERIVED-PATH SCOPE + preservation policy).
 
 ```bash
 git clone https://github.com/fotedev/ghost.git
@@ -118,6 +118,8 @@ chmod +x src/macos/*.sh
                               #   Storage/Backups/cursorDiskKV untouched)
 ./src/macos/reset_trae.sh     # close Trae first (identity-rows-only
                               #   ai-agent scrub: chats preserved)
+./src/macos/reset_devin.sh    # close Windsurf/Devin first (keeps chats:
+                              #   Local Storage/Backups/WebStorage/IndexedDB)
 ```
 
 ### Desktop app (optional)

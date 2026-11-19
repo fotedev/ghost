@@ -184,7 +184,36 @@ src/macos/                     # macOS .sh resetters — the repo's first macOS
                                #   (audited); smoke Pass 15/Fail 0 first try + checker ALL
                                #   PASS (53 assertions incl. the 19-digit format + the
                                #   prefix-anchoring decoy) + idempotence + abort path; live
-                               #   macOS acceptance = user-supervised
+                               #   macOS acceptance = user-supervised;
+                               #   reset_devin.sh v0.1 (2026-11-19) = the fourth macOS
+                               #   resetter, 17 steps porting the LIVE-VERIFIED Windows v0.4
+                               #   + Linux v0.3 step maps onto the macOS column (config =
+                               #   Application Support/Windsurf per the Linux precedent):
+                               #   machineId files in BOTH spellings, reset_electron_stores,
+                               #   the state.vscdb delete-secrets with the EXACT Windows
+                               #   ESCAPE'd windsurf/devin config (5 exact + 5 LIKE patterns,
+                               #   escape = backslash — a literal-underscore decoy proves the
+                               #   escape semantics), Preferences salt + Local State os_crypt
+                               #   pointer + the username replace-text scrub (SCRUB_USER =
+                               #   $USER, loud skip when empty), network/DIPS/SharedStorage/
+                               #   Trust Tokens sweeps, the EXTENDED rebrand-era cache sweep
+                               #   (CachedData..Shared Dictionary, Windows-verified live),
+                               #   Crashpad + logs, workspaceStorage upserts (sidecars
+                               #   preserved), cli/installation_id + ~/.windsurf/
+                               #   installation_id (DISTINCT fresh lowercase GUIDs),
+                               #   credentials.toml delete, devin.org_id blank
+                               #   (skip_if_empty), the shared ~/.codeium/config.json
+                               #   device_id + api_key (Linux portal/inference URL writes
+                               #   deliberately DROPPED — stale-URL overwrite risk), argv.json
+                               #   crash-reporter-id in BOTH ~/.windsurf + ~/.devin, the
+                               #   updater-cache trees in Application Support + Caches;
+                               #   PRESERVATION: Local Storage/Backups/WebStorage/IndexedDB
+                               #   never touched; a Devin-named Application Support sibling
+                               #   is deliberately NOT probed (indistinguishable from the
+                               #   devin CLI home on a case-insensitive volume — the Windows
+                               #   multi-root probe does not port); smoke Pass 17/Fail 0
+                               #   first try + checker ALL PASS (88 assertions) + idempotence
+                               #   + abort path; live macOS acceptance = user-supervised
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,

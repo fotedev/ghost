@@ -8,6 +8,40 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **macOS Devin/Windsurf reset (2026-11-19)** — the fourth macOS resetter
+  (issue #36 follow-up; Qoder + Cursor + Trae shipped first).
+  **`src/macos/reset_devin.sh`** (v0.1): 17 steps porting the
+  LIVE-VERIFIED Windows `reset_devin.ps1` v0.4 + Linux `reset_devin.sh`
+  v0.3 step maps onto the macOS platform.py column (config =
+  `~/Library/Application Support/Windsurf` per the Linux precedent),
+  all DERIVED-flagged and absence-tolerant — machineId files in BOTH
+  spellings, the Electron 5-key telemetry semantics via the shared
+  `reset_electron_stores`, the state.vscdb auth-secret DELETE with the
+  EXACT Windows v0.4 ESCAPE'd windsurf/devin LIKE patterns (5 exact keys
+  + 5 patterns, escape = backslash; smoke-verified with a literal-underscore
+  decoy that must NOT match), the stale `state.vscdb.backup`, the
+  Preferences salt + Local State os_crypt pointer + the username
+  replace-text scrub on both (pinned-user smoke assertion), the Network
+  transport + DIPS + SharedStorage + Trust Tokens sweeps, the EXTENDED
+  rebrand-era cache sweep (CachedData/CachedProfilesData/
+  CachedExtensionVSIXs/CachedConfigurations/DawnGraphiteCache/
+  DawnWebGPUCache/Shared Dictionary — Windows-verified live 2026-09-21),
+  Crashpad + logs, workspaceStorage upserts with sidecars preserved,
+  `cli/installation_id` + `~/.windsurf/installation_id` (distinct fresh
+  lowercase GUIDs), `credentials.toml` delete, `devin.org_id` blanking
+  (skip_if_empty), the shared `~/.codeium/config.json` device_id rotation
+  (+ api_key blank; the Linux portal/inference URL writes deliberately
+  DROPPED — they would overwrite live user endpoints), the argv.json
+  crash-reporter-id patch in BOTH `~/.windsurf` and `~/.devin` + the
+  updater-cache trees in Application Support + Caches. **Preservation
+  policy**: Local Storage, Backups, WebStorage, IndexedDB, and the
+  workspaceStorage files are NEVER touched; a Devin-named Application
+  Support sibling is deliberately NOT probed (it cannot be told apart
+  from the devin CLI home on a case-insensitive volume — live macOS
+  acceptance resolves this). Smoke-tested end-to-end on the dev host
+  against a seeded fake home: Pass 17 / Fail 0 first try, checker ALL
+  PASS (88 assertions), idempotent re-run all-skips, abort path exits 1.
+  Live macOS acceptance = user-supervised.
 - **macOS Trae reset (2026-11-19)** — the third macOS resetter (issue #36
   follow-up; Qoder + Cursor shipped first). **`src/macos/reset_trae.sh`**
   (v0.1): 15 steps on the Windows `reset_trae.ps1` v0.3 + Linux
