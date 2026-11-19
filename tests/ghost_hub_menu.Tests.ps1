@@ -176,7 +176,7 @@ Describe 'menu.json schema' {
             Should -Be 'IDE Resets,ZCode,AutoClaw2,Cline,OpenCode,Maintenance'
     }
 
-    It 'every row has a gid in the 1-123 range, unique per section, and no retired/reserved gid' {
+    It 'every row has a gid in the 1-125 range, unique per section, and no retired/reserved gid' {
         foreach ($sec in $Menu.sections) {
             $gids = @($sec.rows | ForEach-Object { $_.gid })
             ($gids | Select-Object -Unique).Count | Should -Be $gids.Count -Because "section '$($sec.name)'"
@@ -185,9 +185,9 @@ Describe 'menu.json schema' {
         $gids.Count | Should -BeGreaterThan 0
         foreach ($g in $gids) {
             $g | Should -BeGreaterThan 0
-            # 123 = the Cline CLI account login row (2026-11-17); raise the
+            # 125 = the OpenCode chat import row (2026-11-20); raise the
             # ceiling when the next gid lands.
-            $g | Should -BeLessOrEqual 123
+            $g | Should -BeLessOrEqual 125
             $ReservedGids | Should -Not -Contain $g
         }
     }

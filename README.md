@@ -212,7 +212,10 @@ ghost/
 │                   #   patch_opencode_clone_home.ps1 + .mjs (OpenCode desktop
 │                   #   clone-home + taskbar-identity asar patch — re-run after
 │                   #   app updates), install_opencode_clone_shortcuts.ps1
-│                   #   (OpenCode clone shortcuts);
+│                   #   (OpenCode clone shortcuts), sync_opencode_chats.ps1
+│                   #   (OpenCode cross-instance chat sync — inventory diff /
+│                   #   guarded one-way import / revert over the mined
+│                   #   opencode.db contract);
 │                   #   opencode-{blue,yellow,green,red,orange}-branding/
 │                   #   (clone icons, wired via install_opencode_clone_shortcuts.ps1;
 │                   #   orange generated 2026-10-24 as a placeholder);

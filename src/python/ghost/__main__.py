@@ -13,6 +13,10 @@ bootstrap. Subcommands map 1:1 onto the PowerShell bridges:
                                              (tools/sync_autoclaw2_mcp.ps1,
                                               tools/sync_autoclaw2_chats.ps1;
                                               see ghost/autoclaw2.py)
+  oc-chat-inventory / oc-chat-import / oc-chat-revert
+                                             OpenCode chat-sync bridges
+                                             (tools/sync_opencode_chats.ps1;
+                                              see ghost/opencode.py)
 
 Print contracts are consumed by PowerShell (ConvertFrom-Json / line
 matching) -- see ghost/sqlite_keys.py docstrings before changing output.
@@ -25,7 +29,7 @@ import base64
 import json
 import sys
 
-from ghost import audit, autoclaw2, backup, filesweep, identity, json_merge, json_patch, platform, restore, sqlite_keys, winstore
+from ghost import audit, autoclaw2, backup, filesweep, identity, json_merge, json_patch, opencode, platform, restore, sqlite_keys, winstore
 
 
 def _decode_updates(b64):
@@ -69,6 +73,33 @@ def _cmd_ac2_chat_import(args):
 
 def _cmd_ac2_chat_revert(args):
     return _run_ac2(autoclaw2.chat_revert, args)
+
+
+def _run_oc(fn, args):
+    """Shared oc-chat-* bridge: base64 JSON payload in, JSON verdict out.
+    Refusal -> JSON on stdout + exit 2 (a gate, not a crash); anything
+    else -> exception path (stderr + exit 1) from main()."""
+    payload = _decode_updates(args.payload_b64) if getattr(args, "payload_b64", None) else {}
+    try:
+        result = fn(payload)
+    except opencode.Refusal as refusal:
+        print(json.dumps(refusal.as_dict(), ensure_ascii=False))
+        return 2
+    print(json.dumps(result, ensure_ascii=False))
+    ok = result.get("ok", True) if isinstance(result, dict) else True
+    return 0 if ok else 1
+
+
+def _cmd_oc_chat_inventory(args):
+    return _run_oc(opencode.oc_chat_inventory, args)
+
+
+def _cmd_oc_chat_import(args):
+    return _run_oc(opencode.oc_chat_import, args)
+
+
+def _cmd_oc_chat_revert(args):
+    return _run_oc(opencode.oc_chat_revert, args)
 
 
 def _cmd_sqlite_update(args):
@@ -568,6 +599,36 @@ def build_parser():
     p.add_argument("payload_b64",
                    help='base64 of {"target": "c1", "import_id": "..."}')
     p.set_defaults(func=_cmd_ac2_chat_revert)
+
+    # ---- OpenCode suite: chat sync (tools/sync_opencode_chats.ps1) --------
+    # Same ONE-base64-JSON-payload contract as the ac2-* bridges; the PS
+    # orchestrator resolves the db/manifest paths (CS-1 conventions), the
+    # core owns the transaction. Exit codes: 0 ok, 1 failed verdict,
+    # 2 refused by a gate.
+    p = sub.add_parser(
+        "oc-chat-inventory",
+        help="read-only chat inventory for one OpenCode db (counts only)")
+    p.add_argument("payload_b64",
+                   help='base64 of {"db_path": "...", "manifest_path": "..."}')
+    p.set_defaults(func=_cmd_oc_chat_inventory)
+
+    p = sub.add_parser(
+        "oc-chat-import",
+        help="copy source sessions into a target OpenCode db (same ids, "
+             "PK idempotence; one transaction + backup + verify-after)")
+    p.add_argument("payload_b64",
+                   help='base64 of {"source_db", "target_db", '
+                        '"manifest_path", "backup_root", "session_ids", '
+                        '"dry_run", "label", "title_tag"}')
+    p.set_defaults(func=_cmd_oc_chat_import)
+
+    p = sub.add_parser(
+        "oc-chat-revert",
+        help="delete exactly one chat import (manifest-driven; FK cascades)")
+    p.add_argument("payload_b64",
+                   help='base64 of {"target_db", "manifest_path", '
+                        '"backup_root", "import_id", "dry_run"}')
+    p.set_defaults(func=_cmd_oc_chat_revert)
 
     p = sub.add_parser(
         "paths",

@@ -443,6 +443,31 @@ fresh clone WORKS but on the FREE model (iceman-free); `-Login` attaches
 the clone's account (one credential = one instance). `-Auto` passes
 `--auto` for tasks that would otherwise wait on approval prompts.
 
+### OpenCode chat sync (OpenCode [26]-[27])
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "tools\sync_opencode_chats.ps1" -Target All                 # [26] — inventory diff (writes nothing)
+powershell -ExecutionPolicy Bypass -File "tools\sync_opencode_chats.ps1" -Instance c1                # diff for one clone
+powershell -ExecutionPolicy Bypass -File "tools\sync_opencode_chats.ps1" -Instance c1 -AllMissing    # import PLAN (dry-run)
+powershell -ExecutionPolicy Bypass -File "tools\sync_opencode_chats.ps1" -Instance c1 -AllMissing -Apply   # [27] — guarded import
+powershell -ExecutionPolicy Bypass -File "tools\sync_opencode_chats.ps1" -Instance c1 -SessionIds ses_x1ses_x2 -Apply   # explicit sessions
+powershell -ExecutionPolicy Bypass -File "tools\sync_opencode_chats.ps1" -Instance c1 -Revert -ImportId <id>   # undo one import
+```
+
+Copies chat sessions Primary → clones from the mined `opencode.db`
+contract (sessions live IN the db; the whole message payload rides
+`session_message.data`; project ids are stable per worktree path, so a
+project row is reused by path or copied verbatim; auth never crosses —
+the `account`/`credential` tables are never read). Session ids are
+preserved (idempotent re-import = a reported skip), the selection
+expands to ancestors + descendants, imported titles get an
+"`[import]` " tag, every apply takes a WAL-safe backup first
+(`chat-sync-backups\`), the manifest (`chat-sync-manifest.json`) drives
+`-Revert -ImportId`, and the audit (`chat-sync-audit.jsonl`) carries
+ids + counts only. A running clone (lockfile held) or a db-less clone
+is skipped. Live acceptance pending (CS-8): import into a closed clone
+and confirm its UI lists the sessions after the next launch.
+
 ## AutoClaw2 multi-instance (5 clones + Primary; per-user, no admin needed)
 
 ```powershell
