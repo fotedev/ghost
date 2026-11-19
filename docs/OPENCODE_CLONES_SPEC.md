@@ -617,6 +617,20 @@ whole-file .lnk decoding — EC-C09).
   stale, the code already probes this lane first).
 - The 3.7 GB Primary `~\.local\share\opencode\opencode.db` stays
   Primary; clones start with fresh small DBs (no seeding, by design).
+- **Cross-instance CHAT sync SHIPPED 2026-11-20 (CS-8)** — OpenCode [26]
+  inventory diff (gid 124) + [27] guarded import (gid 125,
+  `tools\sync_opencode_chats.ps1` over the `oc-chat-*` core verbs): the
+  store contract was mined from the live dbs (sessions IN `opencode.db`;
+  the whole message payload in `session_message.data` JSON;
+  `session_part`/`blob` declared but empty today; project ids stable per
+  worktree path across instances; auth outside the db). Same-id PK
+  idempotence (a reverted import is plannable again), ancestor+descendant
+  family expansion, project row reuse-by-path or verbatim copy, one
+  transaction + WAL-safe backup + verify-after, `chat-sync-manifest.json`
+  drives `-Revert -ImportId`, imported titles get an "[import] " tag.
+  LIVE acceptance = user-supervised: import into a closed clone and
+  confirm its UI lists the sessions after the next launch (the display
+  hop is the one unverified step).
 - `MachineGuid` shared by every instance (ground truth #1) —
   per-instance differentiation is the per-clone account identity.
 

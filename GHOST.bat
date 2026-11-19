@@ -353,6 +353,10 @@ call :Opt 23 "Taskbar identity watcher" "- resident - re-stamps window AUMIDs + 
 call :Opt 24 "Instance pressure report" "- read-only - instances, commit RAM, log scan"
 call :Opt 25 "Dry-run reset plan" "- what a reset would touch - writes nothing"
 echo.
+call :Div "Chat Sync"
+call :Opt 26 "Chat sync inventory" "- source vs clones - diff plan - writes nothing"
+call :Opt 27 "Import missing chats" "- Primary to c1..c5 - backup + revertable - running clones skipped"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto OPENCODE_PROMPT
@@ -571,6 +575,9 @@ rem reset_opencode.ps1 -Target c1..c5|Primary|All; the ALL row is gated).
 rem 2026-11-17: locals 21-22 = the OpenCode Config Sync section (gids 110/111;
 rem CS-1 v2 - the one-shot definitions sync row + the resident config sync
 rem watcher); Cline locals 18-19 = its Config Sync rows (gids 112/113).
+rem 2026-11-20: locals 26-27 = the Chat Sync section (gids 124/125 - the
+rem cross-instance chat import on the AC2 [9]/[10] semantics; the ceiling
+rem rose 123 -> 125 per the hub-menu test's raise-when-landing rule).
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=53"
 if "%~1"=="2" set "RESOLVED=54"
@@ -597,13 +604,16 @@ if "%~1"=="22" set "RESOLVED=111"
 if "%~1"=="23" set "RESOLVED=115"
 if "%~1"=="24" set "RESOLVED=118"
 if "%~1"=="25" set "RESOLVED=121"
+if "%~1"=="26" set "RESOLVED=124"
+if "%~1"=="27" set "RESOLVED=125"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-123; 5 unused; 74 = the AutoClaw2 MCP sync
+rem Runs one task by global id (1-125; 5 unused = the retired AutoClaw v1
+rem block 37-40 + 63, kept reserved-dead by the hub-menu test; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
 rem builder; 82 = the ZCode Primary launcher; 83 = the clone Task Manager exe
@@ -735,6 +745,8 @@ if "%~1"=="118" (call :Run "tools\diagnose_suite_pressure.ps1" -Suite opencode &
 if "%~1"=="119" (call :Run "src\windows\reset_autoclaw2.ps1" -Target All -DryRun & exit /b)
 if "%~1"=="120" (call :Run "src\windows\reset_cline.ps1" -Target All -DryRun & exit /b)
 if "%~1"=="121" (call :Run "src\windows\reset_opencode.ps1" -Target All -DryRun & exit /b)
+if "%~1"=="124" (call :Run "tools\sync_opencode_chats.ps1" -Target All & exit /b)
+if "%~1"=="125" (call :Run "tools\sync_opencode_chats.ps1" -Target All -AllMissing -Apply & exit /b)
 if "%~1"=="81" (call :RunWith "tools\build_ghost_exe.ps1" "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or after moving this repo folder." & exit /b)
 if "%~1"=="44" (call :Detached "Cline Blue" "-NoProfile" "src\windows\launch_cline_clone.ps1" "" "Launcher opened in a separate window - it closes automatically when done." & exit /b)
 if "%~1"=="45" (call :RunWith "tools\install_cline_clone_shortcuts.ps1" "Look for the new Cline Blue..Orange shortcuts on your Desktop and in the Start menu." & exit /b)

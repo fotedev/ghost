@@ -16,7 +16,7 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   [1]-[5] / AutoClaw2 Multi-Instance & Clones
                                              #   [1]-[25] / Cline Multi-Instance & Clones
                                              #   [1]-[23] / OpenCode Multi-Instance & Clones
-                                             #   [1]-[25]) + ANSI colors + local chained input
+                                             #   [1]-[27]) + ANSI colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
                                              #   global gid jump from the main menu, and
@@ -324,7 +324,16 @@ src/python/                    # stdlib-only Python core (ghost/ package) + ghos
                                #   mutated; area-scoped via --base-path; names-only report;
                                #   backup + verify-after deep re-read + --dry-run zero-write)
                                #   — the generic merge core the Linux syncs ride
-                               #   (tested by tests/python/test_ghost_json_merge.py, 18)
+                               #   (tested by tests/python/test_ghost_json_merge.py, 18);
+                               #   opencode.py (2026-11-20) = the OpenCode CHAT-sync core —
+                               #   `oc-chat-inventory` / `oc-chat-import` / `oc-chat-revert`
+                               #   verbs over the mined opencode.db contract (session_v2 →
+                               #   session_message/parts/instruction_*, project reuse by
+                               #   worktree path or verbatim copy, same-id PK idempotence,
+                               #   FK-cascade revert; the auth/app tables never read;
+                               #   schema-mismatch refusal on drift) — driven by
+                               #   tools/sync_opencode_chats.ps1 (CS-8; tested by
+                               #   tests/python/test_ghost_opencode.py, 15)
 src/desktop/                   # GHOST.exe desktop launcher sources: GhostHub.cs (single-file
                                #   WinForms hub, C# 5 ONLY for the in-box csc.exe), menu.json
                                #   (runtime-loaded GUI menu data — parity-tested against
@@ -572,6 +581,37 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     §5 items 1/3/4/5 (dry-run zero-write, zero secret leaks
                                    #     in config AND audit, SKIP paths, Primary hash stable) +
                                    #     idempotence; live runs = user-supervised;
+                                   #   sync_opencode_chats.ps1 — OpenCode cross-instance CHAT
+                                   #     sync (CS-8, 2026-11-20; OpenCode [26] inventory diff =
+                                   #     gid 124, [27] guarded import = gid 125 — the ceiling
+                                   #     rose 123→125, the retired AutoClaw v1 gids 37-40+63
+                                   #     stay reserved-dead): the store contract MINED from the
+                                   #     live dbs (sessions live IN opencode.db — session_v2→
+                                   #     project FK, the whole message payload in
+                                   #     session_message.data JSON, session_part/blob declared
+                                   #     but empty; project ids STABLE per worktree path across
+                                   #     instances; auth OUTSIDE the db — account/credential/
+                                   #     control_account NEVER touched); -Instance/-Target,
+                                   #     -From Primary|cN, default = diff report, -SessionIds/
+                                   #     -AllMissing plan, -Apply executes, -DryRun, -Revert
+                                   #     -ImportId; CS-1 lockfile probe (running clone = SKIP);
+                                   #     a db-less clone = SKIP (never used); the SOURCE opens
+                                   #     read-only (WAL readers coexist with a live Primary);
+                                   #     all SQL in the core (src/python/ghost/opencode.py:
+                                   #     oc-chat-inventory/-import/-revert — same-id PK
+                                   #     idempotence, ancestor+descendant family expansion,
+                                   #     project row reuse-by-path or verbatim copy, one
+                                   #     transaction + WAL-safe sqlite3 backup + verify-after
+                                   #     recount + sampled byte-compare, manifest sidecar
+                                   #     chat-sync-manifest.json drives the revert; imported
+                                   #     titles get the "[import] " tag, D11); audit
+                                   #     chat-sync-audit.jsonl ids + counts ONLY;
+                                   #     unittest 15 (tests/python/test_ghost_opencode.py, incl.
+                                   #     CLI e2e) + Pester 15 (tests/opencode_chat_sync.Tests.ps1)
+                                   #     + the orchestrator %TEMP% fixture matrix (diff/plan/
+                                   #     apply/idempotence/revert) all green; LIVE acceptance =
+                                   #     user-supervised (import into a closed clone, confirm
+                                   #     the UI lists it after the next launch);
                                    #   watch_opencode_config_sync.ps1 — resident OpenCode
                                    #     config sync watcher (CS-1 v2, 2026-11-17; OpenCode
                                    #     [21] one-shot sync = gid 110, [22] resident = gid 111):

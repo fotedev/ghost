@@ -8,6 +8,44 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **OpenCode cross-instance chat sync (2026-11-20)** — the deferred
+  chat-sync discovery spike resolved: the store contract was MINED from
+  the live dbs (sessions live IN `opencode.db` — `session_v2` →
+  `project` FK, the whole message payload in `session_message.data`
+  JSON, `session_part`/`blob`/`blob_ref` declared but empty in the
+  observed schema; project ids STABLE per worktree path across
+  instances; auth OUTSIDE the db — `account`/`credential`/
+  `control_account` were 0 rows and are never read). **Core**:
+  `src/python/ghost/opencode.py` (`oc-chat-inventory` / `oc-chat-import`
+  / `oc-chat-revert` — same-id PK idempotence (a reverted import is
+  plannable again), ancestor+descendant family expansion, project row
+  reuse-by-path or verbatim copy, one transaction with FK ON + WAL-safe
+  sqlite3 backup + verify-after recount + sampled byte-compare, schema-
+  mismatch refusal on drift, `chat-sync-manifest.json` sidecar, the
+  "[import] " title tag). **Orchestrator**: `tools/sync_opencode_chats.ps1`
+  (default = diff report; `-SessionIds`/`-AllMissing` plan, `-Apply`,
+  `-DryRun`, `-Revert -ImportId`; the CS-1 lockfile probe skips a
+  RUNNING clone; a db-less clone is skipped; source opened read-only;
+  audit `chat-sync-audit.jsonl` carries ids + counts only — never
+  message bodies). **Wiring**: OpenCode [26] inventory diff (gid 124) +
+  [27] guarded import (gid 125) — the gid ceiling rose 123→125 (the
+  retired AutoClaw v1 gids 37-40+63 stay reserved-dead per the hub-menu
+  test). Tests: `tests/python/test_ghost_opencode.py` (15, incl. CLI
+  e2e) + `tests/opencode_chat_sync.Tests.ps1` (15 static contract) +
+  the orchestrator's %TEMP% fixture matrix (diff/plan/apply/
+  idempotence/revert). LIVE acceptance = user-supervised (CS-8): import
+  into a closed clone and confirm its UI lists the sessions after the
+  next launch.
+- **Cline chat-sync verdict (2026-11-20, CS-9 — DEFERRED-BY-EVIDENCE)**
+  — the other deferred spike closed with a mined store map: chat
+  history = `data/sessions/<id>/*.json` files plus a `sessions.db` that
+  is a RUNTIME PROCESS REGISTRY (not a history store), `session-search.db`
+  FTS + agenda/teams side dbs; data volume ~NIL (one session across
+  c1..c3); the desktop UI's task-history source is unverified
+  (snappy-compressed WebView2 LevelDB defeats a literal strings probe);
+  checkpoints live in workspace git refs and do not port. Reopen
+  triggers recorded in docs/TASK_BACKLOG.md + docs/CLINE_CLONES_SPEC.md
+  §7 — the store map is closed, do not re-derive it.
 - **macOS ZCode reset (2026-11-19)** — the SEVENTH and last macOS resetter;
   the wave is COMPLETE (issue #36 — every slug now has a macOS resetter).
   **`src/macos/reset_zcode.sh`** (v0.1): the Linux `reset_zcode.sh` v0.2

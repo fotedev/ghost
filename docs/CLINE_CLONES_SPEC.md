@@ -256,3 +256,15 @@ READ (base-AUMID discovery via `Shell.Application`
 - `-Status` = hub-lock exclusive-open probe (held = running, absent =
   never started / cleanly stopped, free = not running), expected-port
   check and single-instance window check.
+- **Cross-instance CHAT sync = DEFERRED-BY-EVIDENCE (CS-9, 2026-11-20 —
+  the store map below is closed, do not re-derive it)**: chat history =
+  `data/sessions/<id>/<id>.json` + `<id>.messages.json` files plus a
+  `data/db/sessions.db` that is a RUNTIME PROCESS REGISTRY (pid/status/
+  cwd/`messages_path` pointers — NOT a history store) + `session-search.db`
+  FTS + agenda/tasks/teams side dbs; data volume ~NIL (ONE session across
+  c1..c3 as of the mining date); the desktop UI's task-history source is
+  UNVERIFIED (the WebView2 `EBWebView` profile is snappy-compressed
+  LevelDB — a literal strings probe cannot see values, so whether a
+  hub-side import would even DISPLAY is undecided); Cline checkpoints
+  live in workspace git refs and do NOT port. Reopen triggers: a live
+  UI-history probe (the CS-2 probe analog) + real session volume.
