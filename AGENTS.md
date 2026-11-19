@@ -213,7 +213,58 @@ src/macos/                     # macOS .sh resetters — the repo's first macOS
                                #   devin CLI home on a case-insensitive volume — the Windows
                                #   multi-root probe does not port); smoke Pass 17/Fail 0
                                #   first try + checker ALL PASS (88 assertions) + idempotence
-                               #   + abort path; live macOS acceptance = user-supervised
+                               #   + abort path; live macOS acceptance = user-supervised;
+                               #   reset_qoderwork.sh v0.1 (2026-11-19) = the fifth macOS
+                               #   resetter, 16 steps on the LIVE-VERIFIED Windows v0.2 map:
+                               #   machineId files probed in THREE spellings (Windows
+                               #   machine-id vs Linux machineid vs Electron camelCase —
+                               #   macOS spelling unverified, whichever exists rotates),
+                               #   reset_electron_stores, installation_id, the .status.json
+                               #   logged-out patch (version/schema_version/product
+                               #   preserved, fresh UTC snapshot_at, writer=main),
+                               #   external-commands registry commands=[], cache/log
+                               #   sweeps, rum-electron-store (ARMS _arms_uid), Local State
+                               #   delete, Partitions/main salt + network stores +
+                               #   Local/Session Storage + Shared Dictionary, cache trees,
+                               #   SharedStorage + dns-cache, auth.dat/auth-v2.dat, and the
+                               #   signature data/agents.db purge-tables scrub with the
+                               #   EXACT whitelist (15 tables + 12 app_settings keys; chat
+                               #   tables NEVER in the list, proxy survives; backup-first
+                               #   with the core backup --sqlite-wal; schema-missing tables
+                               #   tolerated per the core WARN contract — smoke-proven with
+                               #   2 of 15 deliberately absent) + dynamic-text UI strings
+                               #   PRESERVED; smoke Pass 16/Fail 0 first try + checker ALL
+                               #   PASS (82 assertions) + idempotence + abort;
+                               #   reset_minimax_opencode.sh v0.1 (2026-11-19) = the sixth
+                               #   macOS resetter, 13 steps, MiniMax-only (the Linux v0.2
+                               #   scope + the MiniMax-side Windows v1.4 steps; the
+                               #   OpenCode-desktop Electron steps do NOT port — no macOS
+                               #   map rows for ai.opencode.desktop, the opencode alias
+                               #   resolves to opencode-cli whose XDG auth is NEVER
+                               #   touched, loudly audited): machineId files in three
+                               #   spellings, Electron stores, the mcode-public auth
+                               #   deletions (auth.json + auth-state.json + the legacy root
+                               #   auth-state; absent = fresh-install parity — "{}" there
+                               #   throws Invalid OAuth state and blocks the login page),
+                               #   session-handoff device-id rotation, local-runtime
+                               #   wiped to {}, agent-config user/sharedUser removal
+                               #   (config kept), remote-control desktop_device_id,
+                               #   .updaterId, the MiniMax Chromium sweeps (15-file
+                               #   network list + DIPS*/SharedStorage* prefix probes +
+                               #   cache/web-storage trees + Crashpad + os_crypt pointer +
+                               #   uninstall_metrics + Preferences salt), the mavis-browser
+                               #   Local Storage, misc run-state; sessions/sqlite.db/
+                               #   credentials/mavis/telegram.json/.mavis/system-ca-certs
+                               #   PRESERVED; SMOKE-CAUGHT PORT BUG → the derivation-
+                               #   fallback contract: rows that exist only in the linux/
+                               #   macos platform columns (mcode_public,
+                               #   session_handoff_device_id — the windows column predates
+                               #   them) are derived from the mapped roots with the SAME
+                               #   relative structure when the resolved map lacks them,
+                               #   with a loud PROVENANCE warn (never silent); smoke Pass
+                               #   13/Fail 0 + checker ALL PASS (77 assertions incl. the
+                               #   XDG byte-identical preservation) + idempotence + abort;
+                               #   live macOS acceptance = user-supervised
 src/python/                    # stdlib-only Python core (ghost/ package) + ghost_cli.py bootstrap —
                                #   owns the shared SQLite/JSON identity logic; the PS bridges
                                #   (Set-SqliteKeys, reset_zcode secrets + CLI-telemetry,

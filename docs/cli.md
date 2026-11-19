@@ -532,17 +532,21 @@ sudo ./src/linux/change_device_id.sh ResetMachineId  # /etc/machine-id (root)
 
 ## macOS
 
-Qoder + Cursor + Trae + Devin/Windsurf (issue #36 follow-ups). Every store
-path is DERIVED from the Windows layout until a live Mac verifies it — each
-script prints the provenance caveat and skips any store it does not find.
-System-level sources (IOPlatformUUID, Keychain "Chromium Safe Storage",
-hostname, MAC) are skipped loudly. The Cursor resetter PRESERVES chat state
-(Local Storage, Backups, cursorDiskKV, workspaceStorage files); the Trae
-resetter's ai-agent scrub is identity-ROWS-only (chat rows preserved); the
-Devin/Windsurf resetter keeps Local Storage/Backups/WebStorage/IndexedDB,
-upserts workspaceStorage, and deliberately does NOT probe a Devin-named
-Application Support sibling (it cannot be told apart from the devin CLI
-home on a case-insensitive volume).
+Qoder + Cursor + Trae + Devin/Windsurf + QoderWork + MiniMax/OpenCode
+(issue #36 follow-ups). Every store path is DERIVED from the Windows layout
+until a live Mac verifies it — each script prints the provenance caveat and
+skips any store it does not find. System-level sources (IOPlatformUUID,
+Keychain "Chromium Safe Storage", hostname, MAC) are skipped loudly. The
+Cursor resetter PRESERVES chat state (Local Storage, Backups, cursorDiskKV,
+workspaceStorage files); the Trae resetter's ai-agent scrub is
+identity-ROWS-only (chat rows preserved); the Devin/Windsurf resetter keeps
+Local Storage/Backups/WebStorage/IndexedDB, upserts workspaceStorage, and
+deliberately does NOT probe a Devin-named Application Support sibling (it
+cannot be told apart from the devin CLI home on a case-insensitive volume);
+the QoderWork resetter's agents.db scrub is the EXACT whitelist purge (chat
+tables + the proxy setting survive); the MiniMax resetter is MiniMax-only —
+the OpenCode CLI XDG stores belong to the opencode-cli login and are never
+touched, and sessions/sqlite.db/credentials are preserved.
 
 ```bash
 chmod +x src/macos/*.sh
@@ -550,4 +554,6 @@ chmod +x src/macos/*.sh
 ./src/macos/reset_cursor.sh   # close Cursor first; keeps chats
 ./src/macos/reset_trae.sh     # close Trae first; keeps ai-agent chats
 ./src/macos/reset_devin.sh    # close Windsurf/Devin first; keeps chats
+./src/macos/reset_qoderwork.sh         # close QoderWork first; whitelist purge
+./src/macos/reset_minimax_opencode.sh  # close MiniMax first; CLI auth untouched
 ```
