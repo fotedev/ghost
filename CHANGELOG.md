@@ -8,6 +8,56 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **macOS QoderWork + MiniMax resets (2026-11-19)** — the fifth and sixth
+  macOS resetters (issue #36 follow-up; Qoder + Cursor + Trae +
+  Devin/Windsurf shipped first), one PR, both DERIVED-flagged and
+  absence-tolerant. **`src/macos/reset_qoderwork.sh`** (v0.1, 16 steps):
+  the LIVE-VERIFIED Windows `reset_qoderwork.ps1` v0.2 map ported onto the
+  macOS column — machineId files probed in THREE spellings (Windows
+  `machine-id` vs Linux `machineid` vs Electron camelCase; the macOS
+  spelling is unverified so whichever exists rotates), the Electron 5-key
+  telemetry stores, `~/.qoderwork/installation_id`, the `.status.json`
+  logged-out patch (version/schema_version/product preserved, fresh UTC
+  `snapshot_at`, writer=main), `external-commands/registry.json`
+  commands=[], the cache/log sweeps, `rum-electron-store` (ARMS
+  `_arms_uid`), the Local State delete, the `Partitions/main` salt +
+  network stores + Local/Session Storage + Shared Dictionary, the cache
+  trees, SharedStorage + dns-cache, `auth.dat`/`auth-v2.dat`, and the
+  signature `data/agents.db` purge-tables scrub with the EXACT Windows
+  whitelist (15 tables + 12 app_settings keys; chats/sub_chats/messages/
+  projects NEVER in the list; the `proxy` setting survives; backup-first
+  with `--sqlite-wal`; schema-missing tables tolerated per the core WARN
+  contract — smoke-proven with 2 of the 15 tables deliberately absent) and
+  `data/dynamic-text/qoder-work.json` PRESERVED (UI strings).
+  **`src/macos/reset_minimax_opencode.sh`** (v0.1, 13 steps): the Linux
+  v0.2 MiniMax-only scope + the MiniMax-side Windows v1.4 steps —
+  machineId files in three spellings, the Electron telemetry stores, the
+  mcode-public auth deletions (auth.json + auth-state.json + the legacy
+  root auth-state; absent IS the fresh-install state — `{}` there throws
+  Invalid OAuth state and blocks the login page), the
+  `v2/session-handoff/device-id` rotation, `local-runtime.auth.json`
+  wiped to `{}`, `minimax-agent-config.json` user/sharedUser removal
+  (config kept), `remote-control/state.json` desktop_device_id rotation,
+  `.updaterId`, the MiniMax Chromium sweeps (15-file network list +
+  DIPS*/SharedStorage* prefix probes + cache/web-storage trees + Crashpad
+  + Local State os_crypt pointer + uninstall_metrics + Preferences salt),
+  the mavis-browser Local Storage, and the misc run-state trees/files.
+  The OpenCode-desktop Electron steps do NOT port (no macOS map rows for
+  `ai.opencode.desktop`; the `opencode` alias resolves to opencode-cli)
+  — the CLI XDG auth is NEVER touched (loudly audited), and sessions/ +
+  sqlite.db + credentials/mavis/telegram.json + .mavis + system-ca-certs
+  are preserved. A smoke-caught port bug added the derivation-fallback
+  contract: rows that exist only in the linux/macos platform columns
+  (`mcode_public`, `session_handoff_device_id`) are derived from the
+  mapped roots with the SAME relative structure when the resolved map
+  lacks them (loud PROVENANCE warn, never silent) — required on any host
+  whose own column predates those rows. Both smoke-tested end-to-end on
+  the dev host against one seeded fake home: QoderWork Pass 16 / Fail 0 +
+  checker ALL PASS (82 assertions incl. the chat-table row counts + the
+  schema-missing tolerance), MiniMax Pass 13 / Fail 0 + checker ALL PASS
+  (77 assertions incl. the XDG byte-identical preservation); idempotent
+  re-runs exit 0, abort paths exit 1. Live macOS acceptance =
+  user-supervised.
 - **macOS Devin/Windsurf reset (2026-11-19)** — the fourth macOS resetter
   (issue #36 follow-up; Qoder + Cursor + Trae shipped first).
   **`src/macos/reset_devin.sh`** (v0.1): 17 steps porting the
