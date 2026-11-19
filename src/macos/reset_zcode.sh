@@ -141,7 +141,6 @@ RESTORE_ENTRIES=()
 audit_init "$BACKUP_ROOT"
 
 STORAGE_JSON="$CONFIG_ROOT/User/globalStorage/storage.json"
-STATE_VSCDB="$CONFIG_ROOT/User/globalStorage/state.vscdb"
 # The CLI-side v2 stores (cli_dir is platform-agnostic in platform.py; the
 # specific FILES are derived from the Windows layout - surfaced unverified
 # by the paths verb above). Built inline from cli_dir, matching the Linux
@@ -291,10 +290,10 @@ if [[ -f "$SETTING_JSON" ]]; then
 fi
 # Preservation audit: the stores this resetter deliberately keeps (the
 # same contract as the Windows + Linux ZCode resets).
-info "Preserved (never touched): the shared CLI session db (~/.zcode/cli/db/db.sqlite),"
+info "Preserved (never touched): the shared CLI session db (~$HOME/.zcode/cli/db/db.sqlite),"
 info "cli/config.json (provider definitions + MCP), cli/tasks-index."
-audit_line "$AUDIT_FILE" "~/.zcode/cli/db/db.sqlite (shared CLI session store)" "-" "preserved" 1
-audit_line "$AUDIT_FILE" "~/.zcode/cli/config.json (provider definitions + MCP)" "-" "preserved" 1
+audit_line "$AUDIT_FILE" "$HOME/.zcode/cli/db/db.sqlite (shared CLI session store)" "-" "preserved" 1
+audit_line "$AUDIT_FILE" "$HOME/.zcode/cli/config.json (provider definitions + MCP)" "-" "preserved" 1
 # macOS system identity: a loud, audited skip (no honest userspace analog).
 warn "System identity NOT reset on macOS (see the header NOT-covered list):"
 warn "  IOPlatformUUID (immutable) | hostname | MAC"
