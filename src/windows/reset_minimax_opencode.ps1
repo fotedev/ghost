@@ -161,12 +161,88 @@ param(
     # breaks when [CmdletBinding()] is present (the `*` binds as a positional
     # argument). Same pattern as reset_qoderwork_windows-v0.1.ps1.
     [switch]$KeepLogin,
-    [switch]$SkipVersionCheck
+    [switch]$SkipVersionCheck,
+    [switch]$DryRun
 )
 
 . "$PSScriptRoot\identity_utils.ps1"
 
 $ErrorActionPreference = "Stop"
+
+# --- W1-9-style report-only planner -------------------------------------------
+# Prints both apps' roots + presence, the would-kill set and the step plan,
+# then exits BEFORE self-elevation (a plan never triggers UAC), before any
+# kill, before any write. Zero side effects by construction. Step list mirrors
+# the "--- [N/22]" headings below; tests/reset_dryrun.Tests.ps1 cross-checks
+# the two so the plan cannot silently drift from the steps.
+if ($DryRun) {
+    Write-Host "=== DRY-RUN PLAN - MiniMax Agent / OpenCode Identity Reset v1.4 ===" -ForegroundColor Cyan
+    $planMmRoaming = Join-Path $env:APPDATA "MiniMax Agent"
+    $planOcRoaming = Join-Path $env:APPDATA "ai.opencode.desktop"
+    $planMmHome = Join-Path $env:USERPROFILE ".minimax"
+    $planOcHome = Join-Path $env:USERPROFILE ".local\share\opencode"
+    $planOcConfig = Join-Path $env:USERPROFILE ".config\opencode"
+    Write-Host ("MiniMax roaming : {0} ({1})" -f $planMmRoaming, $(if (Test-Path -LiteralPath $planMmRoaming) { "present" } else { "missing (steps skip)" }))
+    Write-Host ("MiniMax CLI home: {0} ({1})" -f $planMmHome, $(if (Test-Path -LiteralPath $planMmHome) { "present" } else { "missing (steps skip)" }))
+    Write-Host ("OpenCode desktop: {0} ({1})" -f $planOcRoaming, $(if (Test-Path -LiteralPath $planOcRoaming) { "present" } else { "missing (steps skip)" }))
+    Write-Host ("OpenCode CLI    : {0} ({1})" -f $planOcHome, $(if (Test-Path -LiteralPath $planOcHome) { "present" } else { "missing (steps skip)" }))
+    Write-Host ("OpenCode config : {0} ({1})" -f $planOcConfig, $(if (Test-Path -LiteralPath $planOcConfig) { "present" } else { "missing (steps skip)" }))
+    $planCoreOk = (Get-GhostPythonCli) -and (Get-PythonCommandInfo)
+    if (-not $planCoreOk) {
+        Write-Host "Python core     : MISSING - the real run would fail fast here (every step needs it)." -ForegroundColor Yellow
+    }
+    if (-not (Test-Path -LiteralPath $planMmRoaming) -and -not (Test-Path -LiteralPath $planOcRoaming) -and `
+        -not (Test-Path -LiteralPath $planMmHome) -and -not (Test-Path -LiteralPath $planOcHome)) {
+        Write-Host "Neither MiniMax nor OpenCode found - the real run would abort here." -ForegroundColor Yellow
+    }
+    $planRunning = @()
+    foreach ($planProcName in @("MiniMax*", "OpenCode*")) {
+        $planRunning += @(Get-Process -Name $planProcName -ErrorAction SilentlyContinue)
+    }
+    Write-Host ""
+    Write-Host "Would kill (aggressive tree-kill, 2 clean checks required):"
+    if ($planRunning.Count -eq 0) {
+        Write-Host "  no MiniMax/OpenCode processes running"
+    }
+    else {
+        foreach ($planProc in $planRunning) { Write-Host ("  pid {0}: {1}" -f $planProc.Id, $planProc.Name) }
+    }
+    Write-Host ""
+    Write-Host "Step plan:"
+    foreach ($planStep in @(
+        "[1/22]  OpenCode CLI auth.json wipe (forces re-login; -KeepLogin preserves)",
+        "[2/22]  OpenCode CLI home: log/ clear + shared-storage preserves",
+        "[3/22]  OpenCode .updaterId + gh\device-id rotation",
+        "[4/22]  OpenCode opencode.global.dat + stale tmp siblings",
+        "[5/22]  OpenCode Chromium network stores",
+        "[6/22]  OpenCode cache trees + session/web storage (per-file delete)",
+        "[7/22]  OpenCode Local State os_crypt + uninstall_metrics + Preferences salt + windowIds",
+        "[8/22]  OpenCode preservation audit (userData + .config)",
+        "[9/22]  MiniMax mcode-public auth.json DELETE (backup-first)",
+        "[10/22] MiniMax auth-state.json DELETE (absent = fresh install)",
+        "[11/22] MiniMax local-runtime.auth.json wipe",
+        "[12/22] minimax-agent-config.json: remove user/sharedUser ONLY",
+        "[13/22] remote-control\state.json: rotate desktop_device_id",
+        "[13b/22] MiniMax v2 session-handoff device-id rotation",
+        "[14/22] MiniMax .updaterId rotation",
+        "[15/22] MiniMax Agent Chromium stores (profile-wide treatment)",
+        "[16/22] MiniMax Agent cache trees + Local State os_crypt + Preferences salt",
+        "[17/22] mavis-browser partition: Local Storage ONLY (per spec)",
+        "[18/22] MiniMax misc clears (spec step 8 list)",
+        "[19/22] MiniMax preservation audit + .mavis junction (link-only)",
+        "[20/22] Old ID_Backups purge (both apps)",
+        "[21/22] Watchdog re-verify (both profiles + mavis partition)",
+        "[22/22] Final probes"
+    )) {
+        Write-Host ("  {0}" -f $planStep)
+    }
+    Write-Host ""
+    Write-Host "Preserved per policy: sessions/sqlite/memory/plans/workspaces, mavis auth,"
+    Write-Host "telegram.json, .mavis system-ca-certs, the OpenCode .config MCP definitions."
+    Write-Host ""
+    Write-Host "DRY-RUN complete - nothing was written or killed." -ForegroundColor Green
+    exit 0
+}
 
 # --- Self-elevation -----------------------------------------------------------
 # Re-launch elevated with the same script path + switches when not admin.

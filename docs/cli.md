@@ -17,10 +17,15 @@ from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_cursor.ps1"
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cursor.ps1" -DryRun            # plan only — writes nothing, never elevates
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_devin.ps1"
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_devin.ps1" -DryRun             # multi-root plan (Devin + Windsurf roots)
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_trae.ps1"
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_trae.ps1" -DryRun              # plan only
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_qoder.ps1"
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_qoder.ps1" -DryRun             # 31-step plan (per-profile steps noted; -SkipMac/-SkipHostname shown)
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_qoderwork.ps1"
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_qoderwork.ps1" -DryRun         # plan only
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Primary
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Secondary
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_zcode.ps1" -Target Third
@@ -35,6 +40,7 @@ powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instan
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1" -Instance Fifth
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instance.ps1" -Instance Sixth
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_minimax_opencode.ps1"
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_minimax_opencode.ps1" -DryRun  # 22-step plan for both apps
 powershell -ExecutionPolicy Bypass -File "src\windows\change_device_id.ps1"                            # default mode = Fingerprint - READ-ONLY self-test (diagnostic, changes nothing)
 powershell -ExecutionPolicy Bypass -File "src\windows\change_device_id.ps1" -Mode LegacyReset          # IDE Resets [1] — machine-wide ID reset (MachineGuid, ProductId, hostname - reboot required)
 powershell -ExecutionPolicy Bypass -File "src\windows\change_device_id.ps1" -Mode RepairProfiles       # repair ProfileList .bak temp-profile keys

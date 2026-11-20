@@ -45,6 +45,7 @@
 #
 # Usage (Windows 10, PowerShell 5.1 or 7 -- just double-click or run):
 #   powershell -ExecutionPolicy Bypass -File reset_trae.ps1
+#   powershell -ExecutionPolicy Bypass -File reset_trae.ps1 -DryRun   # plan only - writes nothing
 # Prerequisite: close Trae first (the script also force-kills it).
 # Requirement: Python (python or python3) for EVERY store mutation now
 # (v0.2 needed it only for the SQLite steps). The functional probe in
@@ -53,9 +54,85 @@
 # (value generation stays PS, like New-IdentitySet); the Preferences salt is
 # generated in the core (32 lowercase hex - same shape v0.2 produced).
 
+param([switch]$DryRun)
+
 . "$PSScriptRoot\identity_utils.ps1"
 
 $ErrorActionPreference = "Stop"
+
+# --- Store paths (hoisted above the DryRun planner + self-elevation) ----------
+# Pure env-derived values with no side effects; both the planner and the main
+# path read them (the W1-9 shape: a report-only run must see the real layout).
+$app = "Trae"
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$root = Join-Path $env:APPDATA $app
+$backupRoot = Join-Path $root ("ID_Backups\" + $timestamp)
+$idBackupsRoot = Join-Path $root "ID_Backups"
+$machineIdPath = Join-Path $root "machineid"
+$storagePath = Join-Path $root "User\globalStorage\storage.json"
+$sqlitePath = Join-Path $root "User\globalStorage\state.vscdb"
+$workspaceStorageRoot = Join-Path $root "User\workspaceStorage"
+
+# --- W1-9-style report-only planner -------------------------------------------
+# Prints the real step list with resolved paths + presence, then exits BEFORE
+# self-elevation (a plan never triggers UAC), before any kill, before any
+# write. Zero side effects by construction. Step list mirrors the
+# "--- [N/16]" headings below; tests/reset_dryrun.Tests.ps1 cross-checks the
+# two so the plan cannot silently drift from the steps.
+if ($DryRun) {
+    Write-Host "=== DRY-RUN PLAN - Trae Identity Reset v0.3 ===" -ForegroundColor Cyan
+    $rootPresent = Test-Path -LiteralPath $root
+    Write-Host ("Trae roaming     : {0} ({1})" -f $root, $(if ($rootPresent) { "present" } else { "NOT INSTALLED - the real run would abort here" }))
+    foreach ($planPath in @(
+        @{ label = "machineid file        "; path = $machineIdPath },
+        @{ label = "storage.json          "; path = $storagePath },
+        @{ label = "state.vscdb           "; path = $sqlitePath },
+        @{ label = "workspaceStorage root "; path = $workspaceStorageRoot }
+    )) {
+        Write-Host ("{0}: {1} ({2})" -f $planPath.label, $planPath.path, $(if (Test-Path -LiteralPath $planPath.path) { "present" } else { "missing (skips)" }))
+    }
+    $planCoreOk = (Get-GhostPythonCli) -and (Get-PythonCommandInfo)
+    if (-not $planCoreOk) {
+        Write-Host "Python core       : MISSING - the real run would fail fast here (every step needs it)." -ForegroundColor Yellow
+    }
+    $planRunning = @(Get-Process -Name "Trae*" -ErrorAction SilentlyContinue)
+    Write-Host ""
+    Write-Host "Would kill (aggressive tree-kill, 2 clean checks required):"
+    if ($planRunning.Count -eq 0) {
+        Write-Host "  no Trae processes running"
+    }
+    else {
+        foreach ($planProc in $planRunning) { Write-Host ("  Trae pid {0}: {1}" -f $planProc.Id, $planProc.Name) }
+    }
+    Write-Host ""
+    Write-Host "Step plan:"
+    foreach ($planStep in @(
+        "[1/16]  machineid rotate (machineid-file)",
+        "[2/16]  storage.json telemetry + iCubeAuthInfo://* removal + aha flag (json-remove + json-patch)",
+        "[3/16]  state.vscdb serviceMachineId + aha flag (sqlite-update)",
+        "[4/16]  stale state.vscdb.backup delete (sweep-file)",
+        "[5/16]  aha tree delete",
+        "[6/16]  ckg_server local_env.json 19-digit device_id rotate + host_map removal",
+        "[7/16]  env_codekg.db delete",
+        "[8/16]  ai-agent identity-row scrub (scrub-rows; chat rows PRESERVED)",
+        "[9/16]  Preferences salt + Local State os_crypt.encrypted_key",
+        "[10/16] Cookies + transport state stores delete (store-delete)",
+        "[11/16] DIPS stores delete (store-delete)",
+        "[12/16] SharedStorage + Trust Tokens delete (store-delete)",
+        "[13/16] trae-webview partition + caches + Session Storage sweep",
+        "[14/16] Crashpad + logs sweep (sweep-tree)",
+        "[15/16] workspaceStorage state.vscdb UPSERT only (files never deleted)",
+        "[16/16] old ID_Backups purge + watchdog re-verify"
+    )) {
+        Write-Host ("  {0}" -f $planStep)
+    }
+    Write-Host ""
+    Write-Host "Preserved per policy: ModularData ai-agent chat rows, Local Storage\leveldb,"
+    Write-Host "Backups\, workspace files + .backup sidecars."
+    Write-Host ""
+    Write-Host "DRY-RUN complete - nothing was written or killed." -ForegroundColor Green
+    exit 0
+}
 
 # --- Self-elevation -----------------------------------------------------------
 $traeIsAdmin = [Security.Principal.WindowsPrincipal]::new(
@@ -460,15 +537,6 @@ function Get-StepAuditStatus {
 
 Assert-Administrator
 
-$app = "Trae"
-$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$root = Join-Path $env:APPDATA $app
-$backupRoot = Join-Path $root ("ID_Backups\" + $timestamp)
-$idBackupsRoot = Join-Path $root "ID_Backups"
-$machineIdPath = Join-Path $root "machineid"
-$storagePath = Join-Path $root "User\globalStorage\storage.json"
-$sqlitePath = Join-Path $root "User\globalStorage\state.vscdb"
-$workspaceStorageRoot = Join-Path $root "User\workspaceStorage"
 $audit = @()
 $actions = @()
 $ids = New-IdentitySet
