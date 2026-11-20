@@ -7,7 +7,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-20
+
 ### Added
+- **Docs re-baseline + docs↔launcher parity test (2026-11-20)** — issue #2
+  item 3 closed: `tests/docs_launcher_parity.Tests.ps1` pins docs/cli.md to
+  the launcher (GHOST.bat is the source of truth): every rendered submenu row
+  position must be cited in the cheat sheet (a single `[N]` or a covering
+  `[N]-[M]` range), the intro's six submenu ceilings must match the launcher
+  exactly, and the wiring the citations hang off is pinned too — every
+  `:Opt` row must resolve through its submenu resolver to a gid the
+  `:DispatchOne` table actually dispatches with no dangling resolver case,
+  and menu.json must render the same rows in the same order as every `.bat`
+  submenu. The audit it replaces found 85 uncited row positions and 4 stale
+  ranges across the 2026-11-14..17 renumber waves. This release re-baselines
+  every user-facing doc to the current launcher state: docs/cli.md (the
+  header ceilings now [1]-[33] / [1]-[25] / [1]-[23] / [1]-[27]; the three
+  pre-renumber identity-reset headings fixed; ~20 rows newly documented —
+  the per-suite sync / taskbar-watcher / pressure / dry-run rows, ZCode
+  [25]/[26]/[29]/[32]/[33], Maintenance [1], and the ghost.sh clone layer
+  options 10-13), README (the MCP central registry, the blanket -DryRun
+  parity statement, the macOS wave + Linux clone layer in the repo layout,
+  the five-job CI description, the current AutoClaw2 row map),
+  docs/getting-started (a Maintenance-rows section, the ZCode
+  [25]/[29]/[31]-[33] utility rows, the Linux clone layer),
+  docs/README (the 8 tracked docs missing from the index), docs/architecture
+  (the desktop hub, the MCP registry layer, the suite sync/watch/pressure/
+  exe-identity tools, the v9/v4 engine notes) and the AGENTS.md
+  pre-renumber row citations.
 - **Windows resetter dry-run parity COMPLETE (2026-11-20)** — issue #2's
   "what-if/dry-run mode for all reset scripts" item closed: the five
   classic resetters gained the W1-9-style report-only planner

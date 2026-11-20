@@ -198,7 +198,7 @@ Describe 'menu.json schema' {
             ($d.Group | Select-Object -ExpandProperty mode -Unique).Count | Should -Be 1 -Because "gid $($d.Name)"
             ($d.Group | ForEach-Object { $_.args -join ' ' } | Select-Object -Unique).Count | Should -Be 1 -Because "gid $($d.Name)"
         }
-        # gid 7 is the documented cross-menu duplicate (cli.md: IDE Resets [7] AND ZCode [14])
+        # gid 7 is the documented cross-menu duplicate (cli.md: IDE Resets [7] AND ZCode [15])
         (@($AllRows | Where-Object { $_.gid -eq 7 })).Count | Should -Be 2
     }
 

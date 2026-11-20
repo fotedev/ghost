@@ -1450,8 +1450,8 @@ reset_minimax_opencode.ps1  # MiniMax/OpenCode v1.4 THIN MANIFEST (2026-11-14):
                                    #          page — and rotates .minimax\v2\session-handoff\device-id;
                                    #          chat preserved)
 reset_autoclaw2.ps1               # AutoClaw2 (Primary + clones c1..c5): 12 steps/profile
-                                   #          (2026-11-14, AutoClaw2 [14]-[20] = gids 84-90, ALL row
-                                   #          [20] = gid 90 behind :ConfirmAc2Reset): rotates
+                                   #          (2026-11-14, AutoClaw2 [16]-[22] = gids 84-90, ALL row
+                                   #          [22] = gid 90 behind :ConfirmAc2Reset): rotates
                                    #          device\device-id.json (verified old != new), deletes the
                                    #          signed-out pointer (active-product-account.json), per-account
                                    #          auth (account-credentials.enc + account-profile.json) +
@@ -1472,8 +1472,8 @@ reset_autoclaw2.ps1               # AutoClaw2 (Primary + clones c1..c5): 12 step
                                    #          live acceptance = user-supervised, nothing ran against
                                    #          live profiles during implementation)
 reset_cline.ps1                   # Cline (Primary ~\.cline + clones c1..c5): 11 steps/target
-                                   #          (2026-11-14, Cline [10]-[16] = gids 91-97, ALL row
-                                   #          [16] = gid 97 behind :ConfirmClineReset; OVERRIDES the
+                                   #          (2026-11-14, Cline [11]-[17] = gids 91-97, ALL row
+                                   #          [17] = gid 97 behind :ConfirmClineReset; OVERRIDES the
                                    #          spec's old "no reset script by design"): deletes
                                    #          data\secrets.json (clineAccountId + tokens) +
                                    #          data\settings\providers.json (provider OAuth) — the ONLY
@@ -1491,8 +1491,8 @@ reset_cline.ps1                   # Cline (Primary ~\.cline + clones c1..c5): 11
                                    #          Pester: tests/reset_cline.Tests.ps1 via the dot-source
                                    #          guard; live acceptance = user-supervised)
 reset_opencode.ps1                # OpenCode desktop (Primary + clones c1..c5): 10 steps/target
-                                   #          (2026-11-14, OpenCode [13]-[19] = gids 98-104, ALL row
-                                   #          [19] = gid 104 behind :ConfirmOpenCodeReset): ONE target
+                                   #          (2026-11-14, OpenCode [14]-[20] = gids 98-104, ALL row
+                                   #          [20] = gid 104 behind :ConfirmOpenCodeReset): ONE target
                                    #          spans TWO profile surfaces — userData (desktop\ per clone;
                                    #          %APPDATA%\ai.opencode.desktop Primary) + XDG data home
                                    #          (data\opencode per clone; ~\.local\share\opencode Primary).
@@ -1696,7 +1696,7 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   moved into Launch and the patch row into Maintenance, locals [7]/[8]
   swapped, gids unchanged; [13] gid 107 = patch_opencode_exe_identity — the
   opt-in Task-Manager exe-identity rebuild, 2026-11-14) / Identity Resets [14]-[20] (gids 98-104,
-  appended 2026-11-14 — reset_opencode.ps1 c1..c5/Primary, [19] gid 104 =
+  appended 2026-11-14 — reset_opencode.ps1 c1..c5/Primary, [20] gid 104 =
   ALL behind :ConfirmOpenCodeReset; :RunOpenCodeReset wrapper). **Gids NEVER
   renumber** — specs, wiring history and repo-integrity cite them; a
   renumber touches only the submenu echo block + its resolver ladder. Add

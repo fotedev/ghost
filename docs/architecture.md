@@ -33,7 +33,7 @@ tools/
 ├── watch_zcode_mcp_sync.ps1           # resident watcher: sync_zcode_assets -McpOnly on every Primary config.json change
 ├── sync_autoclaw2_mcp.ps1             # AutoClaw2 orchestrator: master manifest/Primary -> closed-clone connected sources (SQLite via the Python core)
 ├── sync_autoclaw2_chats.ps1           # AutoClaw2 chat inventory + guarded one-way import + sidecar revert (closed profiles only)
-├── patch_zcode_icon_override.ps1/.mjs # app.asar icon/accent/AUMID/bidi patch (engine v8)
+├── patch_zcode_icon_override.ps1/.mjs # app.asar icon/accent/AUMID/bidi patch (engine v9, in-place asar surgery)
 ├── install_zcode_second_shortcuts.ps1 # clone shortcuts (Desktop + Start menu)
 ├── refresh_zcode_second_chats.ps1     # cross-instance chat refresh + -Watch watcher
 ├── update_ghost.ps1                   # repo self-updater (git / Download-ZIP paths)
@@ -44,8 +44,20 @@ tools/
 ├── cline-{blue,yellow,green,red,orange}-branding/  # Cline per-clone icons (orange tint-generated)
 ├── install_autoclaw2_clone_shortcuts.ps1 # AutoClaw2 clone shortcuts (Desktop + Start menu)
 ├── autoclaw2-{blue,yellow,green,red,orange}-branding/  # AutoClaw2 per-clone icons (tint-generated)
-├── patch_opencode_clone_home.ps1/.mjs # app.asar clone-home + taskbar-identity patch (engine v3 for 2.2.5.0; -WaitForClose via OpenCode [8])
+├── patch_opencode_clone_home.ps1/.mjs # app.asar clone-home + taskbar-identity patch (engine v4 for 2.2.5.0; -WaitForClose via OpenCode [10])
 ├── install_opencode_clone_shortcuts.ps1 # OpenCode clone shortcuts (Desktop + Start menu)
+├── sync_opencode_chats.ps1            # OpenCode cross-instance chat sync (inventory / guarded import / revert)
+├── sync_opencode_config.ps1           # OpenCode definitions-only config sync (apiKey-shaped Primary values scrubbed)
+├── watch_opencode_config_sync.ps1     # resident watcher: spawns the config sync on every Primary opencode.jsonc change
+├── sync_cline_mcp.ps1                 # Cline MCP settings sync (merge invariant in cline_mcp_merge.ps1)
+├── patch_autoclaw2_identity.ps1       # AutoClaw2 window + tray identity splice into the UNPACKED main.cjs (ZWORK_* env reads)
+├── patch_zcode_exe_identity.ps1       # per-color Task-Manager exe copies (ZCode-Blue.exe..) via Win32 UpdateResource
+├── patch_autoclaw2_exe_identity.ps1 / patch_cline_exe_identity.ps1 / patch_opencode_exe_identity.ps1
+│                                      #   the same exe-identity mechanics per suite (shared tools/exe_identity_lib.ps1 core)
+├── watch_suite_taskbar.ps1            # generic suite taskbar identity watcher (-Suite autoclaw2|opencode)
+├── diagnose_suite_pressure.ps1        # read-only per-suite instance pressure report (-Suite autoclaw2|cline|opencode)
+├── status_zcode_instances.ps1         # ZCode [32] clone status table (read-only)
+├── sync_mcp_registry.ps1 + mcp/       # central MCP registry importer (master-mcp.json → each app's config shape)
 └── opencode-{blue,yellow,green,red,orange}-branding/  # OpenCode per-clone icons (orange generated)
 ```
 
@@ -54,6 +66,28 @@ Two system-level scripts sit above the per-app flow: `change_device_id.ps1`
 WMI-layer serial spoof (Maintenance [3]) documented separately, including its
 winmgmt backup/restore contract and honest limits:
 [WMI_SERIAL_SPOOFING.md](WMI_SERIAL_SPOOFING.md).
+
+Two more structural layers sit on top of the script tree:
+
+- **Desktop hub** — `src/desktop/GhostHub.cs` (single-file WinForms, C# 5 for
+  the in-box `csc.exe`) renders `src/desktop/menu.json` at runtime; the exe is
+  gitignored and built by `tools/build_ghost_exe.ps1`. Its parity with the
+  `GHOST.bat` dispatch table is test-enforced
+  (`tests/ghost_hub_menu.Tests.ps1`), and `tests/docs_launcher_parity.Tests.ps1`
+  (issue #2 item 3) pins `docs/cli.md` to the same map: every rendered submenu
+  row position must be cited in the cheat sheet, the intro ceilings must match
+  the launcher, and the row→resolver→dispatch wiring the citations hang off
+  must be sound.
+- **MCP registry** — `tools/mcp/master-mcp.json` is the single source of truth
+  for MCP servers; `tools/sync_mcp_registry.ps1` (Maintenance [4]) projects it
+  into each target app's own config shape, while the per-suite sync tools
+  (`sync_zcode_assets.ps1`, `sync_cline_mcp.ps1`, `sync_opencode_config.ps1`,
+  `sync_autoclaw2_mcp.ps1`) converge the clone suites from their Primary.
+
+Dry-run planners: every Windows resetter accepts `-DryRun` — a plan-only
+pass that writes nothing and never elevates (`tests/reset_dryrun.Tests.ps1`
+pins the step-map parity), exposed per suite as ZCode [33] / AutoClaw2 [25]
+/ Cline [21] / OpenCode [25].
 
 ## Shared library API (`identity_utils.ps1`)
 
@@ -217,7 +251,8 @@ relocates the legacy v1.x migration source so no clone reads a live
 Primary's state. The app generates a fresh device id per profile (no
 seeding, no credential copying; one manual sign-in per clone) — app
 updates break nothing. Wired into `GHOST.bat` main [4] — the AutoClaw2
-submenu runs the same launchers (rows [1]-[9]).
+submenu runs the same launchers plus the sync/identity tooling
+(rows [1]-[25]).
 Design: [docs/AUTOCLAW2_CLONES_SPEC.md](AUTOCLAW2_CLONES_SPEC.md).
 
 ## Testing
@@ -233,4 +268,5 @@ adds real-SQLite coverage (stdlib `unittest`, zero dependencies).
 toggles survive, clone-only servers kept, new servers inherit the Primary's
 value, Primary definitions win). CI runs the
 analyzer + Pester jobs on `windows-latest`, ShellCheck on `ubuntu-latest`,
-and the Python suite in a dedicated `python-core` job.
+the Linux shared-helper contract lane, the GHOST.bat menu harness, and the
+Python suite in a windows + ubuntu `python-core` matrix.

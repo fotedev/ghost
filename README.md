@@ -56,6 +56,12 @@ touches, and emits an audit log plus a self-contained restore script.
 Detailed per-tool walkthroughs (paths touched, preservation lists, flags):
 **[docs/getting-started.md](docs/getting-started.md)**.
 
+Every Windows resetter also supports `-DryRun` — a plan-only pass that
+writes nothing and never elevates, so you can review exactly what a reset
+would touch first (the dry-run parity is test-pinned in
+`tests/reset_dryrun.Tests.ps1`; menu rows: ZCode [33], AutoClaw2 [25],
+Cline [21], OpenCode [25]).
+
 ## Why not just use Sandboxie?
 
 Sandboxie-Plus isolates an app's file writes — it does not change the app's
@@ -179,7 +185,11 @@ ghost/
 │   │               #   + reset_autoclaw2/reset_cline/reset_opencode.ps1
 │   │               #   (per-clone identity resets, chats/work preserved)
 │   ├── linux/      # .sh resetters + id_reset_common.sh
-│   ├── macos/      # macOS .sh resetters (issue #36: reset_qoder.sh v0.1,
+│   │               #   + the ZCode Linux clone layer (launch_zcode_clone.sh,
+│   │               #   launch_zcode_cli_light.sh, reset_zcode.sh --instance,
+│   │               #   sync_zcode_assets.sh — ghost.sh options 10-13)
+│   ├── macos/      # macOS .sh resetters (issue #36 wave COMPLETE:
+│   │               #   qoder/cursor/trae/devin/qoderwork/minimax_opencode/zcode;
 │   │               #   all paths DERIVED until a live Mac verifies)
 │   └── python/     # stdlib-only Python core (ghost/) + ghost_cli.py bootstrap —
 │                   #   owns the shared SQLite/JSON identity logic
@@ -221,7 +231,19 @@ ghost/
 │                   #   orange generated 2026-10-24 as a placeholder);
 │                   #   install_autoclaw2_clone_shortcuts.ps1 (AutoClaw2 clone
 │                   #   shortcuts) + autoclaw2-{blue,yellow,green,red,orange}-branding/
-│                   #   (clone icons)
+│                   #   (clone icons),
+│                   #   sync_opencode_config.ps1 + watch_opencode_config_sync.ps1
+│                   #   (OpenCode definitions-only config sync + resident watcher),
+│                   #   sync_cline_mcp.ps1 (Cline MCP settings sync + dry-run plan),
+│                   #   sync_mcp_registry.ps1 + tools/mcp/ (central MCP registry
+│                   #   importer: master-mcp.json → every app's own config shape),
+│                   #   patch_zcode_exe_identity.ps1 / patch_autoclaw2_exe_identity.ps1 /
+│                   #   patch_cline_exe_identity.ps1 / patch_opencode_exe_identity.ps1
+│                   #   (per-color Task-Manager exe copies on the shared
+│                   #   exe_identity_lib.ps1 core), watch_suite_taskbar.ps1
+│                   #   (generic suite taskbar identity watcher),
+│                   #   diagnose_suite_pressure.ps1 (read-only per-suite pressure
+│                   #   report), status_zcode_instances.ps1 (clone status table)
 ├── tests/          # Pester 5 suite (PowerShell) + stdlib unittest suite (Python core)
 ├── docs/           # getting-started / architecture / cli / troubleshooting / faq
 ├── .github/        # CI workflow, issue forms, PR template, CODEOWNERS
@@ -289,6 +311,15 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   (Desktop + repo root) that carry the launcher icon; `-Remove` uninstalls
 - `tools/update_ghost.ps1` — repo self-updater: fetch + compare + guarded
   `git pull --ff-only` (`-CheckOnly` reports without writing)
+- `tools/sync_mcp_registry.ps1` — MCP central registry importer
+  (Maintenance [4]): author MCP servers once in `tools/mcp/master-mcp.json`
+  (device values in the gitignored `master-mcp.local.json` overlay; secrets
+  ride `${VAR}` names resolved from machine env) and push them into every
+  target app's own config shape (ZCode/Windsurf/VS Code/MiniMax/OpenCode/
+  Claude Code/Codex; `-DryRun` previews, `-Target` narrows). Registry
+  definitions win, app-local enable/disable state survives, app-only servers
+  are never deleted; backups + verify-after + JSONL audit. Plan:
+  [docs/MCP_CENTRAL_REGISTRY_PLAN.md](docs/MCP_CENTRAL_REGISTRY_PLAN.md)
 - **AutoClaw multi-instance (SUNSET)** — the AutoClaw v1.20 suite
   (`launch_autoclaw_clone.ps1`, `reset_autoclaw.ps1`,
   `patch_autoclaw_ports.ps1` + engine v12,
@@ -338,8 +369,11 @@ libraries; the per-app scripts are thin target manifests on top. Details:
   `launch_autoclaw2_clones_all.ps1` launches all five sequentially;
   `tools/install_autoclaw2_clone_shortcuts.ps1` installs per-color shortcuts
   (`-Remove`). Wired into `GHOST.bat` main [4] — the AutoClaw2 submenu runs
-  the same launchers (rows [1]-[9]: launch c1..c5 / ALL / shortcuts / status /
-  remove).
+  the same launchers plus the sync/identity tooling (rows [1]-[25]: launches
+  [1]-[6], shortcuts [7], MCP/chat sync [8]-[11], status [12], remove [13],
+  identity patch [14], Task-Manager icons [15], resets [16]-[22], taskbar
+  watcher [23], pressure report [24], dry-run plan [25]; full row map in
+  [docs/cli.md](docs/cli.md)).
   Design + verified ground truth: [docs/AUTOCLAW2_CLONES_SPEC.md](docs/AUTOCLAW2_CLONES_SPEC.md)
 - Telegram alerts for `tools/watch_zcode_captcha.ps1` come from
   `-TelegramBotToken`/`-TelegramChatId` params or `TELEGRAM_BOT_TOKEN` /
@@ -361,8 +395,10 @@ for f in src/linux/*.sh src/macos/*.sh ghost.sh; do bash -n "$f"; done
 python -m unittest discover -s tests/python -v
 ```
 
-CI runs three jobs on every push/PR: PowerShell lint + Pester
-(`windows-latest`), ShellCheck (`ubuntu-latest`), and the Python core suite
+CI runs five jobs on every push/PR: PowerShell lint + Pester
+(`windows-latest`), ShellCheck (`ubuntu-latest`), the Linux shared-helper
+contract lane, the Python core suite (windows + ubuntu matrix), and the
+GHOST.bat menu harness
 (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ## Important notes
