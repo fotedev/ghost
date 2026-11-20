@@ -86,6 +86,11 @@ First launch of each clone copies history (`~\.zcode` → `~\ZCodeSecondHome\.zc
 | ZCode [19] | same script, `-McpOnly -Target All` | One-shot MCP-definitions-only sync, safe against RUNNING instances (2026-10-27: the app holds no handle on `config.json`, never rewrites it on exit, and re-reads `mcp.servers` at every app-server spawn) — a synced definition lands on each clone's next chat with no restart. |
 | ZCode [20] / [21] | `tools\watch_zcode_mcp_sync.ps1` | Resident MCP sync watcher: stat-guards the Primary's `~\.zcode\cli\config.json` and re-invokes the `-McpOnly` sync on every change (first pass converges drift, deep re-verify every ~5 min). [21] = one-shot with `-ApplyLive`, which additionally recycles running clones' app-servers idle-guarded (never mid-turn) so the currently open session gets the new MCP immediately. `-InstallAutostart` writes a hidden Startup shortcut. Log: `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`. |
 | — (CLI only) | `tools\diagnose_zcode_throttle.ps1` | Read-only throttle diagnostic for "Reconnecting... x/10" / "The system is busy..." turn failures: lists Start-Plan admission-busy retries + failed turns with their cause chain (`providerCode 3009` model concurrency), an hourly histogram and a per-session rollup. Verified root cause (2026-10-27): server-side admission control, NOT a device/IP ban. No menu entry. |
+| ZCode [7] / [29] | `src\windows\launch_zcode_cli_light.ps1` | Light headless worker (no desktop window, ~¼ of a full instance's RAM): `-Instance`, `-Prompt` one-shot, `-Server` stdio; ZCode [29] runs the one-time `-Login` plan setup for that clone home. |
+| ZCode [25] | `tools\watch_zcode_captcha.ps1` | Detached captcha watchdog: tails the Primary for captcha stalls + quota failures, escalates via Telegram (`.envlocal` creds). PRIMARY instance only. |
+| ZCode [31] | `tools\patch_zcode_exe_identity.ps1` | Builds per-color exe copies (`ZCode-Blue.exe` … `ZCode-Orange.exe`, ~235 MB each, support files shared) in the install dir so Task Manager shows one named colored group per clone; the clone launcher's step 2f fast-checks a sidecar marker and rebuilds on drift (app update / icon change). `-Target All`, `-DryRun`; ~1.2 GB disk for the five copies. |
+| ZCode [32] | `tools\status_zcode_instances.ps1` | One read-only table for all six instances: running state, profile home, device-id freshness, commit pressure. |
+| ZCode [33] | `src\windows\reset_zcode.ps1 -Target All -DryRun` | Dry-run reset planner: prints what a full reset would touch, writes nothing, never elevates. |
 
 ### 6. Reset QoderWork ID (`reset_qoderwork.ps1`)
 
@@ -161,8 +166,8 @@ honest limits: [WMI_SERIAL_SPOOFING.md](WMI_SERIAL_SPOOFING.md).
 ### 9. Other clone suites (Cline / OpenCode / AutoClaw2)
 
 The same "Primary + 5 clones" pattern exists for three more apps, each with
-its own spec doc (menu ranges: AutoClaw2 [1]-[9], Cline [1]-[9], OpenCode
-[1]-[10]):
+its own spec doc (menu ranges: AutoClaw2 [1]-[25], Cline [1]-[23], OpenCode
+[1]-[27]):
 
 <p align="center">
   <img src="../assets/preview.png" alt="Color-branded shortcut icons of all four clone suites" />
@@ -175,16 +180,33 @@ its own spec doc (menu ranges: AutoClaw2 [1]-[9], Cline [1]-[9], OpenCode
   launcher neutralizes the app's single-instance hidden window and enforces
   per-clone locks itself. [CLINE_CLONES_SPEC.md](CLINE_CLONES_SPEC.md)
 - **OpenCode desktop** (Electron) — needs the one-time clone-home asar patch
-  (OpenCode [8]; the row waits for you to close OpenCode first; re-apply
+  (OpenCode [10]; the row waits for you to close OpenCode first; re-apply
   after app updates — the launcher aborts loudly when it is missing);
   per-clone `XDG_*` CLI-state homes; native per-userData
   single-instance lock; ephemeral service ports.
   [OPENCODE_CLONES_SPEC.md](OPENCODE_CLONES_SPEC.md)
 - **AutoClaw2** (Electron, v2.1.1 "zwork") — pure env levers
   (`ZWORK_USER_DATA` + `AUTOCLAW_PROFILE_ROOT`), no patching; wired into
-  `GHOST.bat` main [4] (rows [1]-[9]). [AUTOCLAW2_CLONES_SPEC.md](AUTOCLAW2_CLONES_SPEC.md)
+  `GHOST.bat` main [4] (rows [1]-[25]). [AUTOCLAW2_CLONES_SPEC.md](AUTOCLAW2_CLONES_SPEC.md)
 
-Command-level detail for all three suites: [cli.md](cli.md).
+Command-level detail for all three suites (including the per-suite MCP
+syncs, taskbar watchers, pressure reports and dry-run plan rows):
+[cli.md](cli.md).
+
+### 10. Maintenance rows (System & GHOST Maintenance)
+
+| Menu | Script | What it does |
+|---|---|---|
+| Maintenance [1] | `tools\install_ghost_shortcut.ps1` | Desktop + repo-root GHOST.lnk shortcuts carrying the launcher icon; `-Remove`, `-DesktopOnly`, `-RepoOnly`. |
+| Maintenance [2] | `tools\update_ghost.ps1` | Repo self-updater (same as main-menu `[U]`): guarded `git pull --ff-only`; ZIP-copy conversion / direct-download handling. |
+| Maintenance [3] | `src\windows\spoof_wmi_serials.ps1` | WMI serial spoof — see 8b above. |
+| Maintenance [4] | `tools\sync_mcp_registry.ps1` | MCP central registry importer: `tools/mcp/master-mcp.json` (+ gitignored `.local` overlay) into every target app's own config shape; `-DryRun` previews, `-Target` narrows. Plan: [MCP_CENTRAL_REGISTRY_PLAN.md](MCP_CENTRAL_REGISTRY_PLAN.md). |
+| Maintenance [5] | `tools\build_ghost_exe.ps1` | Builds the GHOST.exe desktop launcher (in-box csc.exe; runtime menu data from `src/desktop/menu.json`). |
+
+The desktop launcher (`GHOST.exe`, repo root) mirrors the `GHOST.bat` menu
+one-to-one — double-click it and UAC elevation comes from its baked-in
+manifest; parity with the `.bat` menu is test-enforced
+(`tests/ghost_hub_menu.Tests.ps1`).
 
 ## Linux
 
@@ -247,9 +269,22 @@ per-OS path maps (with provenance flags) live in `src/python/ghost/platform.py`
   CLI session store is deliberately untouched (matches the Windows reset)
 - `reset_minimax_opencode.sh` — Derived-path reset; the OpenCode CLI XDG
   stores are deliberately untouched (they carry the CLI login)
+- `reset_zcode.sh --instance Second|Third|Fourth|Fifth|Sixth` — ZCode clone
+  reset (identity + desktop userData; ghost.sh option 11)
+- `launch_zcode_clone.sh` — per-clone desktop launcher: seeds the clone home
+  from the Primary (first run), scrubs identity via the Python core —
+  FAILS CLOSED without it, so a clone never runs on the Primary's identity
+  (ghost.sh option 10)
+- `launch_zcode_cli_light.sh` — light headless worker on the clone home
+  (no Electron; ghost.sh option 12)
+- `sync_zcode_assets.sh --instance Second|...|All` — Primary→clone MCP
+  definitions sync through the core `json-merge-defs` verb (Primary defs
+  win, clone-local toggles survive; `--dry-run` supported; ghost.sh
+  option 13 — the MCP-only area, the Windows-verified safe one)
 - `change_device_id.sh` — `Fingerprint` or `ResetMachineId`
 - `id_reset_common.sh` — Shared helpers (core bridge, backups, audit,
   restore emission, verify-after) sourced by the scripts above
-- `ghost.sh` — Interactive menu (repo root)
+- `ghost.sh` — Interactive menu (repo root; options 1-13: resetters,
+  fingerprint, machine-id, then the ZCode clone layer at 10-13)
 
 > **Note:** `change_device_id.ps1` modes `LegacyReset` and `RepairProfiles` are **Windows-only** (registry and profile list). On Linux use `ResetMachineId` for system ID changes.

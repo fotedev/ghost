@@ -4,9 +4,9 @@ Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 **`./ghost.sh`** (Linux). This page is the direct-command cheat sheet for
 scripts and CI. `GHOST.bat` groups its tasks into six submenus with
 continuous local numbering (IDE Resets [1]-[8] / ZCode Multi-Instance &
-Clones [1]-[31] / System & GHOST Maintenance [1]-[5] / AutoClaw2
-Multi-Instance & Clones [1]-[13] / Cline Multi-Instance & Clones
-[1]-[9] / OpenCode Multi-Instance & Clones [1]-[12]); chain several tasks in one
+Clones [1]-[33] / System & GHOST Maintenance [1]-[5] / AutoClaw2
+Multi-Instance & Clones [1]-[25] / Cline Multi-Instance & Clones
+[1]-[23] / OpenCode Multi-Instance & Clones [1]-[27]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
 from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
 [1] [3] [4]) or a bare global id — this page cites menu positions as
@@ -48,6 +48,12 @@ powershell -ExecutionPolicy Bypass -File "src\windows\spoof_wmi_serials.ps1"    
 powershell -ExecutionPolicy Bypass -File "src\windows\spoof_wmi_serials.ps1" -DryRun     # plan only, no writes
 ```
 
+Every reset script above supports `-DryRun` (plan only — writes nothing,
+never elevates). Menu equivalents (the IDE Resets submenu, one row per
+script): IDE Resets [1] Change Device ID · IDE Resets [2]-[6] Cursor /
+Windsurf-Devin / Trae / Qoder / QoderWork · IDE Resets [7] ZCode Primary
+(the same task as ZCode [15]) · IDE Resets [8] MiniMax/OpenCode.
+
 ## MCP central registry (Maintenance [4])
 
 ```powershell
@@ -64,11 +70,12 @@ survives; app-only servers are never deleted. Secrets ride `${VAR}` names
 resolved from machine env. Plan: `docs/MCP_CENTRAL_REGISTRY_PLAN.md`.
 
 Menu equivalents for the reset targets: `reset_zcode.ps1 -Target Primary` =
-IDE Resets [7] **and** ZCode [15] (the same task from both menus);
-`-Target Secondary` / `Both` / `Third` / `Fourth` / `Fifth` / `Sixth` / `All` =
-ZCode [10] Reset **Blue** clone / [16] **Blue** + Primary / [11] **Yellow** /
-[12] **Green** / [13] **Red** / [14] **Orange** / [17] **ALL SIX** (menus display
-the COLOR names; the CLI params keep the frozen keys). The AutoClaw v1.20 suite
+IDE Resets [7] **and** ZCode [15] (the same task from both menus); ZCode
+[10]-[14] = the five clone resets (Blue / Yellow / Green / Red / Orange =
+`-Target Secondary|Third|Fourth|Fifth|Sixth`); ZCode [16] = `-Target Both`
+(Blue + Primary, independent IDs); ZCode [17] = `-Target All` (ALL SIX).
+ZCode [33] = the dry-run reset planner (`-Target All -DryRun`, report only).
+Menus display the COLOR names; the CLI params keep the frozen keys. The AutoClaw v1.20 suite
 (`reset_autoclaw.ps1` and friends) was REMOVED 2026-10-31 with the v1.20 app
 (uninstalled from the dev host 2026-10-29) — recover it from git history or
 `archive/autoclaw-v1.20/` for a v1.20 host. AutoClaw2 has no reset script
@@ -87,9 +94,12 @@ PowerShell scripts in their own console windows; UAC elevation comes from its
 baked-in manifest. It must stay next to `GHOST.bat`, reads
 `src\desktop\menu.json` at runtime (menu edits need no rebuild), and warns in
 its header when the build is older than the tree. Parity with the `.bat` menu
-is test-enforced (`tests\ghost_hub_menu.Tests.ps1`).
+is test-enforced (`tests\ghost_hub_menu.Tests.ps1`). Desktop + repo-root
+GHOST.lnk shortcuts (icon = `assets\ghost.ico`): Maintenance [1]
+(`tools\install_ghost_shortcut.ps1`; `-Remove` / `-DesktopOnly` / `-RepoOnly`
+scoping — re-run it after moving this repo folder).
 
-## ZCode captcha watchdog (unattended; no admin needed)
+## ZCode captcha watchdog (unattended; no admin needed; ZCode [25])
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "tools\watch_zcode_captcha.ps1"
@@ -107,7 +117,9 @@ powershell -ExecutionPolicy Bypass -File "src\windows\launch_zcode_second_instan
 ```
 
 Or double-click: `src\windows\Launch-ZCode-Blue.bat` / `-Yellow.bat` /
-`-Green.bat` / `-Red.bat` / `-Orange.bat`.
+`-Green.bat` / `-Red.bat` / `-Orange.bat`. Menu equivalents: ZCode [1]-[5]
+launch the clones one per row, ZCode [6] launches all five (staggered,
+3 s apart).
 
 First launch of each clone copies history into its own home
 (`%USERPROFILE%\ZCodeSecondHome | ZCodeThirdHome | ZCodeFourthHome |
@@ -153,6 +165,17 @@ AV-protected machines may see a SmartScreen prompt on first launch of a copy;
 and each copy costs disk (5 copies ≈ 1.2 GB). Manual rebuild after closing
 clones: `powershell -NoProfile -ExecutionPolicy Bypass -File "tools\patch_zcode_exe_identity.ps1" -Target All` (-DryRun supported).
 
+### ZCode clone status (read-only; ZCode [32])
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_zcode_instances.ps1"
+```
+
+One read-only table for all six instances: running state, profile home,
+device-id freshness and commit pressure — the first tool to run when a
+clone "looks wrong". The per-suite twins live in their own submenus
+(AutoClaw2 [12], Cline [8], OpenCode [11]).
+
 ### ZCode light headless worker (no desktop window; ZCode [7])
 
 ```powershell
@@ -167,7 +190,9 @@ sessions isolated to that clone's home and shareable with its desktop app. The
 interactive TUI cannot run standalone (`@zcode/tui` lives inside app.asar) and
 a home without a standalone `zcode login zai` runs tasks on the free
 opencode-zen model, not the Start Plan — the launcher prints the one-time
-login recipe when it detects that. Full findings: [ZCODE_LIGHT_MODE.md](ZCODE_LIGHT_MODE.md).
+login recipe when it detects that. ZCode [29] runs the `-Login` flow
+directly (one-time plan setup for light workers + the T3 bridge).
+Full findings: [ZCODE_LIGHT_MODE.md](ZCODE_LIGHT_MODE.md).
 
 ## ZCode clone shortcuts (Desktop + Start menu; per-user, no admin needed)
 
@@ -181,7 +206,8 @@ window title) that run the launcher above; a taskbar pin groups with
 that clone's running window. Remove with `-Remove` (ZCode [30]); install /
 scope with `-Instance` (ZCode [8]).
 Repair a hijacked Primary pin (clone AUMID + wiped icon) with
-`-RepairPrimaryAumid` — the taskbar watcher also self-heals it every ~5 min
+`-RepairPrimaryAumid` — the taskbar identity watcher (ZCode [26],
+`tools\watch_zcode_taskbar.ps1`) also self-heals it every ~5 min
 (`-RunOnce -CheckPrimaryHijack` for a one-shot repair).
 
 ## ZCode cross-instance chat refresh (no app restart; per-user, no admin needed)
@@ -242,7 +268,7 @@ change — idle-guarded, never mid-turn — so the currently open session gets
 the new MCP immediately. `-InstallAutostart` writes a hidden Startup-folder
 shortcut (like the taskbar watcher); single-instance via a named mutex plus
 a startup process scan. Log: `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`.
-ZCode [20] (resident) / [21] (one-shot + live apply). You normally never
+ZCode [20] (resident) / ZCode [21] (one-shot + live apply). You normally never
 start it yourself: every clone launch (launcher step 2e) starts it hidden
 and installs its autostart shortcut if missing — install-and-forget.
 
@@ -342,11 +368,12 @@ powershell -ExecutionPolicy Bypass -File "tools\install_cline_clone_shortcuts.ps
 Each clone gets its own state tree, web login profile and hub/sidecar
 ports; the launcher neutralizes the app's single-instance hidden window
 and aborts a second copy on the same data. First run per clone: ONE
-manual sign-in. Menu equivalents: launch c1/c2/c3/c4/c5 = Cline
-[1]/[2]/[3]/[4]/[5]; all five = Cline [6]; status = Cline [8];
-shortcuts = Cline [7] (`-Remove` = [9]).
+manual sign-in. Menu equivalents: launch c1/c2/c3/c4/c5 = Cline [1]-[5];
+all five = Cline [6]; status = Cline [8]; shortcuts = Cline [7]
+(`-Remove` = Cline [9]); TM icons = Cline [10]
+(`tools\patch_cline_exe_identity.ps1`, opt-in — close Cline first).
 
-### Cline light headless worker (Cline [22] / [23])
+### Cline light headless worker (Cline [22], CLI login = Cline [23])
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_cline_cli_light.ps1" -Instance c1
@@ -363,14 +390,14 @@ clone's own `CLINE_DIR` state with the clone's fixed
 own defaults — use `-NoAutoApprove` to gate approvals). A running desktop
 clone only WARNS (shared home; the CLI is expected to attach to its hub).
 The desktop web login may not cover the CLI — if a headless run reports an
-auth error, run the [23] login row once for that clone.
+auth error, run the Cline [23] login row once for that clone.
 
-### Cline identity reset (Cline [10]-[16])
+### Cline identity reset (Cline [11]-[17])
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target c1        # [10] — Blue (c2..c5 = [11]..[14])
-powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target Primary   # [15] — the stock ~\.cline profile
-powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target All       # [16] — clones first, Primary last (menu row asks first)
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target c1        # [11] — Blue (c2..c5 = [12]..[15])
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target Primary   # [16] — the stock ~\.cline profile
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target All       # [17] — clones first, Primary last (menu row asks first)
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target c1 -KeepLogin  # keep the sign-in
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target c1 -DryRun     # plan only
 ```
@@ -383,8 +410,34 @@ hub locks, logs, cache and the web-login Chromium profile
 teams/connectors), `data\sessions\` and the settings files are PRESERVED.
 HKLM MachineGuid is deliberately NOT touched (system-level; shared with
 every IDE). Backups + audit + restore script per target. Menu
-equivalents: Blue..Orange = [11]-[15]; Primary = [16]; ALL = [17]
-(confirmation gate).
+equivalents: Blue..Orange = Cline [11]-[15]; Primary = Cline [16]; ALL =
+Cline [17] (confirmation gate).
+
+### Cline MCP sync (Cline [18]-[19])
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sync_cline_mcp.ps1" -Target All           # [18] — live sync (running clones skipped)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sync_cline_mcp.ps1" -Target All -DryRun   # [19] — what would change, writes nothing
+```
+
+Same merge invariant as the ZCode MCP sync: MCP server definitions from
+the Primary's `cline_mcp_settings.json` win, a clone-local `disabled` flag
+survives, clone-only servers are kept, the Primary is read-only. A
+lockfile-held clone is RUNNING and is skipped with a warning; every write
+is backed up and verified by re-read; audit at
+`<CloneHome>\mcp-sync-audit.jsonl` (server names only).
+
+### Cline watchers (Cline [20]-[21])
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\diagnose_suite_pressure.ps1" -Suite cline   # [20] — read-only pressure report
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_cline.ps1" -Target All -DryRun             # [21] — dry-run reset plan
+```
+
+The pressure report prints each clone's honestly-labeled running signals
+(per-color exe copy, lockfile, title map), live commit / RAM / pagefile
+pressure and an optional Electron log scan. The dry-run plan lists what a
+reset would touch without touching it.
 
 ## OpenCode multi-instance (5 clones + Primary; per-user, no admin needed)
 
@@ -416,16 +469,18 @@ update). Each clone gets its own userData/sessionData plus its own
 taskbar identity (AUMID + window icon + "OpenCode <Color>" title).
 Service ports are ephemeral per instance (no port plan). First run per
 clone: ONE manual sign-in. Menu equivalents: launch
-c1/c2/c3/c4/c5 = OpenCode [1]-[5]; all five = [6]; light worker = [7]
-(gids 79/80 for worker/login); login = [8]; shortcuts = [9]
-(`-Remove` = [12]); patch = [10]; status = [11].
+c1/c2/c3/c4/c5 = OpenCode [1]-[5]; all five = OpenCode [6]; light worker =
+OpenCode [7] (gids 79/80 for worker/login); login = OpenCode [8]; shortcuts
+= OpenCode [9] (`-Remove` = OpenCode [12]); patch = OpenCode [10]; status =
+OpenCode [11]; TM icons = OpenCode [13]
+(`tools\patch_opencode_exe_identity.ps1`, opt-in — close OpenCode first).
 
-### OpenCode identity reset (OpenCode [13]-[19])
+### OpenCode identity reset (OpenCode [14]-[20])
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target c1        # [13] — Blue (c2..c5 = [14]..[17])
-powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target Primary   # [18] — the stock profile
-powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target All       # [19] — clones first, Primary last (menu row asks first)
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target c1        # [14] — Blue (c2..c5 = [15]..[18])
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target Primary   # [19] — the stock profile
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target All       # [20] — clones first, Primary last (menu row asks first)
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target c1 -KeepLogin  # keep the sign-in
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target c1 -DryRun     # plan only
 ```
@@ -439,8 +494,8 @@ Deletes `auth.json` + `mcp-auth.json` (CLI OAuth), `gh\device-id`,
 network session stores, caches, Crashpad/logs/compile-cache. Preserves
 `opencode.db` (sessions), repos, snapshots, drafts, the CLI cache and the
 MCP config. Backups + audit + restore script per target. Menu
-equivalents: Blue..Orange = [14]-[18]; Primary = [19]; ALL = [20]
-(confirmation gate).
+equivalents: Blue..Orange = OpenCode [14]-[18]; Primary = OpenCode [19];
+ALL = OpenCode [20] (confirmation gate).
 
 The light worker (`src/windows/launch_opencode_cli_light.ps1`, OpenCode
 [7]) runs the shipped `opencode-cli.exe` headless on the clone's own
@@ -474,6 +529,27 @@ ids + counts only. A running clone (lockfile held) or a db-less clone
 is skipped. Live acceptance pending (CS-8): import into a closed clone
 and confirm its UI lists the sessions after the next launch.
 
+### OpenCode config sync + suite watchers (OpenCode [21]-[25])
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sync_opencode_config.ps1" -Target All         # [21] — live sync (running clones skipped)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\watch_opencode_config_sync.ps1"               # [22] — resident watcher (syncs on Primary change)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\watch_suite_taskbar.ps1" -Suite opencode      # [23] — taskbar identity watcher
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\diagnose_suite_pressure.ps1" -Suite opencode  # [24] — read-only pressure report
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_opencode.ps1" -Target All -DryRun            # [25] — dry-run reset plan
+```
+
+Definitions-only Primary → clone sync of the `mcp` + provider blocks in
+`opencode.jsonc` (Primary definitions win, clone-local `enabled` toggles
+survive, clone-only entries stay; apiKey-shaped values coming FROM the
+Primary are scrubbed loudly — each clone fills its own key). A
+lockfile-held clone is RUNNING and is skipped; a config-less clone is
+skipped (its first run is anonymous). The resident watcher stat-guards the
+Primary config and spawns the sync on every change (log at
+`%LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log`). The taskbar
+watcher re-stamps window AUMIDs and heals the Primary lnk; the pressure
+report is the suite twin of the ZCode freeze diagnostic.
+
 ## AutoClaw2 multi-instance (5 clones + Primary; per-user, no admin needed)
 
 ```powershell
@@ -485,12 +561,12 @@ powershell -ExecutionPolicy Bypass -File "tools\install_autoclaw2_clone_shortcut
 powershell -ExecutionPolicy Bypass -File "tools\install_autoclaw2_clone_shortcuts.ps1" -Remove
 ```
 
-### AutoClaw2 identity reset (AutoClaw2 [14]-[20])
+### AutoClaw2 identity reset (AutoClaw2 [16]-[22])
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target c1        # [14] — Blue (c2..c5 = [15]..[18])
-powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target Primary   # [19] — the default profile
-powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target All       # [20] — clones first, Primary last (menu row asks first)
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target c1        # [16] — Blue (c2..c5 = [17]..[20])
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target Primary   # [21] — the default profile
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target All       # [22] — clones first, Primary last (menu row asks first)
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target c1 -KeepLogin  # identity only — keep the sign-in
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target c1 -DryRun     # plan only, nothing touched
 ```
@@ -503,8 +579,22 @@ Per profile: rotates `device\device-id.json`, clears the signed-out marker
 skips it), telemetry (`apmplus`, `log_sdk_v2.db`, `diagnostics`, `logs`) and
 caches/webview partitions. Chats, work runs, projects, MCP connections and
 Telegram routing are PRESERVED. Backups to `ID_Backups\<ts>\` + audit JSON +
-a restore script per target. Menu equivalents: Blue..Orange = [16]-[20];
-Primary = [21]; ALL = [22] (confirmation gate).
+a restore script per target. Menu equivalents: Blue..Orange =
+AutoClaw2 [16]-[20]; Primary = AutoClaw2 [21]; ALL = AutoClaw2 [22]
+(confirmation gate).
+
+### AutoClaw2 window + Task Manager identity (AutoClaw2 [14]-[15])
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "tools\patch_autoclaw2_identity.ps1"                              # [14] — colored taskbar buttons + tray icons (waits for AutoClaw2 to close)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\patch_autoclaw2_exe_identity.ps1" -Target All   # [15] — per-color exe copies for Task Manager (opt-in)
+```
+
+The window patch splices `ZWORK_AUMID` / `ZWORK_CLONE_ICON` env reads into
+the unpacked `resources\app\dist\main.cjs` (the app ships UNPACKED — no
+asar, no runtime integrity check); the launcher sets those env vars per
+clone, so no env = stock behavior. The exe rebuild is the ZCode [31]
+mechanics on the AutoClaw2 suite (repo-only, opt-in).
 
 ### AutoClaw2 MCP + chat sync (AutoClaw2 [8]-[11])
 
@@ -536,6 +626,21 @@ prefix (D11), refuses IM-bound sessions (D12), and is revertible by import id.
 Spec: `docs\AUTOCLAW2_SYNC_SPEC.md`. The live acceptance runs (A1-A7, C2-C7)
 are still gated on the supervised Phase 0 spikes.
 
+### AutoClaw2 watchers (AutoClaw2 [23]-[25])
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\watch_suite_taskbar.ps1" -Suite autoclaw2      # [23] — resident taskbar identity watcher
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\diagnose_suite_pressure.ps1" -Suite autoclaw2  # [24] — read-only pressure report
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target All -DryRun            # [25] — dry-run reset plan
+```
+
+The taskbar watcher re-stamps window AUMIDs + heals the Primary lnk (log
+at `%LOCALAPPDATA%\watch-autoclaw2-taskbar\taskbar.log`); the pressure
+report is read-only; the dry-run plan writes nothing. Honest limit: a
+stock-exe AutoClaw2 clone carries no classification markers (no per-color
+exe, env-only suite), so the taskbar watcher warns once and leaves it
+alone — it is never re-stamped to the base AUMID.
+
 Isolation is 100% env-based and needs NO patching: `ZWORK_USER_DATA` pins
 the whole Electron userData per clone BEFORE the per-profile
 single-instance lock (N copies coexist natively), and
@@ -543,22 +648,40 @@ single-instance lock (N copies coexist natively), and
 clone ever reads a live Primary's state. The app generates a fresh
 `device\device-id.json` per profile (no identity seeding, no credential
 copying). First run per clone: ONE manual sign-in. Menu equivalents: launch
-c1/c2/c3/c4/c5 = AutoClaw2 [1]-[5]; all five = [6]; shortcuts = [7];
-Import MCPs = [8]; chat inventory = [9]; import chats = [10]
-(`-Remove` = [12]); status = [11].
+c1/c2/c3/c4/c5 = AutoClaw2 [1]-[5]; all five = AutoClaw2 [6]; shortcuts =
+AutoClaw2 [7] (`-Remove` = AutoClaw2 [13]); Import MCPs = AutoClaw2 [8];
+chat inventory = AutoClaw2 [9]; import chats = AutoClaw2 [10]; MCP sync
+watcher = AutoClaw2 [11]; status = AutoClaw2 [12]; identity patch =
+AutoClaw2 [14]; TM icons = AutoClaw2 [15].
 
 ## Linux
 
 ```bash
 chmod +x src/linux/*.sh
-./ghost.sh           # interactive menu
+./ghost.sh           # interactive menu (options 1-13; `ghost.sh -h` prints the same list)
 
 # Or run directly:
 ./src/linux/reset_cursor.sh                          # close Cursor first
 sudo ./src/linux/reset_cursor.sh                     # also resets /etc/machine-id
 ./src/linux/reset_devin.sh                           # close Windsurf/Devin first
+./src/linux/reset_trae.sh                            # close Trae first
+./src/linux/reset_qoder.sh                           # close Qoder first
+./src/linux/reset_qoderwork.sh                       # close QoderWork first
+./src/linux/reset_zcode.sh                           # close ZCode first; shared CLI db preserved
+./src/linux/reset_zcode.sh --instance Second         # clone reset (Third..Sixth too)
+./src/linux/reset_minimax_opencode.sh                # close MiniMax first; CLI auth untouched
 ./src/linux/change_device_id.sh Fingerprint          # no root
 sudo ./src/linux/change_device_id.sh ResetMachineId  # /etc/machine-id (root)
+```
+
+The ZCode Linux clone layer (ghost.sh options 10-13 — app code is
+platform-independent, live acceptance user-supervised):
+
+```bash
+./src/linux/launch_zcode_clone.sh --instance Second        # ghost.sh [10] — per-clone desktop home (~/ZCode<Name>Home layout, seeded + scrubbed)
+./src/linux/reset_zcode.sh --instance Second               # ghost.sh [11] — clone reset (identity + desktop userData)
+./src/linux/launch_zcode_cli_light.sh --instance Second    # ghost.sh [12] — light headless worker (clone home, no Electron)
+./src/linux/sync_zcode_assets.sh --instance All            # ghost.sh [13] — Primary -> clones MCP definitions (--dry-run supported)
 ```
 
 ## macOS
