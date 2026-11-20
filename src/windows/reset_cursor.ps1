@@ -27,6 +27,7 @@
 #
 # Usage (Windows 10, PowerShell 5.1 or 7 -- just double-click or run):
 #   powershell -ExecutionPolicy Bypass -File reset_cursor.ps1
+#   powershell -ExecutionPolicy Bypass -File reset_cursor.ps1 -DryRun   # plan only - writes nothing
 # Prerequisite: close Cursor first (the script also force-kills it).
 # Requirement: Python (python or python3) for EVERY store mutation now
 # (v0.2 needed it only for SQLite writes). The functional probe in
@@ -35,9 +36,85 @@
 # v0.2 generated uppercase. The value is an opaque random salt - case is
 # not significant to the app.
 
+param([switch]$DryRun)
+
 . "$PSScriptRoot\identity_utils.ps1"
 
 $ErrorActionPreference = "Stop"
+
+# --- Store paths (hoisted above the DryRun planner + self-elevation) ----------
+# Pure env-derived values with no side effects; both the planner and the main
+# path read them (the W1-9 shape: a report-only run must see the real layout).
+$app = "Cursor"
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$root = Join-Path $env:APPDATA $app
+$backupRoot = Join-Path $root ("ID_Backups\" + $timestamp)
+$idBackupsRoot = Join-Path $root "ID_Backups"
+$machineIdPath = Join-Path $root "machineid"
+$storagePath = Join-Path $root "User\globalStorage\storage.json"
+$sqlitePath = Join-Path $root "User\globalStorage\state.vscdb"
+$workspaceStorageRoot = Join-Path $root "User\workspaceStorage"
+
+# --- W1-9-style report-only planner -------------------------------------------
+# Prints the real step list with resolved paths + presence, then exits BEFORE
+# self-elevation (a plan never triggers UAC), before any kill, before any
+# write. Zero side effects by construction. Step list mirrors the
+# "--- [N/15]" headings below; tests/reset_dryrun.Tests.ps1 cross-checks the
+# two so the plan cannot silently drift from the steps.
+if ($DryRun) {
+    Write-Host "=== DRY-RUN PLAN - Cursor Identity Reset v0.3 ===" -ForegroundColor Cyan
+    $rootPresent = Test-Path -LiteralPath $root
+    Write-Host ("Cursor roaming  : {0} ({1})" -f $root, $(if ($rootPresent) { "present" } else { "NOT INSTALLED - the real run would abort here" }))
+    foreach ($planPath in @(
+        @{ label = "machineid file        "; path = $machineIdPath },
+        @{ label = "storage.json          "; path = $storagePath },
+        @{ label = "state.vscdb           "; path = $sqlitePath },
+        @{ label = "workspaceStorage root "; path = $workspaceStorageRoot }
+    )) {
+        Write-Host ("{0}: {1} ({2})" -f $planPath.label, $planPath.path, $(if (Test-Path -LiteralPath $planPath.path) { "present" } else { "missing (skips)" }))
+    }
+    $planCoreOk = (Get-GhostPythonCli) -and (Get-PythonCommandInfo)
+    if (-not $planCoreOk) {
+        Write-Host "Python core    : MISSING - the real run would fail fast here (every step needs it)." -ForegroundColor Yellow
+    }
+    $planRunning = @(Get-Process -Name "Cursor*" -ErrorAction SilentlyContinue)
+    Write-Host ""
+    Write-Host "Would kill (aggressive tree-kill, 2 clean checks required):"
+    if ($planRunning.Count -eq 0) {
+        Write-Host "  no Cursor processes running"
+    }
+    else {
+        foreach ($planProc in $planRunning) { Write-Host ("  Cursor pid {0}: {1}" -f $planProc.Id, $planProc.Name) }
+        Write-Host "  (+ the extension helpers kilo/roo/cline/cline-host/blackbox when running)"
+    }
+    Write-Host ""
+    Write-Host "Step plan:"
+    foreach ($planStep in @(
+        "[1/15]  machineid rotate (machineid-file)",
+        "[2/15]  storage.json 4 telemetry keys (json-patch, +backup)",
+        "[3/15]  state.vscdb serviceMachineId upsert (sqlite-update, +backup)",
+        "[4/15]  state.vscdb auth secrets delete (delete-secrets, Cursor defaults)",
+        "[5/15]  stale state.vscdb.backup delete (sweep-file)",
+        "[6/15]  Preferences device_id_salt rotate (salt-rotate; skips if absent)",
+        "[7/15]  Local State os_crypt.encrypted_key remove (json-remove)",
+        "[8/15]  Cookies + transport state stores delete (store-delete)",
+        "[9/15]  DIPS stores delete (store-delete)",
+        "[10/15] SharedStorage + Trust Tokens delete (store-delete)",
+        "[11/15] sentry tree sweep (sweep-tree; skips if absent)",
+        "[12/15] cache dirs + Session Storage sweep (Local Storage + Backups PRESERVED)",
+        "[13/15] Crashpad + logs sweep (sweep-tree)",
+        "[14/15] workspaceStorage state.vscdb UPSERT only (files never deleted)",
+        "[15/15] old ID_Backups purge + watchdog re-verify"
+    )) {
+        Write-Host ("  {0}" -f $planStep)
+    }
+    Write-Host ""
+    Write-Host "Preserved per policy: Local Storage\leveldb, Backups\, workspace files,"
+    Write-Host "workspace .backup sidecars, third-party secret:// entries."
+    Write-Host ""
+    Write-Host "DRY-RUN complete - nothing was written or killed." -ForegroundColor Green
+    exit 0
+}
 
 # --- Self-elevation -----------------------------------------------------------
 $cursorIsAdmin = [Security.Principal.WindowsPrincipal]::new(
@@ -366,15 +443,6 @@ function Confirm-JsonValues {
 
 Assert-Administrator
 
-$app = "Cursor"
-$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$root = Join-Path $env:APPDATA $app
-$backupRoot = Join-Path $root ("ID_Backups\" + $timestamp)
-$idBackupsRoot = Join-Path $root "ID_Backups"
-$machineIdPath = Join-Path $root "machineid"
-$storagePath = Join-Path $root "User\globalStorage\storage.json"
-$sqlitePath = Join-Path $root "User\globalStorage\state.vscdb"
-$workspaceStorageRoot = Join-Path $root "User\workspaceStorage"
 $audit = @()
 $actions = @()
 $ids = New-IdentitySet

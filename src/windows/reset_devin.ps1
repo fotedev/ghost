@@ -37,6 +37,7 @@
 #
 # Usage (Windows 10, PowerShell 5.1 or 7 -- just double-click or run):
 #   powershell -ExecutionPolicy Bypass -File reset_devin.ps1
+#   powershell -ExecutionPolicy Bypass -File reset_devin.ps1 -DryRun   # plan only - writes nothing
 # Prerequisite: close Windsurf / Devin Desktop first (the script force-kills both).
 # NOTE: the kill list also force-kills generic extension-helper names (kilo /
 # roo / cline / cline-host / blackbox) that are NOT Windsurf/Devin-namespaced -
@@ -45,9 +46,90 @@
 # Requirement: Python (python or python3) for EVERY store mutation now
 # (v0.3 needed it only for SQLite writes) - the run fails fast without it.
 
+param([switch]$DryRun)
+
 . "$PSScriptRoot\identity_utils.ps1"
 
 $ErrorActionPreference = "Stop"
+
+# --- W1-9-style report-only planner -------------------------------------------
+# Multi-root aware (Devin + Windsurf under %APPDATA%, the same detection the
+# main path runs). Prints the detected roots, presence of the home dirs, the
+# would-kill set and the step plan, then exits BEFORE self-elevation (a plan
+# never triggers UAC), before any kill, before any write. Zero side effects by
+# construction. Step list mirrors the "--- [N/17]" headings below;
+# tests/reset_dryrun.Tests.ps1 cross-checks the two so the plan cannot
+# silently drift from the steps.
+if ($DryRun) {
+    Write-Host "=== DRY-RUN PLAN - Windsurf/Devin Identity Reset v0.4 ===" -ForegroundColor Cyan
+    $planRoots = @()
+    foreach ($planName in @("Devin", "Windsurf")) {
+        $planCandidate = Join-Path $env:APPDATA $planName
+        if (Test-Path -LiteralPath $planCandidate) {
+            $planResolved = Get-Item -LiteralPath $planCandidate
+            $planRoots += $planResolved.FullName
+            Write-Host ("Data root       : {0} (present)" -f $planResolved.FullName)
+        }
+    }
+    if ($planRoots.Count -eq 0) {
+        Write-Host ("Data root       : NOT INSTALLED (checked {0} and {1}) - the real run would abort here." -f `
+            (Join-Path $env:APPDATA "Devin"), (Join-Path $env:APPDATA "Windsurf"))
+    }
+    foreach ($planHome in @(
+        @{ label = ".windsurf home "; path = (Join-Path $env:USERPROFILE ".windsurf") },
+        @{ label = ".devin home    "; path = (Join-Path $env:USERPROFILE ".devin") },
+        @{ label = ".codeium home  "; path = (Join-Path $env:USERPROFILE ".codeium") }
+    )) {
+        Write-Host ("{0}: {1} ({2})" -f $planHome.label, $planHome.path, $(if (Test-Path -LiteralPath $planHome.path) { "present" } else { "missing (skips)" }))
+    }
+    $planCoreOk = (Get-GhostPythonCli) -and (Get-PythonCommandInfo)
+    if (-not $planCoreOk) {
+        Write-Host "Python core     : MISSING - the real run would fail fast here (every step needs it)." -ForegroundColor Yellow
+    }
+    $planRunning = @()
+    foreach ($planProcName in @("Devin*", "Windsurf*", "Codeium*")) {
+        $planRunning += @(Get-Process -Name $planProcName -ErrorAction SilentlyContinue)
+    }
+    Write-Host ""
+    Write-Host "Would kill (aggressive tree-kill; NOTE the generic helper names kilo/roo/cline/cline-host/blackbox are killed too - close other IDEs):"
+    if ($planRunning.Count -eq 0) {
+        Write-Host "  no Devin/Windsurf/Codeium processes running"
+    }
+    else {
+        foreach ($planProc in $planRunning) { Write-Host ("  pid {0}: {1}" -f $planProc.Id, $planProc.Name) }
+    }
+    Write-Host ""
+    Write-Host "Step plan (steps 1-14 run PER DETECTED ROOT; 15-17 once):"
+    foreach ($planStep in @(
+        "[1/17]  machineid rotate (machineid-file)",
+        "[2/17]  storage.json telemetry keys (json-patch)",
+        "[3/17]  state.vscdb serviceMachineId upsert (sqlite-update)",
+        "[4/17]  state.vscdb auth secrets delete (delete-secrets, Windsurf/Devin config)",
+        "[5/17]  stale state.vscdb.backup delete (sweep-file)",
+        "[6/17]  Preferences salt + Local State os_crypt + username scrub",
+        "[7/17]  Cookies + transport state stores delete (store-delete)",
+        "[8/17]  DIPS stores delete (store-delete)",
+        "[9/17]  SharedStorage + Trust Tokens delete (store-delete)",
+        "[10/17] cache dirs + Session Storage sweep (extended rebrand-era sweep)",
+        "[11/17] Crashpad + logs sweep (sweep-tree)",
+        "[12/17] workspaceStorage state.vscdb UPSERT only (files never deleted)",
+        "[13/17] app-specific files (installation_id x2, credentials.toml delete,",
+        "        devin.org_id blank, .codeium device_id + api_key)",
+        "[14/17] old ID_Backups purge + watchdog re-verify (this root)",
+        "[15/17] home dirs: argv.json crash-reporter-id (~\.windsurf + ~\.devin)",
+        "[16/17] %LOCALAPPDATA% updater sweep (sweep-tree)",
+        "[17/17] final probes + combined audit + restore script"
+    )) {
+        Write-Host ("  {0}" -f $planStep)
+    }
+    Write-Host ""
+    Write-Host "Preserved per policy: Local Storage\leveldb, Backups\, workspace files +"
+    Write-Host ".backup sidecars, WebStorage + IndexedDB, extensions/plans/worktrees,"
+    Write-Host "%USERPROFILE%\.devin-shared, %LOCALAPPDATA%\devin (CLI)."
+    Write-Host ""
+    Write-Host "DRY-RUN complete - nothing was written or killed." -ForegroundColor Green
+    exit 0
+}
 
 # --- Self-elevation -----------------------------------------------------------
 $devinIsAdmin = [Security.Principal.WindowsPrincipal]::new(

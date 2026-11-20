@@ -90,6 +90,10 @@ assumptions.
 | `backup`, `machineid-file`, `salt-rotate`, `json-remove`, `store-delete`, `sweep-file`, `sweep-tree` | the per-step delete/rename/verify PS blocks (Phase 3 thin manifests: reset_cursor v0.3, reset_devin v0.4) | JSON `{ok, path, before, after}` |
 | `patch-argv`, `replace-text`, `json-set` | the app-specific PS steps (JSONC argv patch, raw-text scrub, dotted-path JSON set) | JSON reports |
 | `json-patch`, `identity`, `restore-script`, `audit-log` | Python twins of the utils functions — `identity` is a manual diagnostic; the others are consumed through the thin-manifest step runners | JSON reports |
+| `count-keys` (read-only survivor probe), `purge-keys`, `purge-tables`, `scrub-rows` | the SQLite sweep verbs the thin manifests drive (BS-11's report-02 needs; exact + LIKE + ESCAPE semantics) | JSON `{deleted, survivors, skipped_tables}` |
+| `json-merge-defs` | the Primary→clone DEFINITIONS-merge invariant (PR #97; Primary wins, clone-local `--preserve-keys` survive, clone-only kept, Primary never mutated; area-scoped `--base-path`; backup + verify-after + `--dry-run` zero-write) — the generic merge core the Linux syncs ride (`ghost/json_merge.py`) | JSON plan `{added, updated, unchanged, clone_only}` |
+| `ac2-inventory`, `ac2-mcp-plan`, `ac2-mcp-apply`, `ac2-chat-inventory`, `ac2-chat-import`, `ac2-chat-revert` | the AutoClaw2 suite bridges (`ghost/autoclaw2.py`; tools/sync_autoclaw2_mcp.ps1 + sync_autoclaw2_chats.ps1) — ONE base64 JSON payload in, JSON verdict out; exit 2 = refused by a gate | JSON verdicts |
+| `oc-chat-inventory`, `oc-chat-import`, `oc-chat-revert` | the OpenCode cross-instance CHAT-sync bridges (`ghost/opencode.py`, PR #107; tools/sync_opencode_chats.ps1) — same-id PK idempotence, family expansion, project remap by worktree path, FK-cascade revert | JSON verdicts |
 
 Payloads travel base64-encoded to sidestep native-argument quoting; values
 always use `?` placeholders; table names are validated against

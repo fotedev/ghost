@@ -1185,6 +1185,18 @@ src/windows/identity_utils.ps1  # Shared library, dot-sourced by all IDE scripts
   New-RestoreScript                #   -> self-contained .ps1 that reverses all changes
   Get-NewCrashReporterId           #   -> lowercase GUID
 
+# 2026-11-20 -DryRun PARITY COMPLETE (issue #2 item 1): every Windows resetter
+#  now carries the W1-9-style report-only planner (reset_zcode's pattern) —
+#  cursor v0.3 / trae v0.3 / devin v0.4 / minimax v1.4 / qoder v0.5 gained
+#  [switch]$DryRun: a plan block BEFORE self-elevation (a report-only run
+#  never triggers UAC), the real step list with resolved paths + presence
+#  (cross-checked against the "--- [N/M]" headings by
+#  tests/reset_dryrun.Tests.ps1's drift tripwire), zero side effects by
+#  construction (no python call, no backup dir, no audit/restore/marker
+#  write — Pester-proven under redirected APPDATA/LOCALAPPDATA/USERPROFILE),
+#  not-installed = honest "would abort here" + exit 0. CLI-only (the
+#  qoderwork precedent — no new menu rows/gids).
+
 reset_cursor.ps1     # Cursor: 15 steps (machineid, storage.json, state.vscdb,
                                    #          auth-secrets scrub, device_id_salt, os_crypt rotation,
                                    #          Cookies/NPS/sentry/DIPS/Trust Tokens/Crashpad/logs, workspace DBs)

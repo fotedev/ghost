@@ -7,12 +7,89 @@ param(
     # declared switches (the *_done.txt marker file, not a log, is the
     # persisted result channel). Switches work without CmdletBinding.
     [switch]$SkipMac,
-    [switch]$SkipHostname
+    [switch]$SkipHostname,
+    [switch]$DryRun
 )
 
 . "$PSScriptRoot\identity_utils.ps1"
 
 $ErrorActionPreference = "Stop"
+
+# --- W1-9-style report-only planner -------------------------------------------
+# Prints the profile roots + presence, the would-kill set and the step plan,
+# then exits BEFORE self-elevation (a plan never triggers UAC), before any
+# kill, before any write. Zero side effects by construction. Step list mirrors
+# the "--- [N/31]" headings below; tests/reset_dryrun.Tests.ps1 cross-checks
+# the two so the plan cannot silently drift from the steps.
+if ($DryRun) {
+    Write-Host "=== DRY-RUN PLAN - Qoder Identity Reset v0.5 ===" -ForegroundColor Cyan
+    $planRoot = Join-Path $env:APPDATA "Qoder"
+    $planUserQoder = Join-Path $env:USERPROFILE ".qoder"
+    $planRootPresent = Test-Path -LiteralPath $planRoot
+    Write-Host ("Qoder roaming : {0} ({1})" -f $planRoot, $(if ($planRootPresent) { "present" } else { "NOT INSTALLED - the real run would abort here" }))
+    Write-Host ("User-level    : {0} ({1})" -f $planUserQoder, $(if (Test-Path -LiteralPath $planUserQoder) { "present" } else { "missing (skips)" }))
+    if ($planRootPresent) {
+        $planCors = Join-Path $planRoot "CORS_Profile"
+        Write-Host ("Profiles      : MAIN" + $(if (Test-Path -LiteralPath $planCors) { " + CORS_Profile" }) + " (per-profile steps run for each)")
+    }
+    $planCoreOk = (Get-GhostPythonCli) -and (Get-PythonCommandInfo)
+    if (-not $planCoreOk) {
+        Write-Host "Python core   : MISSING - the real run would fail fast here (every step needs it)." -ForegroundColor Yellow
+    }
+    $planRunning = @(Get-Process -Name "Qoder*" -ErrorAction SilentlyContinue)
+    Write-Host ""
+    Write-Host "Would kill (aggressive tree-kill, 2 clean checks required):"
+    if ($planRunning.Count -eq 0) {
+        Write-Host "  no Qoder processes running"
+    }
+    else {
+        foreach ($planProc in $planRunning) { Write-Host ("  Qoder pid {0}: {1}" -f $planProc.Id, $planProc.Name) }
+    }
+    Write-Host ""
+    Write-Host "Step plan (per-profile steps run for each profile root):"
+    foreach ($planStep in @(
+        "[1/31]  machineid rotate (per profile)",
+        "[2/31]  storage.json telemetry keys (per profile)",
+        "[3/31]  state.vscdb serviceMachineId upsert (per profile)",
+        "[3b/31] state.vscdb auth secrets scrub (per profile)",
+        "[4/31]  SharedClientCache\cache\id (MAIN only)",
+        "[5/31]  SharedClientCache auth files (MAIN only)",
+        "[6/31]  whole SharedClientCache tree (MAIN only)",
+        "[7/31]  Local State delete (per profile)",
+        "[8/31]  Cookies + Network PS + Trust Tokens (per profile)",
+        "[9/31]  DIPS stores (per profile)",
+        "[10/31] SharedStorage (per profile)",
+        "[11/31] WebStorage (per profile)",
+        "[12/31] Session Storage + Local Storage (per profile)",
+        "[13/31] Cache + Code Cache + GPUCache (per profile)",
+        "[14/31] Service Worker + blob_storage (per profile)",
+        "[15/31] Crashpad + CrashFeedback (per profile)",
+        "[16/31] Preferences device_id_salt rotate (per profile)",
+        "[17/31] workspace state.vscdb UPSERT only (per profile)",
+        "[18/31] logs/ deletion (per profile)",
+        "[19/31] argv.json crash-reporter-id (user-level)",
+        "[20/31] %USERPROFILE%\.qoder subdir cleanup",
+        "[21/31] old ID_Backups purge (24h floor + same-day protection)",
+        "[22/31] post-write watchdog re-verify",
+        "[23/31] HKCU DeveloperTools deviceid source",
+        "[24/31] HKLM SQMClient MachineId source",
+        "[25/31] state.vscdb.backup stale auth/session backups",
+        "[26/31] NIC MAC address rotation (physical adapters; -SkipMac opts out)",
+        "[27/31] hostname change (-SkipHostname opts out)",
+        "[28/31] %USERPROFILE%\.qoder device files",
+        "[29/31] webview Chromium stores (per profile, if present)",
+        "[30/31] .qoder CLI run state (tmp/telemetry + logs)",
+        "[31/31] device-flow final probe (read-only, audited)"
+    )) {
+        Write-Host ("  {0}" -f $planStep)
+    }
+    Write-Host ""
+    Write-Host "Preserved per policy: chat-bearing stores (memories/canvas/knowledges),"
+    Write-Host "workspace files + .backup sidecars, the Qoder keep-dir backup policy."
+    Write-Host ""
+    Write-Host "DRY-RUN complete - nothing was written or killed." -ForegroundColor Green
+    exit 0
+}
 
 # Self-elevate if not already admin. Re-launch with the same switches so the
 # elevated copy sees the user's opt-out choices.

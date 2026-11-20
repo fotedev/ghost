@@ -8,6 +8,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Windows resetter dry-run parity COMPLETE (2026-11-20)** — issue #2's
+  "what-if/dry-run mode for all reset scripts" item closed: the five
+  classic resetters gained the W1-9-style report-only planner
+  (`reset_cursor.ps1`, `reset_trae.ps1`, `reset_devin.ps1`,
+  `reset_minimax_opencode.ps1`, `reset_qoder.ps1`; `reset_zcode`,
+  `reset_qoderwork` and the three suite resetters already had it — every
+  Windows resetter now plans). Each planner prints the real step list
+  with resolved store paths + presence (devin's is multi-root aware: the
+  Devin + Windsurf `%APPDATA%` detection mirrors the main path), the
+  would-kill process set (read-only probe, no kill), the core-availability
+  note, and the preservation policy — then exits 0 BEFORE self-elevation
+  (a report-only run never triggers UAC) and before any kill/write: no
+  python invocation, no backup dir, no audit/restore/marker file. The
+  hand-maintained plan lists are cross-checked against the real
+  `--- [N/M]` step headings by `tests/reset_dryrun.Tests.ps1` (20 tests:
+  per-app planner-before-elevation, planner purity, drift tripwire, and a
+  functional zero-write probe under redirected
+  APPDATA/LOCALAPPDATA/USERPROFILE). Not-installed targets get an honest
+  "the real run would abort here" + exit 0. CLI-only (the qoderwork
+  precedent — no new menu rows/gids). docs/cli.md gains the -DryRun lines.
+- **CS-8 real-data validation (2026-11-20)** — the OpenCode chat sync's
+  inventory + zero-write dry-run plan ran against the REAL stores (the
+  58-session / 2772-message Primary db + clone c1's 19 sessions):
+  58 missing sessions planned with correct family ordering (the 4
+  subagent sessions sort after their parent), 2772 messages, 58
+  instruction_state rows, 4 of 9 project rows would be copied verbatim,
+  Arabic/Unicode titles and empty titles handled — zero fixes needed, the
+  fixture-built contract held at scale. Evidence recorded in
+  docs/TASK_BACKLOG.md (CS-8 row); live import + UI display acceptance
+  remains user-supervised.
 - **OpenCode cross-instance chat sync (2026-11-20)** — the deferred
   chat-sync discovery spike resolved: the store contract was MINED from
   the live dbs (sessions live IN `opencode.db` — `session_v2` →
