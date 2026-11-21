@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+﻿# SPDX-License-Identifier: Apache-2.0
 # Docs <-> launcher parity (issue #2 item 3). GHOST.bat is the source of truth
 # for the six submenus' row positions; docs/cli.md is the human map of them.
 # The invariant this pins - the drift class caught 2026-11-20 (the cli.md
@@ -29,6 +29,7 @@ BeforeAll {
         'AUTOCLAW' = 'AutoClaw2'
         'CLINE'    = 'Cline'
         'OPENCODE' = 'OpenCode'
+        'TERMINAL' = 'Terminal Agents'
     }
     $script:BlockToResolver = @{
         'RESETS'   = 'ResetsOne'
@@ -37,6 +38,7 @@ BeforeAll {
         'AUTOCLAW' = 'AutoClawOne'
         'CLINE'    = 'ClineOne'
         'OPENCODE' = 'OpenCodeOne'
+        'TERMINAL' = 'TerminalOne'
     }
 
     # slice one :LABEL block: from its label line to the next line-start ':' label
@@ -72,7 +74,7 @@ BeforeAll {
         return $map
     }
 
-    # parse the six submenus: display name -> @{ Rows; ResolverCases; Max }
+    # parse the seven submenus: display name -> @{ Rows; ResolverCases; Max }
     $script:Submenus = [ordered]@{}
     foreach ($blockLabel in $BlockToName.Keys) {
         $name = $BlockToName[$blockLabel]
@@ -122,8 +124,8 @@ BeforeAll {
 }
 
 Describe 'GHOST.bat submenu wiring (the source of truth the docs hang off)' {
-    It 'parses all six submenu blocks with ascending 1..N local ids' {
-        $Submenus.Keys.Count | Should -Be 6
+    It 'parses all seven submenu blocks with ascending 1..N local ids' {
+        $Submenus.Keys.Count | Should -Be 7
         foreach ($name in $Submenus.Keys) {
             $info = $Submenus[$name]
             $info.Rows.Count | Should -BeGreaterThan 0 -Because "the $name submenu must render rows"
@@ -171,12 +173,13 @@ Describe 'GHOST.bat submenu wiring (the source of truth the docs hang off)' {
 }
 
 Describe 'docs/cli.md parity with GHOST.bat' {
-    It 'the intro states the exact six submenu ceilings' {
+    It 'the intro states the exact seven submenu ceilings' {
         $pattern = 'IDE Resets \[1\]-\[(\d+)\] / ZCode Multi-Instance & Clones \[1\]-\[(\d+)\] / ' +
             'System & GHOST Maintenance \[1\]-\[(\d+)\] / AutoClaw2 Multi-Instance & Clones \[1\]-\[(\d+)\] / ' +
-            'Cline Multi-Instance & Clones \[1\]-\[(\d+)\] / OpenCode Multi-Instance & Clones \[1\]-\[(\d+)\]'
+            'Cline Multi-Instance & Clones \[1\]-\[(\d+)\] / OpenCode Multi-Instance & Clones \[1\]-\[(\d+)\] / ' +
+            'Terminal Agents \[1\]-\[(\d+)\]'
         $m = [regex]::Match($CliIntro, $pattern)
-        $m.Success | Should -BeTrue -Because 'the cli.md intro must state all six submenu ranges'
+        $m.Success | Should -BeTrue -Because 'the cli.md intro must state all seven submenu ranges'
         if ($m.Success) {
             $stated = @{
                 'IDE Resets'  = [int]$m.Groups[1].Value
@@ -185,6 +188,7 @@ Describe 'docs/cli.md parity with GHOST.bat' {
                 'AutoClaw2'   = [int]$m.Groups[4].Value
                 'Cline'       = [int]$m.Groups[5].Value
                 'OpenCode'    = [int]$m.Groups[6].Value
+                'Terminal Agents' = [int]$m.Groups[7].Value
             }
             foreach ($name in $Submenus.Keys) {
                 $stated[$name] | Should -Be $Submenus[$name].Max -Because "$name submenu ceiling"

@@ -30,6 +30,7 @@
 | [MCP central registry plan](MCP_CENTRAL_REGISTRY_PLAN.md) | The MCP central registry (`master-mcp.json` → every app's own config shape): design + live status (largely Arabic); implemented 2026-11-04 |
 | [ZCode light mode](ZCODE_LIGHT_MODE.md) | Headless per-account ZCode workers: the five env levers, why the interactive TUI cannot run standalone, the free-model vs Start-Plan login recipe |
 | [T3 local support](T3_LOCAL_SUPPORT.md) | T3 Code control-surface support schedule for the GHOST-managed apps (local working notes) |
+| [Terminal Agents spec](TERMINAL_AGENTS_SPEC.md) | The terminal-CLI agent family (claude-code pilot, 2026-11-21): Phase-0 evidence (CLAUDE_CONFIG_DIR lever, machineID regeneration), the light worker + resetter + markers-only attribution, TA-1 acceptance + TA-3 backlog |
 | [T3 ZCode bridge spec](T3_ZCODE_BRIDGE_SPEC.md) | Run ZCode accounts as T3 agents through a bridge process — spec only (phases A–D complete, T3 Code v0.1.4 installed; §9.2 runbook user-supervised) |
 | [Rebrand plan 2026-09-24](PLAN-2026-09-24-rebrand.md) | The one-off commit plan for the Clean-Slate-Kit → GHOST rebrand + v1.1.0 (HISTORICAL — commit quotes frozen, never updated) |
 

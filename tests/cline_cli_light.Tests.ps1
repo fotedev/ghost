@@ -122,8 +122,8 @@ Describe 'Cline light worker - menu wiring' {
         ($script:BatRaw -match [regex]::Escape('if "%~1"=="123" (call :Detached "Cline Clone CLI Login" "-NoProfile" "src\windows\launch_cline_cli_light.ps1" "-Auth"')) | Should -BeTrue
     }
 
-    It 'states the real dispatch range in the :DispatchOne header (1-125)' {
-        ($script:BatRaw -match 'rem Runs one task by global id \(1-125;') | Should -BeTrue
+    It 'states the real dispatch range in the :DispatchOne header (1-130)' {
+        ($script:BatRaw -match 'rem Runs one task by global id \(1-130;') | Should -BeTrue
     }
 
     It 'menu.json carries gid 122/123 in the Cline section with the right modes' {

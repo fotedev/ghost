@@ -171,12 +171,12 @@ BeforeAll {
 }
 
 Describe 'menu.json schema' {
-    It 'parses with the six GHOST.bat submenu sections in display order' {
+    It 'parses with the seven GHOST.bat submenu sections in display order' {
         ($Menu.sections | ForEach-Object { $_.name }) -join ',' |
-            Should -Be 'IDE Resets,ZCode,AutoClaw2,Cline,OpenCode,Maintenance'
+            Should -Be 'IDE Resets,ZCode,AutoClaw2,Cline,OpenCode,Maintenance,Terminal Agents'
     }
 
-    It 'every row has a gid in the 1-125 range, unique per section, and no retired/reserved gid' {
+    It 'every row has a gid in the 1-130 range, unique per section, and no retired/reserved gid' {
         foreach ($sec in $Menu.sections) {
             $gids = @($sec.rows | ForEach-Object { $_.gid })
             ($gids | Select-Object -Unique).Count | Should -Be $gids.Count -Because "section '$($sec.name)'"
@@ -185,9 +185,10 @@ Describe 'menu.json schema' {
         $gids.Count | Should -BeGreaterThan 0
         foreach ($g in $gids) {
             $g | Should -BeGreaterThan 0
-            # 125 = the OpenCode chat import row (2026-11-20); raise the
-            # ceiling when the next gid lands.
-            $g | Should -BeLessOrEqual 125
+            # 130 = the Terminal Agents rows (claude-code worker/login/reset/
+            # status, appended 2026-11-21); raise the ceiling when the next
+            # gid lands.
+            $g | Should -BeLessOrEqual 130
             $ReservedGids | Should -Not -Contain $g
         }
     }

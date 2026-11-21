@@ -365,7 +365,25 @@
         { "gid": 77, "label": "Sync MCP registry to apps", "tail": "- ZCode, Windsurf, VS Code + MiniMax", "mode": "inline", "script": "tools/sync_mcp_registry.ps1", "args": [], "notes": [] },
         { "gid": 81, "label": "Build GHOST desktop app", "tail": "- GHOST.exe in the repo root", "mode": "inline-note", "script": "tools/build_ghost_exe.ps1", "args": [], "notes": [
           "Look for GHOST.exe in the repo root - double-click it to open the desktop launcher. Rebuild it after updates or repo moves."
+        ] },
+        { "gid": 126, "label": "All-suites instance status", "tail": "- who is running - ZCode + AutoClaw2 + Cline + OpenCode + Claude Code", "mode": "inline", "script": "tools/status_all_instances.ps1", "args": [], "notes": [
+          "Cross-suite read-only fleet view. Deep per-suite tools: ZCode [32], the per-suite pressure reports and launcher -Status rows."
         ] }
+      ]
+    },
+    {
+      "name": "Terminal Agents",
+      "rows": [
+        { "gid": 127, "label": "Launch light worker c1", "tail": "- per-instance config home - terminal REPL or one-shot", "mode": "detached", "title": "Claude Code Light Worker", "psFlags": "-NoProfile", "script": "src/windows/launch_claude_code_light.ps1", "args": [], "notes": [
+          "Light worker opened in a separate window - terminal REPL there; exit returns.",
+          "Per-instance config home via CLAUDE_CONFIG_DIR. A fresh home has NO login - run the Login row first; -Prompt one-shots need -Yolo for tool approvals."
+        ] },
+        { "gid": 128, "label": "Login c1 account", "tail": "- one-time browser login for the c1 home", "mode": "detached", "title": "Claude Code c1 Login", "psFlags": "-NoProfile", "script": "src/windows/launch_claude_code_light.ps1", "args": ["-Login"], "notes": [
+          "Login window opened - follow the browser flow for THIS instance's account.",
+          "One-time per clone home: it writes the home's own .credentials.json. One credential = one instance."
+        ] },
+        { "gid": 129, "label": "Reset Primary identity", "tail": "- ~\\.claude + ~\\.claude.json - chats + settings kept - asks first", "mode": "confirm-run", "confirmTitle": "Claude Code reset - Primary identity (~\\.claude + ~\\.claude.json)", "confirmText": "Removes the identity + telemetry keys and the OAuth credentials so the next run generates a FRESH machineID. Transcripts, sessions, history, settings, skills + mcpServers are PRESERVED. Re-login required afterwards. Clone-home resets: run the script with -Instance cN.", "script": "src/windows/reset_claude_code.ps1", "args": [], "notes": [] },
+        { "gid": 130, "label": "Instance status", "tail": "- read-only - Primary + c1..c5 - light-worker markers", "mode": "inline", "script": "tools/status_all_instances.ps1", "args": ["-Suites", "claudecode"], "notes": [] }
       ]
     }
   ]

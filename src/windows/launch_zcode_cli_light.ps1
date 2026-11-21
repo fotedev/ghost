@@ -41,6 +41,12 @@
 #   -Prompt "text"     one-shot: run the task and exit (verify-after on exit code)
 #   -Server            foreground `app-server` stdio worker for orchestrators
 #                      (the caller owns the pipe; never detach this mode)
+#
+# VISIBILITY: every run mode writes <CloneHome>\.ghost-light-worker.json
+# (launcher pid + mode) for the whole run and removes it on exit - the
+# shared PID-marker contract in ghost_light_marker.ps1 that makes headless
+# workers show up in tools\status_all_instances.ps1. (-Login is transient
+# and writes no marker.)
 param(
     [ValidateSet('Second', 'Third', 'Fourth', 'Fifth', 'Sixth')]
     [string]$Instance = 'Second',
@@ -82,6 +88,12 @@ $InstanceMap = @{
 $cfg = $InstanceMap[$Instance]
 $CloneHome = Join-Path $UserProfile $cfg.Home
 $CloneZCode = Join-Path $CloneHome '.zcode'
+
+# Light-worker PID-marker contract (shared lib): one JSON marker per clone
+# home for the whole worker run, removed on exit; readers validate pid
+# liveness so a hard-killed worker reads as stale, never as running.
+. (Join-Path $PSScriptRoot 'ghost_light_marker.ps1')
+$LightMarkerPath = Join-Path $CloneHome '.ghost-light-worker.json'
 
 if (-not (Test-Path -LiteralPath (Join-Path $CloneZCode 'v2\credentials.json'))) {
     throw "Clone home $($cfg.DisplayName) has no profile yet ($CloneZCode). Launch its desktop instance once (GHOST.bat ZCode [1]-[5]) to seed it, then retry."
@@ -210,13 +222,24 @@ function Invoke-LightPrompt {
 if ($Server) {
     Write-Host "[light] $($cfg.DisplayName) app-server on stdio - the CALLER owns this pipe." -ForegroundColor Cyan
     Write-Host "[light] home=$CloneHome cli=$ZcodeCli"
-    & $NodeExe $ZcodeCli app-server
-    exit $LASTEXITCODE
+    Write-GhostLightMarker -Path $LightMarkerPath -Suite 'zcode' -Instance $Instance -Mode 'server'
+    try {
+        & $NodeExe $ZcodeCli app-server
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Remove-GhostLightMarker -Path $LightMarkerPath
+    }
+    exit $exitCode
 }
 
 if (-not [string]::IsNullOrWhiteSpace($Prompt)) {
     Write-Host "[light] $($cfg.DisplayName) one-shot task (mode=$Mode, cwd=$Cwd)..." -ForegroundColor Cyan
-    $ok = Invoke-LightPrompt -Text $Prompt
+    Write-GhostLightMarker -Path $LightMarkerPath -Suite 'zcode' -Instance $Instance -Mode 'prompt'
+    try {
+        $ok = Invoke-LightPrompt -Text $Prompt
+    } finally {
+        Remove-GhostLightMarker -Path $LightMarkerPath
+    }
     if (-not $ok) { exit 1 }
     exit 0
 }
@@ -225,8 +248,13 @@ if (-not [string]::IsNullOrWhiteSpace($Prompt)) {
 Write-Host ("[light] ZCode {0} light worker - account isolated to {1}" -f $cfg.DisplayName, $cfg.Home) -ForegroundColor Cyan
 Write-Host '[light] Type a task and press Enter. Empty input exits. Each task is a fresh session'
 Write-Host '[light] in the clone''s own store (shareable with its desktop app).'
-while ($true) {
-    $task = Read-Host '[light] task'
-    if ([string]::IsNullOrWhiteSpace($task)) { Write-Host '[light] bye.'; exit 0 }
-    $null = Invoke-LightPrompt -Text $task
+Write-GhostLightMarker -Path $LightMarkerPath -Suite 'zcode' -Instance $Instance -Mode 'repl'
+try {
+    while ($true) {
+        $task = Read-Host '[light] task'
+        if ([string]::IsNullOrWhiteSpace($task)) { Write-Host '[light] bye.'; exit 0 }
+        $null = Invoke-LightPrompt -Text $task
+    }
+} finally {
+    Remove-GhostLightMarker -Path $LightMarkerPath
 }

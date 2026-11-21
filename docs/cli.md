@@ -2,11 +2,12 @@
 
 Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 **`./ghost.sh`** (Linux). This page is the direct-command cheat sheet for
-scripts and CI. `GHOST.bat` groups its tasks into six submenus with
+scripts and CI. `GHOST.bat` groups its tasks into seven submenus with
 continuous local numbering (IDE Resets [1]-[8] / ZCode Multi-Instance &
-Clones [1]-[33] / System & GHOST Maintenance [1]-[5] / AutoClaw2
+Clones [1]-[33] / System & GHOST Maintenance [1]-[6] / AutoClaw2
 Multi-Instance & Clones [1]-[25] / Cline Multi-Instance & Clones
-[1]-[23] / OpenCode Multi-Instance & Clones [1]-[27]); chain several tasks in one
+[1]-[23] / OpenCode Multi-Instance & Clones [1]-[27] / Terminal Agents
+[1]-[4]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
 from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
 [1] [3] [4]) or a bare global id — this page cites menu positions as
@@ -99,6 +100,40 @@ GHOST.lnk shortcuts (icon = `assets\ghost.ico`): Maintenance [1]
 (`tools\install_ghost_shortcut.ps1`; `-Remove` / `-DesktopOnly` / `-RepoOnly`
 scoping — re-run it after moving this repo folder).
 
+## Which instance is running? (Maintenance [6])
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1"                    # Maintenance [6] — the cross-suite fleet view (read-only)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1" -Suites zcode,opencode  # subset (zcode, autoclaw2, cline, opencode, claudecode)
+```
+
+One read-only report for EVERY instance of EVERY suite — ZCode, AutoClaw2,
+Cline, OpenCode and Claude Code — desktop windows AND headless light workers:
+running state per instance, the signal that proved it, light-worker markers,
+lockfile state and the OS commit/RAM pressure header. The signals are
+honestly labeled and never guessed:
+
+- **exe copy** — a main running from the per-color copy (`ZCode-Blue.exe`,
+  `OpenCode-Red.exe`, …) is that clone outright (Task Manager shows the same
+  thing as one colored named group per clone — Maintenance row "Rebuild clone
+  Task Manager icons" builds the copies),
+- **markers** — the clone home / argv markers on the process tree,
+- **lockfile** — a held clone lockfile (OpenCode, Cline),
+- **title** — the window-title map (ZCode clones, OpenCode clones),
+- **light worker** — the `.ghost-light-worker.json` PID marker each
+  headless worker writes for its whole run (pid-liveness validated on read,
+  so a hard-killed worker reads as stale, never as running),
+- a stock-exe AutoClaw2 clone (env-only markers, shared title, no lockfile)
+  is reported `UNCLASSIFIABLE externally`, never guessed.
+
+Deep per-suite views stay authoritative for detail: ZCode [32]
+(`status_zcode_instances.ps1` — deviceMid, roaming dirs, per-instance
+commit), the per-suite pressure reports (AutoClaw2 [24], Cline [20],
+OpenCode [24] — log scans), the launcher `-Status` rows (AutoClaw2 [12],
+Cline [8], OpenCode [11]) and the taskbar watchers (ZCode [26],
+AutoClaw2 [23], OpenCode [23]). Terminal Agents [4] is the same fleet tool
+scoped to the claude-code suite.
+
 ## ZCode captcha watchdog (unattended; no admin needed; ZCode [25])
 
 ```powershell
@@ -174,7 +209,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_zcode_instance
 One read-only table for all six instances: running state, profile home,
 device-id freshness and commit pressure — the first tool to run when a
 clone "looks wrong". The per-suite twins live in their own submenus
-(AutoClaw2 [12], Cline [8], OpenCode [11]).
+(AutoClaw2 [12], Cline [8], OpenCode [11]); the cross-suite fleet view
+covering every suite at once is Maintenance [6].
 
 ### ZCode light headless worker (no desktop window; ZCode [7])
 
@@ -191,7 +227,10 @@ interactive TUI cannot run standalone (`@zcode/tui` lives inside app.asar) and
 a home without a standalone `zcode login zai` runs tasks on the free
 opencode-zen model, not the Start Plan — the launcher prints the one-time
 login recipe when it detects that. ZCode [29] runs the `-Login` flow
-directly (one-time plan setup for light workers + the T3 bridge).
+directly (one-time plan setup for light workers + the T3 bridge). Every run
+mode writes a `.ghost-light-worker.json` PID marker into the clone home for
+its whole run, so headless workers show up in the cross-suite fleet view
+(Maintenance [6]) — see "Which instance is running?" above.
 Full findings: [ZCODE_LIGHT_MODE.md](ZCODE_LIGHT_MODE.md).
 
 ## ZCode clone shortcuts (Desktop + Start menu; per-user, no admin needed)
@@ -625,6 +664,43 @@ Chat import copies a session as a NEW local session with an `[import]` title
 prefix (D11), refuses IM-bound sessions (D12), and is revertible by import id.
 Spec: `docs\AUTOCLAW2_SYNC_SPEC.md`. The live acceptance runs (A1-A7, C2-C7)
 are still gated on the supervised Phase 0 spikes.
+
+## Terminal Agents (claude-code pilot; per-user, no admin needed)
+
+The Terminal Agents submenu is GHOST's home for TERMINAL coding agents —
+CLIs with no desktop window whose interactive REPL already IS a terminal
+TUI. The pilot suite is **claude-code** (npm `@anthropic-ai/claude-code`):
+per-instance homes ride ONE env lever, `CLAUDE_CONFIG_DIR` (Phase-0
+live-verified 2026-11-21 — a fresh dir + `claude mcp list` creates
+`.claude.json` + `backups\` there and `claude auth status` reports it as
+`configDirectory`), and each fresh home auto-generates its own
+`machineID`/`userID` on first run. Evidence map + open items:
+[TERMINAL_AGENTS_SPEC.md](TERMINAL_AGENTS_SPEC.md).
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_claude_code_light.ps1" -Instance c1        # Terminal Agents [1] — interactive REPL on the c1 home (terminal TUI, fully supported)
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_claude_code_light.ps1" -Instance c1 -Prompt "task"   # one-shot (claude -p)
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_claude_code_light.ps1" -Instance c1 -Yolo -Prompt "task"  # one-shot bypassing permission checks (unsupervised only)
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_claude_code_light.ps1" -Instance c1 -Login # Terminal Agents [2] — one-time browser login for THIS home
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_claude_code_light.ps1" -Instance c1 -Status # read-only row for one instance
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_claude_code.ps1"               # Terminal Agents [3] — reset the Primary (~\.claude + ~\.claude.json)
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_claude_code.ps1" -DryRun       # plan only - writes nothing
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_claude_code.ps1" -Instance c1  # reset clone home c1
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1" -Suites claudecode  # Terminal Agents [4] — suite instance status
+```
+
+Honest limits (DERIVED until live acceptance = TA-1): a fresh home has NO
+login, so one-shot runs fail with an auth error until its `-Login` ran (no
+free-model fallback here, unlike the ZCode/OpenCode workers); one-shot tasks
+needing tool approvals fail without `-Yolo`; whether a fresh home needs
+interactive onboarding before headless use is unverified. The resetter
+scrubs identity + telemetry keys and the OAuth credentials (fresh machineID
+on the next run), sweeps `backups\.claude.json.backup.*`, `state\`,
+`cache\`, `statsig\` and PRESERVES transcripts (`projects\`), `sessions\`,
+`history.jsonl`, `settings.json`, `skills\`, `plugins\` and the
+`mcpServers` config. Layout note: the Primary keeps `.claude.json` at the
+PROFILE ROOT (`~\.claude.json`) while a `CLAUDE_CONFIG_DIR` home
+consolidates it inside the home — the resetter handles both shapes.
 
 ### AutoClaw2 watchers (AutoClaw2 [23]-[25])
 

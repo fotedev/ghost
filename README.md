@@ -45,6 +45,11 @@ touches, and emits an audit log plus a self-contained restore script.
 | ZCode light headless worker (no desktop window) | `launch_zcode_cli_light.ps1 -Instance Second\|...\|Sixth` (`-Prompt` / `-Server`) | `launch_zcode_cli_light.sh --instance Second\|...\|Sixth` (`-p` one-shot; PR 8, derived) | — |
 | OpenCode light headless worker (CLI only, clone XDG state) | `launch_opencode_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` / `-Server` / `-Login` / `-StopService`) | — | — |
 | Cline light headless worker (cline-cli.exe on the clone's CLINE_DIR state) | `launch_cline_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` one-shot / `-Json` / `-Auth`) | — | — |
+| Claude Code light worker (terminal TUI/CLI, per-instance `CLAUDE_CONFIG_DIR` home) | `launch_claude_code_light.ps1 -Instance c1\|...\|c5` (`-Prompt` one-shot / `-Yolo` / `-Login` / `-Status`) — Terminal Agents [1]/[2] | — | — |
+| Claude Code identity reset (fresh machineID on next run; transcripts + settings + mcpServers kept) | `reset_claude_code.ps1` (`-Instance c1\|...\|c5` / `-ConfigDir <dir>`, `-DryRun`) — Terminal Agents [3] | — | — |
+| Light-worker PID marker (shared contract: makes headless workers visible to the status tools) | `ghost_light_marker.ps1` (write/read `.ghost-light-worker.json` per clone home; consumed by every light launcher + the status lib) | — | — |
+| All-suites instance status (who is running, every suite + headless workers) | `status_all_instances.ps1` (`-Suites zcode,autoclaw2,cline,opencode,claudecode`) — Maintenance [6] | — | — |
+| Suite status classifier lib (shared copy-exe/marker/lock/title rules behind the status tools) | `suite_status_lib.ps1` (`Get-GhostSuiteInstanceState -Suite <s>`; injectable snapshots for tests) | — | — |
 | Reset AutoClaw2 (Primary + clones, chats/work kept) | `reset_autoclaw2.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — | — |
 | Reset Cline (Primary + clones, chats/tasks kept) | `reset_cline.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — | — |
 | Reset OpenCode desktop (Primary + clones, chats/repos kept) | `reset_opencode.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — | — |
@@ -184,6 +189,9 @@ ghost/
 │   │               #   launch guard used by all four suites' launchers)
 │   │               #   + reset_autoclaw2/reset_cline/reset_opencode.ps1
 │   │               #   (per-clone identity resets, chats/work preserved)
+│   │               #   + the Terminal Agents pilot (launch_claude_code_light.ps1,
+│   │               #   reset_claude_code.ps1) + ghost_light_marker.ps1 (the shared
+│   │               #   light-worker PID-marker contract)
 │   ├── linux/      # .sh resetters + id_reset_common.sh
 │   │               #   + the ZCode Linux clone layer (launch_zcode_clone.sh,
 │   │               #   launch_zcode_cli_light.sh, reset_zcode.sh --instance,

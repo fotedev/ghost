@@ -1,4 +1,4 @@
-# Static contract for the OpenCode cross-instance chat sync (2026-11-20):
+﻿# Static contract for the OpenCode cross-instance chat sync (2026-11-20):
 # tools/sync_opencode_chats.ps1 + src/python/ghost/opencode.py + the
 # GHOST.bat/menu.json wiring (OpenCode [26]/[27], gids 124/125).
 # The FUNCTIONAL side (fixture dbs: import/remap/idempotence/revert) is
@@ -117,7 +117,7 @@ Describe 'opencode chat sync - GHOST.bat + menu.json wiring' {
         }
     }
 
-    It 'the dispatch header states the real 1-125 range' {
-        ($script:BatRaw -match 'rem Runs one task by global id \(1-125;') | Should -BeTrue
+    It 'the dispatch header states the real 1-130 range' {
+        ($script:BatRaw -match 'rem Runs one task by global id \(1-130;') | Should -BeTrue
     }
 }

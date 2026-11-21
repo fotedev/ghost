@@ -19,6 +19,12 @@ src/windows/
 ├── launch_autoclaw2_clones_all.ps1    # sequential all-five
 ├── launch_cline_clones_all.ps1        # sequential all-five (fixed 12s stagger)
 ├── launch_opencode_clones_all.ps1     # sequential all-five (verify-after staggered)
+├── launch_{zcode,opencode,cline,claude_code}_cli_light.ps1   # headless light workers
+│                                      #   (per-instance homes; every run mode writes the
+│                                      #   ghost_light_marker.ps1 PID marker contract)
+├── launch_claude_code_light.ps1       # Terminal Agents pilot: claude-code per-instance
+│                                      #   CLAUDE_CONFIG_DIR homes (REPL/-Prompt/-Yolo/-Login/-Status)
+├── reset_claude_code.ps1              # Terminal Agents identity resetter (user-scope only)
 src/python/
 ├── ghost_cli.py                       # bootstrap: PS scripts call this absolute path
 └── ghost/                             # stdlib-only Python core (identity + SQLite logic)
@@ -57,6 +63,9 @@ tools/
 ├── watch_suite_taskbar.ps1            # generic suite taskbar identity watcher (-Suite autoclaw2|opencode)
 ├── diagnose_suite_pressure.ps1        # read-only per-suite instance pressure report (-Suite autoclaw2|cline|opencode)
 ├── status_zcode_instances.ps1         # ZCode [32] clone status table (read-only)
+├── suite_status_lib.ps1               # ONE shared cross-suite instance classifier (honest signals;
+│                                      #   injectable snapshots) behind the status tools
+├── status_all_instances.ps1           # unified read-only "who's running" fleet report (Maintenance [6])
 ├── sync_mcp_registry.ps1 + mcp/       # central MCP registry importer (master-mcp.json → each app's config shape)
 └── opencode-{blue,yellow,green,red,orange}-branding/  # OpenCode per-clone icons (orange generated)
 ```
