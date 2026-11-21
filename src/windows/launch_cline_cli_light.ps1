@@ -110,6 +110,12 @@ $InstanceMap = @{
 $cfg = $InstanceMap[$Instance]
 $CloneDir = Join-Path $UserProfile $cfg.Home
 
+# Light-worker PID-marker contract (shared lib): one JSON marker per clone
+# home for the whole worker run, removed on exit; readers validate pid
+# liveness so a hard-killed worker reads as stale, never as running.
+. (Join-Path $PSScriptRoot 'ghost_light_marker.ps1')
+$LightMarkerPath = Join-Path $CloneDir '.ghost-light-worker.json'
+
 if (-not (Test-Path -LiteralPath $CloneDir)) {
     throw "Clone home $($cfg.Color) does not exist yet ($CloneDir). Launch its desktop instance once (GHOST.bat Cline [1]-[5]) to create it, then retry."
 }
@@ -173,11 +179,16 @@ if (-not [string]::IsNullOrWhiteSpace($Prompt)) {
     if ($Yolo) { $runArgs += '-y' }
     if ($NoAutoApprove) { $runArgs += @('--auto-approve', 'false') }
     $runArgs += $Prompt
-    # NO pipeline capture around this call (the OpenCode lesson: assigning the
-    # output swallows the CLI's stdout). Call as a statement, branch on exit.
-    & $CliExe @runArgs
-    $exit = $LASTEXITCODE
-    Pop-Location
+    Write-GhostLightMarker -Path $LightMarkerPath -Suite 'cline' -Instance $Instance -Mode 'prompt'
+    try {
+        # NO pipeline capture around this call (the OpenCode lesson: assigning the
+        # output swallows the CLI's stdout). Call as a statement, branch on exit.
+        & $CliExe @runArgs
+        $exit = $LASTEXITCODE
+    } finally {
+        Remove-GhostLightMarker -Path $LightMarkerPath
+        Pop-Location
+    }
     if ($exit -ne 0) {
         Write-Host ("[light] FAILED - exit code {0} (output above)." -f $exit) -ForegroundColor Red
         exit 1
@@ -192,10 +203,12 @@ Write-Host ("[light] Cline {0} light worker - state isolated to {1}" -f $cfg.Col
 Write-Host "[light] cli=$CliExe  hub=$($cfg.Hub)  sidecar=$($cfg.Sidecar)"
 Write-Host '[light] The CLI defaults to ACT MODE with tool auto-approval ON - review each'
 Write-Host '[light] prompt before Enter. Exit the CLI session to return.'
+Write-GhostLightMarker -Path $LightMarkerPath -Suite 'cline' -Instance $Instance -Mode 'repl'
 try {
     & $CliExe
     $exit = $LASTEXITCODE
 } finally {
+    Remove-GhostLightMarker -Path $LightMarkerPath
     Pop-Location
 }
 if ($exit -ne 0) {

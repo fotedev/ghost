@@ -92,9 +92,21 @@ else
     warn "  cd $APP_DIR && ZCODE_HOME='$CLONE_CLI' node resources/glm/zcode.cjs login zai"
 fi
 
+# Light-worker PID-marker contract (the Windows ghost_light_marker.ps1
+# twin): one JSON marker per clone home for the whole worker run, removed on
+# exit. The shell pid ($$) is the liveness sentinel - node runs in the
+# FOREGROUND (no exec, so the EXIT trap can clean up), and a hard kill that
+# skips the trap leaves a stale marker the readers treat as not-running.
+WORKER_MODE="repl"
+if [[ -n "$PROMPT" ]]; then WORKER_MODE="prompt"; fi
+MARKER="$CLONE_HOME/.ghost-light-worker.json"
+printf '{"suite":"zcode","instance":"%s","pid":%d,"mode":"%s","startedAt":"%s"}\n' \
+    "$INSTANCE" "$$" "$WORKER_MODE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MARKER"
+trap 'rm -f "$MARKER"' EXIT
+
 if [[ -n "$PROMPT" ]]; then
-    exec node "$APP_DIR/resources/glm/zcode.cjs" -p "$PROMPT" --mode cli --cwd "$PWD"
+    node "$APP_DIR/resources/glm/zcode.cjs" -p "$PROMPT" --mode cli --cwd "$PWD"
 else
     info "interactive REPL on the clone's own state - empty input exits."
-    exec node "$APP_DIR/resources/glm/zcode.cjs" --mode cli --cwd "$PWD"
+    node "$APP_DIR/resources/glm/zcode.cjs" --mode cli --cwd "$PWD"
 fi

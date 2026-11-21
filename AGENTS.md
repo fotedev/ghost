@@ -1,4 +1,4 @@
-# AGENTS.md — GHOST (Guided Hardware & OS Scrubbing Toolkit)
+﻿# AGENTS.md — GHOST (Guided Hardware & OS Scrubbing Toolkit)
 
 ## Project overview
 
@@ -10,18 +10,36 @@ Fresh-start toolkit for local AI-IDE identity stores — **Cursor**, **Windsurf/
 README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the gitignored
                                              #   built desktop launcher hub; scripts live under src/;
                                              #   CLI cheat sheet: docs/cli.md); GHOST.bat =
-                                             #   6 submenus with CONTINUOUS LOCAL numbering
+                                             #   7 submenus with CONTINUOUS LOCAL numbering
                                              #   (IDE Resets [1]-[8] / ZCode Multi-Instance &
                                              #   Clones [1]-[33] / System & GHOST Maintenance
-                                             #   [1]-[5] / AutoClaw2 Multi-Instance & Clones
+                                             #   [1]-[6] / AutoClaw2 Multi-Instance & Clones
                                              #   [1]-[25] / Cline Multi-Instance & Clones
                                              #   [1]-[23] / OpenCode Multi-Instance & Clones
-                                             #   [1]-[27]) + ANSI colors + local chained input
+                                             #   [1]-[27] / Terminal Agents [1]-[4]) + ANSI
+                                             #   colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
                                              #   global gid jump from the main menu, and
                                              #   [U] Check for updates on the main menu
 src/windows/                        # current .ps1 resetters (unversioned names) + identity_utils.ps1 + change_device_id.ps1
+                               #   2026-11-21 TERMINAL AGENTS PILOT (claude-code): launch_claude_code_light.ps1
+                               #     (-Instance c1..c5; REPL/-Prompt/-Yolo/-Login/-Status; the ONE isolation
+                               #     lever = CLAUDE_CONFIG_DIR, Phase-0 LIVE-VERIFIED 2026-11-21: fresh dir +
+                               #     `claude mcp list` creates .claude.json + backups\ there, fresh homes
+                               #     auto-generate their own machineID/userID; light-worker PID marker around
+                               #     every run mode) + reset_claude_code.ps1 (USER-SCOPE only - never
+                               #     elevates, never kills; W1-9 dry-run planner; evidence-based
+                               #     identity/telemetry key scrub + .credentials.json delete +
+                               #     backups/.claude.json.backup.*/state/cache/statsig sweeps;
+                               #     transcripts/sessions/history/settings/skills/mcpServers PRESERVED;
+                               #     LAYOUT ASYMMETRY: Primary .claude.json at the PROFILE ROOT
+                               #     (~\.claude.json) vs clone consolidated INSIDE CLAUDE_CONFIG_DIR -
+                               #     both handled) + ghost_light_marker.ps1 (the ONE shared
+                               #     light-worker PID-marker contract: <clone-home>\.ghost-light-worker.json
+                               #     written by every light launcher for the whole run, removed on exit;
+                               #     readers validate pid liveness + PowerShell/pwsh process-name sanity,
+                               #     so a hard-killed worker reads as stale, never as running)
 src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters);
                                #   2026-11-17 DEEPENING WAVE toward the Windows store maps:
                                #   reset_zcode v0.2 (+~/.zcode/v2 telemetry-state deviceMid,
@@ -350,6 +368,24 @@ docs/                              # IMPLEMENTATION_GUIDE/PLAN, WALKTHROUGH, res
 archive/                           # superseded versions (local-only fallbacks — do not run, never committed)
 assets/                            # ghost.ico + ghost-source.png (launcher icon; regenerate via
                                    #   tools/make_ghost_icon.ps1 — never hand-edit)
+tools/suite_status_lib.ps1         # ONE shared cross-suite instance classifier (2026-11-21):
+                                   #   Get-GhostSuiteInstanceState -Suite
+                                   #   zcode|autoclaw2|cline|opencode|claudecode over the
+                                   #   live-verified rules (EC-K01 bare-exe mains,
+                                   #   copy-exe-first, queue-based subtree marker walk,
+                                   #   lockfile probes, title maps, the honest-labeling
+                                   #   contract) + claude-code markers-only attribution
+                                   #   (env-only CLAUDE_CONFIG_DIR - a clone's running procs
+                                   #   are claimed via its light-worker marker's launcher-pid
+                                   #   process-tree descendants); injectable -Procs/-Windows
+                                   #   snapshots for tests; the six live-verified per-suite
+                                   #   inline copies are deliberately untouched (TA-2 dedup);
+tools/status_all_instances.ps1     # the unified READ-ONLY "who's running" report
+                                   #   (Maintenance [6] = gid 126; Terminal Agents [4] =
+                                   #   gid 130 with -Suites claudecode): every suite +
+                                   #   Primary + headless light workers (via the
+                                   #   .ghost-light-worker.json PID markers) in ONE
+                                   #   invocation - honest signals, never guessed;
 tools/                             # reviewed utilities (block_qoder_domains.ps1,
                                    #   watch_zcode_captcha.ps1 — captcha-stall watchdog
                                    #     (Telegram creds via params or .envlocal at repo root);

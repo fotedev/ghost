@@ -19,10 +19,10 @@ New-Item -ItemType Directory -Path $work | Out-Null
 # --- build the test copy -------------------------------------------------------
 $src = [System.IO.File]::ReadAllText("$repo\GHOST.bat")
 $count = ([regex]::Matches($src, [regex]::Escape('set /p choice=%PROMPT_TEXT%'))).Count
-# Floor 7 = main + the six hand-written submenus; generated clone suites
+# Floor 7 = main + the seven hand-written submenus; generated clone suites
 # (tools\new_clone_suite.ps1) add one prompt per new submenu and the global
 # rewrite below covers every occurrence, so the check guards the floor only.
-if ($count -lt 7) { throw "expected at least 7 set /p sites in GHOST.bat (main + 6 submenus), found $count" }
+if ($count -lt 8) { throw "expected at least 8 set /p sites in GHOST.bat (main + 7 submenus), found $count" }
 $copy = $src.Replace('set /p choice=%PROMPT_TEXT%', 'call :TestNextInput choice')
 # The REAL GHOST.bat self-normalizes its working directory via
 # `cd /d "%~dp0"` (line 5 - it lives in the repo root, and every dispatched
@@ -89,8 +89,8 @@ $failures = @()
 # S0) static guard: every submenu renders its ids strictly ascending 1..N with
 #     a trailing [0] Back row (renumber discipline 2026-10-29 - future rows are
 #     added in display order, never a higher id out of sequence).
-$menuBlocks = [regex]::Matches($src, '(?ms)^:(RESETS|ZCODE|MAINT|AUTOCLAW|CLINE|OPENCODE)\r?$.*?(?=^:(?:RESETS|ZCODE|MAINT|AUTOCLAW|CLINE|OPENCODE|UnknownTask)\r?$)')
-if ($menuBlocks.Count -ne 6) { $failures += "S0: expected 6 submenu blocks in GHOST.bat, found $($menuBlocks.Count)" }
+$menuBlocks = [regex]::Matches($src, '(?ms)^:(RESETS|ZCODE|MAINT|AUTOCLAW|CLINE|OPENCODE|TERMINAL)\r?$.*?(?=^:(?:RESETS|ZCODE|MAINT|AUTOCLAW|CLINE|OPENCODE|TERMINAL|UnknownTask)\r?$)')
+if ($menuBlocks.Count -ne 7) { $failures += "S0: expected 7 submenu blocks in GHOST.bat, found $($menuBlocks.Count)" }
 foreach ($block in $menuBlocks) {
     $name = $block.Groups[1].Value
     $ids = @([regex]::Matches($block.Value, 'call :Opt (\d+)') | ForEach-Object { [int]$_.Groups[1].Value })

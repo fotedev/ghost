@@ -114,6 +114,12 @@ $InstanceMap = @{
 $cfg = $InstanceMap[$Instance]
 $CloneHome = Join-Path $UserProfile $cfg.Home
 
+# Light-worker PID-marker contract (shared lib): one JSON marker per clone
+# home for the whole worker run, removed on exit; readers validate pid
+# liveness so a hard-killed worker reads as stale, never as running.
+. (Join-Path $PSScriptRoot 'ghost_light_marker.ps1')
+$LightMarkerPath = Join-Path $CloneHome '.ghost-light-worker.json'
+
 if (-not (Test-Path -LiteralPath $CloneHome)) {
     throw "Clone home $($cfg.Color) does not exist yet ($CloneHome). Launch its desktop instance once (GHOST.bat OpenCode [1]-[5]) to create it, then retry."
 }
@@ -222,11 +228,17 @@ function Invoke-LightRun {
 if ($Server) {
     Write-Host "[light] $($cfg.Color) v2 API/web server - the CALLER owns this process." -ForegroundColor Cyan
     Write-Host "[light] home=$CloneHome cli=$CliExe"
-    $serveArgs = @('serve')
-    if ($Port -gt 0) { $serveArgs += @('--port', "$Port") }
-    & $CliExe @serveArgs
-    Pop-Location
-    exit $LASTEXITCODE
+    Write-GhostLightMarker -Path $LightMarkerPath -Suite 'opencode' -Instance $Instance -Mode 'server'
+    try {
+        $serveArgs = @('serve')
+        if ($Port -gt 0) { $serveArgs += @('--port', "$Port") }
+        & $CliExe @serveArgs
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Remove-GhostLightMarker -Path $LightMarkerPath
+        Pop-Location
+    }
+    exit $exitCode
 }
 
 if ($Acp) {
@@ -235,17 +247,29 @@ if ($Acp) {
     }
     Write-Host "[light] $($cfg.Color) ACP server on stdio - the CALLER owns this pipe." -ForegroundColor Cyan
     Write-Host "[light] home=$CloneHome cli=$CliExe"
-    $acpArgs = @('acp')
-    & $CliExe @acpArgs
-    Pop-Location
-    exit $LASTEXITCODE
+    Write-GhostLightMarker -Path $LightMarkerPath -Suite 'opencode' -Instance $Instance -Mode 'acp'
+    try {
+        $acpArgs = @('acp')
+        & $CliExe @acpArgs
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Remove-GhostLightMarker -Path $LightMarkerPath
+        Pop-Location
+    }
+    exit $exitCode
 }
 
 if (-not [string]::IsNullOrWhiteSpace($Prompt)) {
     Write-Host "[light] $($cfg.Color) one-shot task (cwd=$Cwd)..." -ForegroundColor Cyan
-    Invoke-LightRun -Text $Prompt
-    Pop-Location
-    if ($LASTEXITCODE -ne 0) { exit 1 }
+    Write-GhostLightMarker -Path $LightMarkerPath -Suite 'opencode' -Instance $Instance -Mode 'prompt'
+    try {
+        Invoke-LightRun -Text $Prompt
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Remove-GhostLightMarker -Path $LightMarkerPath
+        Pop-Location
+    }
+    if ($exitCode -ne 0) { exit 1 }
     exit 0
 }
 
@@ -256,6 +280,7 @@ Write-Host ("[light] OpenCode {0} light worker - state isolated to {1}" -f $cfg.
 Write-Host '[light] Type a task and press Enter. Empty input exits. Each task is a fresh session'
 Write-Host '[light] in the clone''s own store (shareable with its desktop app).'
 Write-Host '[light] Tasks that edit files or run commands need -Auto, or they wait on approval.'
+Write-GhostLightMarker -Path $LightMarkerPath -Suite 'opencode' -Instance $Instance -Mode 'repl'
 try {
     while ($true) {
         $task = Read-Host '[light] task'
@@ -263,5 +288,6 @@ try {
         Invoke-LightRun -Text $task
     }
 } finally {
+    Remove-GhostLightMarker -Path $LightMarkerPath
     Pop-Location
 }

@@ -19,6 +19,7 @@ if defined ESC (echo %ESC%[92m[ 3] %ESC%[97mSystem ^& GHOST Maintenance %ESC%[90
 if defined ESC (echo %ESC%[92m[ 4] %ESC%[97mAutoClaw2 Multi-Instance ^& Clones %ESC%[90m- launchers, shortcuts%ESC%[0m) else echo [ 4] AutoClaw2 Multi-Instance ^& Clones - launchers, shortcuts
 if defined ESC (echo %ESC%[92m[ 5] %ESC%[97mCline Multi-Instance ^& Clones %ESC%[90m- launchers, clone status%ESC%[0m) else echo [ 5] Cline Multi-Instance ^& Clones - launchers, clone status
 if defined ESC (echo %ESC%[92m[ 6] %ESC%[97mOpenCode Multi-Instance ^& Clones %ESC%[90m- launchers, clone-home patch%ESC%[0m) else echo [ 6] OpenCode Multi-Instance ^& Clones - launchers, clone-home patch
+if defined ESC (echo %ESC%[92m[ 7] %ESC%[97mTerminal Agents %ESC%[90m- claude-code light workers + resets%ESC%[0m) else echo [ 7] Terminal Agents - claude-code light workers + resets
 echo.
 call :Opt U "Check for updates / update GHOST" "- from GitHub"
 call :Opt 0 "Exit" ""
@@ -68,6 +69,10 @@ if "%first%"=="5" (
 if "%first%"=="6" (
     set "PENDING_CHAIN=%rest%"
     goto OPENCODE
+)
+if "%first%"=="7" (
+    set "PENDING_CHAIN=%rest%"
+    goto TERMINAL
 )
 if /i "%first%"=="U" if "%rest%"=="" (
     call :Run "tools\update_ghost.ps1"
@@ -181,6 +186,7 @@ call :Opt 2 "Check for updates / update GHOST" "- from GitHub"
 call :Opt 3 "Spoof WMI hardware serials" "- BIOS, motherboard, disk, RAM + Bluetooth MAC"
 call :Opt 4 "Sync MCP registry to apps" "- ZCode, Windsurf, VS Code + MiniMax"
 call :Opt 5 "Build GHOST desktop app" "- GHOST.exe in the repo root"
+call :Opt 6 "All-suites instance status" "- who is running - ZCode + AutoClaw2 + Cline + OpenCode + Claude Code"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -375,6 +381,34 @@ if "%choice%"=="0" goto MAIN
 for %%t in (%choice:,= %) do call :OpenCodeOne %%t
 goto OPENCODE
 
+:TERMINAL
+cls
+if defined ESC (echo %ESC%[96mGHOST / Terminal Agents%ESC%[0m) else echo GHOST / Terminal Agents
+echo.
+call :Div "Claude Code pilot"
+call :Opt 1 "Launch light worker c1" "- per-instance config home - terminal REPL or one-shot"
+call :Opt 2 "Login c1 account" "- one-time browser login for the c1 home"
+call :Opt 3 "Reset Primary identity" "- ~\.claude + ~\.claude.json - chats + settings kept - asks first"
+call :Opt 4 "Instance status" "- read-only - Primary + c1..c5 - light-worker markers"
+echo.
+call :Opt 0 "Back to Main Menu" ""
+echo.
+if not defined PENDING_CHAIN goto TERMINAL_PROMPT
+for %%t in (%PENDING_CHAIN%) do call :TerminalOne %%t
+set "PENDING_CHAIN="
+:TERMINAL_PROMPT
+set "choice="
+set /p choice=%PROMPT_TEXT%
+if not defined choice goto TERMINAL_PROMPT
+call :ValidateChoice choice
+if errorlevel 1 (
+    echo   Invalid input - menu numbers only, separated by spaces or commas.
+    goto TERMINAL_PROMPT
+)
+if "%choice%"=="0" goto MAIN
+for %%t in (%choice:,= %) do call :TerminalOne %%t
+goto TERMINAL
+
 :UnknownTask
 rem Red "not found" message for a bad task id (shared by all resolvers).
 if defined ESC echo %ESC%[91mUnknown task "%~1" - check the menu and try again.%ESC%[0m
@@ -478,6 +512,7 @@ if "%~1"=="2" set "RESOLVED=26"
 if "%~1"=="3" set "RESOLVED=66"
 if "%~1"=="4" set "RESOLVED=77"
 if "%~1"=="5" set "RESOLVED=81"
+if "%~1"=="6" set "RESOLVED=126"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -611,8 +646,20 @@ if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
+:TerminalOne
+rem Resolves a Terminal Agents submenu-local id to its global task id and runs it.
+set "RESOLVED="
+if "%~1"=="1" set "RESOLVED=127"
+if "%~1"=="2" set "RESOLVED=128"
+if "%~1"=="3" set "RESOLVED=129"
+if "%~1"=="4" set "RESOLVED=130"
+if not defined RESOLVED call :UnknownTask "%~1"
+if not defined RESOLVED exit /b
+call :DispatchOne %RESOLVED%
+exit /b
+
 :DispatchOne
-rem Runs one task by global id (1-125; 5 unused = the retired AutoClaw v1
+rem Runs one task by global id (1-130; 5 unused = the retired AutoClaw v1
 rem block 37-40 + 63, kept reserved-dead by the hub-menu test; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
@@ -624,7 +671,10 @@ rem ZCode clone status row, appended 2026-11-14; 110/111 = the OpenCode
 rem definitions sync row + the OpenCode config sync watcher, CS-1 v2
 rem 2026-11-17; 112/113 = the Cline MCP sync rows; 117 = the Cline pressure
 rem report; 120/121 = the Cline/OpenCode dry-run reset plans; 122/123 = the
-rem Cline light worker + its CLI account login, 2026-11-17).
+rem Cline light worker + its CLI account login, 2026-11-17; 126 = the
+rem all-suites instance status (Maintenance [6]); 127-130 = the Terminal
+rem Agents submenu - claude-code light worker + login + reset + status,
+rem appended 2026-11-21).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -790,6 +840,11 @@ if "%~1"=="82" (call :Detached "ZCode Primary" "-NoProfile" "src\windows\launch_
 if "%~1"=="83" (call :Run "tools\patch_zcode_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="108" (call :Run "tools\status_zcode_instances.ps1" & exit /b)
 if "%~1"=="109" (call :RunWith "src\windows\reset_zcode.ps1" "Report only - nothing was written or killed. Close the window when done." "-Target All -DryRun" & exit /b)
+if "%~1"=="126" (call :Run "tools\status_all_instances.ps1" & exit /b)
+if "%~1"=="127" (call :Detached "Claude Code Light Worker" "-NoProfile" "src\windows\launch_claude_code_light.ps1" "" "Light worker opened in a separate window - terminal REPL there; exit returns." "Per-instance config home (CLAUDE_CONFIG_DIR). A fresh home has NO login - run the Login row first; -Prompt one-shots need -Yolo for tool approvals." & exit /b)
+if "%~1"=="128" (call :Detached "Claude Code c1 Login" "-NoProfile" "src\windows\launch_claude_code_light.ps1" "-Login" "Login window opened - follow the browser flow for THIS instance's account." "One-time per clone home: it writes the home's own .credentials.json. One credential = one instance." & exit /b)
+if "%~1"=="129" (call :ConfirmRun "Claude Code reset - Primary identity (~\.claude + ~\.claude.json)" "src\windows\reset_claude_code.ps1" "Removes the identity + telemetry keys and the OAuth credentials so the next run generates a FRESH machineID. Transcripts, sessions, history, settings, skills + mcpServers are PRESERVED. Re-login required afterwards. Clone-home resets: run the script with -Instance cN." & exit /b)
+if "%~1"=="130" (call :Run "tools\status_all_instances.ps1" -Suites claudecode & exit /b)
 call :UnknownTask "%~1"
 exit /b
 

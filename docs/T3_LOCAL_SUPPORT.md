@@ -24,8 +24,9 @@ GitHub fork.
 | **OpenCode** (desktop clone suite accounts) | Native — **SEEDED (2026-11-07)** | `tools/install_t3_opencode_instances.ps1` seeds five `acpRegistry` instances (backup + verify-after + merge-never-overwrite; [OPENCODE_CLONES_SPEC.md](OPENCODE_CLONES_SPEC.md) §3.10): each launches `launch_opencode_cli_light.ps1 -Instance cN -Acp`, which sets the four XDG clone-home levers and execs `opencode acp` on stdio (handshake live-verified: protocolVersion 1). T3-UI acceptance user-supervised; one manual `opencode auth login` per clone home attaches its account (anonymous = FREE model) |
 | **Claude Code / Codex / Grok / Cursor / Pi / Antigravity** | Native | First-class T3 providers (if you hold subscriptions) |
 | **AutoClaw** | Not applicable | Desktop app with its own gateway/MCP ports — not a headless agent CLI; T3 controls agents, not Electron IDEs |
-| **Cline** | Not applicable | Tauri desktop app, no headless CLI surface |
+| **Cline** | Not yet (no ACP surface probed) | STALE-FIX 2026-11-21: this row predated the Cline CLI — the desktop install DOES ship `cline-cli.exe` and GHOST runs it headless per clone home (`launch_cline_cli_light.ps1`, CLINE_DIR lever, Cline [22]/[23], CL-1 acceptance open). What is still missing for T3 is a probed ACP/stdout mode, not a CLI |
 | **QoderWork / MiniMax Agent / Windsurf / Trae / Qoder** | Not applicable | Same class — desktop IDEs, no orchestratable agent CLI |
+| **Claude Code (GHOST Terminal Agents pilot, 2026-11-21)** | Outside T3 for now — GHOST clones ride per-instance `CLAUDE_CONFIG_DIR` homes (`launch_claude_code_light.ps1`, Terminal Agents [1]-[4]; spec = [TERMINAL_AGENTS_SPEC.md](TERMINAL_AGENTS_SPEC.md)). As a T3 provider claude-code is already native (row above) |
 
 ## Why this is cheap
 

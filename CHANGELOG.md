@@ -7,6 +7,69 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Terminal Agents family + the claude-code pilot (2026-11-21)** — GHOST's
+  home for TERMINAL coding agents (CLIs whose interactive REPL already is a
+  terminal TUI, so no desktop isolation layer is needed). Pilot = claude-code
+  (npm `@anthropic-ai/claude-code` 2.1.314, Phase-0 evidence-cited):
+  per-instance homes ride ONE env lever (`CLAUDE_CONFIG_DIR` — live-verified:
+  a fresh dir + `claude mcp list` creates `.claude.json` + `backups\` there;
+  each fresh home auto-generates its own `machineID`/`userID`). New:
+  `src/windows/launch_claude_code_light.ps1` (`-Instance c1..c5`, REPL /
+  `-Prompt` / `-Yolo` / `-Login` / `-Status`; light-worker PID marker around
+  every run mode; login verified via the home's own `.credentials.json`) +
+  `src/windows/reset_claude_code.ps1` (user-scope resetter, W1-9 dry-run
+  planner, evidence-based identity/telemetry key scrub + OAuth deletion +
+  `backups/.claude.json.backup.*`/`state`/`cache`/`statsig` sweeps;
+  transcripts/sessions/history/settings/skills/mcpServers PRESERVED; handles
+  the Primary profile-root `.claude.json` vs clone consolidated-home layout
+  asymmetry; fixture-tested end-to-end incl. idempotence). Honest limits
+  recorded: no free-model fallback (fresh homes need their own `-Login`);
+  one-shot tool approvals need `-Yolo`. Spec:
+  `docs/TERMINAL_AGENTS_SPEC.md`; open items TA-1 (live acceptance,
+  user-supervised) + TA-3 (codex/gemini backlog) in TASK_BACKLOG §5.
+- **Unified cross-suite instance status — Maintenance [6] (gid 126) +
+  Terminal Agents [4] (gid 130)** — "how do I know which clone/instance is
+  running" answered in ONE read-only report:
+  `tools/status_all_instances.ps1` covers every suite (ZCode, AutoClaw2,
+  Cline, OpenCode, Claude Code) in one invocation with honestly-labeled
+  signals (exe copy / markers / lockfile / title / bare main / light worker
+  — a stock-exe AutoClaw2 clone stays `UNCLASSIFIABLE externally`, never
+  guessed) + the OS commit/RAM header. The classifier rules (EC-K01
+  bare-exe mains, copy-exe-first, queue-based subtree marker walk, lockfile
+  probes, title maps) live in ONE shared lib now,
+  `tools/suite_status_lib.ps1` (`Get-GhostSuiteInstanceState`, injectable
+  process snapshots for tests) — the six live-verified per-suite inline
+  copies are deliberately untouched for now (dedup recorded as TA-2).
+- **Headless light-worker visibility (the PID-marker contract)** — every
+  light-worker launcher (ZCode `launch_zcode_cli_light.ps1`,
+  `launch_opencode_cli_light.ps1`, `launch_cline_cli_light.ps1`, the new
+  claude-code worker, and the Linux `launch_zcode_cli_light.sh` twin) now
+  writes `<clone-home>\.ghost-light-worker.json` (launcher pid + mode,
+  key names only) for the whole run and removes it on exit
+  (`src/windows/ghost_light_marker.ps1` = the one shared copy; readers
+  validate pid liveness + a PowerShell/pwsh process-name sanity check, so a
+  hard-killed worker reads as stale, never as running). Until now headless
+  workers were invisible to every status surface (no window, no AUMID, no
+  lockfile).
+- **Terminal Agents submenu (main menu [7])** — GHOST.bat + menu.json +
+  parity tests: locals [1]-[4] = claude-code worker (gid 127, detached),
+  c1 login (gid 128, detached), Primary identity reset (gid 129,
+  confirm-run), suite instance status (gid 130). Ceiling raised 125→130 per
+  the raise-when-landing rule; the retired v1 gids 37-40+63 stay
+  reserved-dead.
+
+### Changed
+- `tests/ghost_hub_menu.Tests.ps1` (seven sections incl. "Terminal Agents"
+  last, gid ceiling 130) + `tests/docs_launcher_parity.Tests.ps1` (seven
+  submenu ceilings; every new row cited in docs/cli.md). docs/cli.md gains
+  the "Which instance is running? (Maintenance [6])" guide (the honest
+  signal vocabulary + the deep per-suite tools) and the "Terminal Agents"
+  section; README gains the claude-code/status rows + the light-worker
+  marker; docs/T3_LOCAL_SUPPORT.md fixes the stale Cline row (the CLI
+  worker predates it) and notes the GHOST claude-code pilot; TASK_BACKLOG
+  §5 gains TA-1/TA-2/TA-3.
+
 ## [1.6.0] - 2026-11-20
 
 ### Added
