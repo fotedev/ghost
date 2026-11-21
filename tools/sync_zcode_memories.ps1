@@ -170,12 +170,15 @@ function Probe-JunctionContent([string]$Path) {
     } catch { return 0 }
 }
 
-function Invoke-NewerWinsMerge([string]$Name, [string]$CloneMem) {
+function Invoke-NewerWinsMerge([string]$Name, [string]$CloneMem, [string]$AuditZ) {
     # robocopy /E /XO clone -> Primary: copies NEW + NEWER-or-CHANGED files
-    # only, so the Primary is never downgraded by an older clone copy. /L in
-    # DryRun lists without writing. rc >= 8 is a robocopy failure (0-7 are
-    # success codes).
-    $rcArgs = @($CloneMem, $PrimaryMem, '/E', '/XO', '/R:1', '/W:1', '/NFL', '/NDL', '/NJH', '/NJS')
+    # only, so the Primary is never downgraded by an older clone copy.
+    # MEMORY.md is EXCLUDED from this pass (/XF): /XO would let a newer
+    # (possibly less complete) clone index overwrite the Primary's index
+    # BEFORE the line-union pass reads it - the union, not robocopy, must be
+    # the only writer of index files. /L in DryRun lists without writing.
+    # rc >= 8 is a robocopy failure (0-7 are success codes).
+    $rcArgs = @($CloneMem, $PrimaryMem, '/E', '/XO', '/R:1', '/W:1', '/NFL', '/NDL', '/NJH', '/NJS', '/XF', 'MEMORY.md')
     if ($DryRun) { $rcArgs += '/L' }
     $junk = Get-JunkDirs $CloneMem
     if ($junk.Count -gt 0) { $rcArgs += (@('/XD') + $junk) }
@@ -183,18 +186,19 @@ function Invoke-NewerWinsMerge([string]$Name, [string]$CloneMem) {
     $rc = $LASTEXITCODE
     if ($rc -ge 8) {
         Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("newer-wins merge robocopy failed (rc={0})." -f $rc) 'Red'
-        Add-Audit (Split-Path $CloneMem) 'memories' 'robocopy-merge' $false ("rc=" + $rc)
+        Add-Audit $AuditZ 'memories' 'robocopy-merge' $false ("rc=" + $rc)
         return $false
     }
     Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" ("newer-wins merge clone->Primary done (rc={0})." -f $rc) 'Green'
-    Add-Audit (Split-Path $CloneMem) 'memories' 'robocopy-merge' $true ("rc=" + $rc)
+    Add-Audit $AuditZ 'memories' 'robocopy-merge' $true ("rc=" + $rc)
     return $true
 }
 
-function Sync-MemoryIndexes([string]$Name, [string]$CloneMem) {
+function Sync-MemoryIndexes([string]$Name, [string]$CloneMem, [string]$AuditZ) {
     # Line-union every clone MEMORY.md into the Primary's same-rel index.
-    # No PS 5.1 Get-Content/Add-Content anywhere: the lib is explicit no-BOM
-    # UTF-8 (the 2026-11-21 incident's root cause).
+    # This is the ONLY writer of index files (the robocopy pass excludes
+    # them with /XF). No PS 5.1 Get-Content/Add-Content anywhere: the lib is
+    # explicit no-BOM UTF-8 (the 2026-11-21 incident's root cause).
     $cloneIndexes = @(Get-ChildItem -LiteralPath $CloneMem -Recurse -Filter 'MEMORY.md' -File -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -notmatch '_backup-merge-|memories\.pre-sync-' })
     $ok = $true
@@ -213,10 +217,10 @@ function Sync-MemoryIndexes([string]$Name, [string]$CloneMem) {
                 Copy-Item -LiteralPath $ci.FullName -Destination $primaryIdx -Force
                 if (-not (Test-Path -LiteralPath $primaryIdx)) { throw 'index missing after copy' }
                 Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" ("new index adopted: {0}" -f $rel) 'Green'
-                Add-Audit (Split-Path $CloneMem) 'memories' 'index-copy' $true $rel
+                Add-Audit $AuditZ 'memories' 'index-copy' $true $rel
             } catch {
                 Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("could not adopt index {0}: {1}" -f $rel, $_.Exception.Message) 'Red'
-                Add-Audit (Split-Path $CloneMem) 'memories' 'index-copy' $false $rel
+                Add-Audit $AuditZ 'memories' 'index-copy' $false $rel
                 $ok = $false
             }
             continue
@@ -244,10 +248,10 @@ function Sync-MemoryIndexes([string]$Name, [string]$CloneMem) {
             $reread = Get-MemoryIndexLines -Path $primaryIdx
             if (($reread -join "`n") -ne $after) { throw 're-read mismatch after index write' }
             Write-Tag "OK:$(Get-SyncTargetDisplay $Name)" ("index union {0}: {1} -> {2} lines (backup kept)" -f $rel, $primaryLines.Count, $merged.Count) 'Green'
-            Add-Audit (Split-Path $CloneMem) 'memories' 'index-union' $true ("{0}: {1}->{2}" -f $rel, $primaryLines.Count, $merged.Count)
+            Add-Audit $AuditZ 'memories' 'index-union' $true ("{0}: {1}->{2}" -f $rel, $primaryLines.Count, $merged.Count)
         } catch {
             Write-Tag "FAILED:$(Get-SyncTargetDisplay $Name)" ("index union failed for {0}: {1}" -f $rel, $_.Exception.Message) 'Red'
-            Add-Audit (Split-Path $CloneMem) 'memories' 'index-union' $false $rel
+            Add-Audit $AuditZ 'memories' 'index-union' $false $rel
             $ok = $false
         }
     }
@@ -288,8 +292,8 @@ function Invoke-InstanceSync([hashtable]$Def) {
         Write-Tag "INFO:$(Get-SyncTargetDisplay $name)" 'instance is RUNNING and -AllowRunning was passed - proceeding (owner override).' 'Cyan'
     }
 
-    if (-not (Invoke-NewerWinsMerge -Name $name -CloneMem $cloneMem)) { return $false }
-    if (-not (Sync-MemoryIndexes -Name $name -CloneMem $cloneMem))    { return $false }
+    if (-not (Invoke-NewerWinsMerge -Name $name -CloneMem $cloneMem -AuditZ $cloneZ)) { return $false }
+    if (-not (Sync-MemoryIndexes -Name $name -CloneMem $cloneMem -AuditZ $cloneZ))    { return $false }
 
     if ($DryRun) {
         Write-Tag "DRY:$(Get-SyncTargetDisplay $name)" ("would move {0} aside -> memories.pre-sync-{1} and junction it -> {2}" -f $cloneMem, $Stamp, $PrimaryMem) 'Cyan'
@@ -309,8 +313,19 @@ function Invoke-InstanceSync([hashtable]$Def) {
     try {
         New-Item -ItemType Junction -Path $cloneMem -Value $PrimaryMem | Out-Null
     } catch {
-        Write-Tag "FAILED:$(Get-SyncTargetDisplay $name)" ("could not create the junction: {0} - the backup stays at {1}" -f $_.Exception.Message, $aside) 'Red'
+        # The move-aside removed the active cli\memories path - leaving it
+        # missing would make the next run report "no memory store" and
+        # silently skip. RESTORE the store before reporting failure.
+        Write-Tag "FAILED:$(Get-SyncTargetDisplay $name)" ("could not create the junction: {0}" -f $_.Exception.Message) 'Red'
         Add-Audit $cloneZ 'memories' 'junction' $false 'create failed'
+        try {
+            Move-Item -LiteralPath $aside -Destination $cloneMem -Force
+            Write-Tag "OK:$(Get-SyncTargetDisplay $name)" ("store restored from {0} - nothing lost; fix the junction cause and re-run." -f (Split-Path -Leaf $aside)) 'Yellow'
+            Add-Audit $cloneZ 'memories' 'restore' $true (Split-Path -Leaf $aside)
+        } catch {
+            Write-Tag "FAILED:$(Get-SyncTargetDisplay $name)" ("could not restore the store either - the backup STAYS at {0}: {1}" -f $aside, $_.Exception.Message) 'Red'
+            Add-Audit $cloneZ 'memories' 'restore' $false (Split-Path -Leaf $aside)
+        }
         return $false
     }
     $probe = Probe-JunctionContent $cloneMem
@@ -358,7 +373,14 @@ try {
         }
     }
 } catch {
-    Write-Tag 'WARN' ("WMI process scan failed ({0}) - the running-instance guard is blind; close every ZCode instance if unsure." -f $_.Exception.Message) 'Yellow'
+    if (-not $DryRun -and -not $AllowRunning) {
+        # A blind guard must never degrade to "no instances running": the
+        # whole point of the default skip is not racing a live app. Abort
+        # loudly instead of proceeding unprotected.
+        Write-Tag 'FAILED' ("WMI process scan failed ({0}) - the running-instance guard is blind. Aborting (close every ZCode instance and re-run, or pass -AllowRunning to accept the risk)." -f $_.Exception.Message) 'Red'
+        exit 1
+    }
+    Write-Tag 'WARN' ("WMI process scan failed ({0}) - the running-instance guard is blind; proceeding because {1} was passed." -f $_.Exception.Message, $(if ($DryRun) { '-DryRun (nothing is written)' } else { '-AllowRunning' })) 'Yellow'
 }
 
 $targets = @($InstanceDefs | Where-Object { $Target -eq 'All' -or $_.Name -eq $Target })

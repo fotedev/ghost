@@ -83,15 +83,15 @@ function Merge-MemoryIndexLines {
         [AllowEmptyCollection()][string[]]$PrimaryLines,
         [AllowEmptyCollection()][string[]]$CloneLines
     )
-    $seen = @{}
+    # Ordinal case-SENSITIVE seen-set: a bare PS @{} has case-insensitive
+    # keys, which would collapse two pointer lines differing only in case -
+    # both belong in the index (the retention invariant).
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
     $out = @()
     foreach ($line in (@($PrimaryLines) + @($CloneLines))) {
         $clean = ConvertFrom-MojibakeLayers $line
         if ([string]::IsNullOrWhiteSpace($clean)) { continue }
-        if (-not $seen.ContainsKey($clean)) {
-            $seen[$clean] = $true
-            $out += $clean
-        }
+        if ($seen.Add($clean)) { $out += $clean }
     }
     return ,$out
 }

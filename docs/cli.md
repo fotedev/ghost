@@ -307,6 +307,9 @@ change — idle-guarded, never mid-turn — so the currently open session gets
 the new MCP immediately. `-InstallAutostart` writes a hidden Startup-folder
 shortcut (like the taskbar watcher); single-instance via a named mutex plus
 a startup process scan. Log: `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`.
+ZCode [20] (resident) / ZCode [21] (one-shot + live apply). You normally never
+start it yourself: every clone launch (launcher step 2e) starts it hidden
+and installs its autostart shortcut if missing — install-and-forget.
 
 ## ZCode clone memory sync (per-user, no admin needed)
 
@@ -314,14 +317,14 @@ a startup process scan. Log: `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`.
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sync_zcode_memories.ps1" [-Target Second|Third|Fourth|Fifth|Sixth|All] [-DryRun] [-AllowRunning]
 ```
 
-Each clone's `~\ZCode<Color>Home\.zcode\cli\memories` is a private copy
-created at seed time, so memory saved in one instance never reaches the
-others (2026-11-21 live measurement: five clone stores of 233 markdown files
-each vs 957 on the Primary). This syncs the per-project memory stores the
-same way the skills sync handles `~\.agents`: a newer-wins robocopy merge
-(clone → Primary, `/E /XO` — the Primary is never downgraded; junk
-`_backup-merge-*` / `memories.pre-sync-*` dirs are excluded everywhere), a
-UTF-8-safe `MEMORY.md` index union with a mojibake peel
+Each clone's `~\ZCode<Second|Third|Fourth|Fifth|Sixth>Home\.zcode\cli\memories`
+is a private copy created at seed time, so memory saved in one instance never
+reaches the others (2026-11-21 live measurement: five clone stores of 233
+markdown files each vs 957 on the Primary). This syncs the per-project memory
+stores the same way the skills sync handles `~\.agents`: a newer-wins robocopy
+merge (clone → Primary, `/E /XO`, `MEMORY.md` excluded — the Primary is never
+downgraded; junk `_backup-merge-*` / `memories.pre-sync-*` dirs are excluded
+everywhere), a UTF-8-safe `MEMORY.md` index union with a mojibake peel
 (`tools\zcode_memory_merge.ps1` — never PS 5.1 `Get-Content` ANSI defaults,
 which re-append UTF-8 lines as layered mojibake), then the clone store is
 moved aside whole (`memories.pre-sync-<ts>`) and junctioned onto the Primary
@@ -332,9 +335,6 @@ backed up under `~\.zcode\memory-sync-backups\<ts>\`. A RUNNING instance is
 skipped with a warning unless `-AllowRunning` is passed; an unseeded home is
 skipped; already-junctioned stores are verified + idempotent-skipped.
 ZCode [34].
-ZCode [20] (resident) / ZCode [21] (one-shot + live apply). You normally never
-start it yourself: every clone launch (launcher step 2e) starts it hidden
-and installs its autostart shortcut if missing — install-and-forget.
 
 ## ZCode freeze diagnostic (per-user, no admin needed)
 

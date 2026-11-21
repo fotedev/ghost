@@ -151,6 +151,22 @@ Describe 'Merge-MemoryIndexLines (the sync invariant)' {
         $merged = Merge-MemoryIndexLines -PrimaryLines @() -CloneLines @()
         $merged.Count | Should -Be 0
     }
+
+    It 'case-distinct lines are BOTH retained (ordinal compare - a bare PS hashtable would collapse them)' {
+        $primary = @('- [Flag](flags.md) use -A', '- [Flag](flags.md) use -a')
+        $clone   = @()
+        $merged = Merge-MemoryIndexLines -PrimaryLines $primary -CloneLines $clone
+        $merged.Count | Should -Be 2
+        $merged[0] | Should -Be '- [Flag](flags.md) use -A'
+        $merged[1] | Should -Be '- [Flag](flags.md) use -a'
+    }
+
+    It 'an exact duplicate is still removed (case-sensitivity does not break the dedup)' {
+        $primary = @('- [Flag](flags.md) use -A')
+        $clone   = @('- [Flag](flags.md) use -A')
+        $merged = Merge-MemoryIndexLines -PrimaryLines $primary -CloneLines $clone
+        $merged.Count | Should -Be 1
+    }
 }
 
 Describe 'Write-MemoryIndexLines (no-BOM UTF-8 contract)' {
