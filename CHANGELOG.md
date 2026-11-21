@@ -7,6 +7,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Verified
+- **TA-1 live acceptance, half-verified (2026-11-21)** — the light-worker
+  PID-marker + fleet-view contract VERIFIED LIVE on the claude-code suite
+  (mid-run `c1 RUNNING / light worker` capture + clean `stopped` after);
+  the no-subscription failure mode captured: an unauthenticated headless
+  `-p` HANGS silently (always `-Login` first). The real login + turn stay
+  OPEN, gated on an Anthropic subscription. Docs: TASK_BACKLOG TA-1,
+  TERMINAL_AGENTS_SPEC §2/§5, cli.md honest limits.
+
 ### Added
 - **Terminal Agents family + the claude-code pilot (2026-11-21)** — GHOST's
   home for TERMINAL coding agents (CLIs whose interactive REPL already is a
