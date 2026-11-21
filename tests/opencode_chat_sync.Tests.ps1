@@ -117,7 +117,7 @@ Describe 'opencode chat sync - GHOST.bat + menu.json wiring' {
         }
     }
 
-    It 'the dispatch header states the real 1-132 range' {
-        ($script:BatRaw -match 'rem Runs one task by global id \(1-132;') | Should -BeTrue
+    It 'the dispatch header states the real 1-136 range' {
+        ($script:BatRaw -match 'rem Runs one task by global id \(1-136;') | Should -BeTrue
     }
 }

@@ -4,8 +4,9 @@
 #
 # Every light-worker launcher (launch_zcode_cli_light.ps1,
 # launch_opencode_cli_light.ps1, launch_cline_cli_light.ps1,
-# launch_claude_code_light.ps1 and the Linux .sh twin) writes ONE JSON marker
-# into its clone home for the whole worker run and removes it on exit:
+# launch_claude_code_light.ps1, launch_codex_light.ps1 and the Linux .sh
+# twin) writes ONE JSON marker into its clone home for the whole worker run
+# and removes it on exit:
 #
 #     <clone-home>\.ghost-light-worker.json
 #       { "suite", "instance", "pid", "mode", "startedAt" }   (key names only)
@@ -29,7 +30,7 @@ function Write-GhostLightMarker {
     #>
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][ValidateSet('zcode', 'opencode', 'cline', 'claudecode')][string]$Suite,
+        [Parameter(Mandatory = $true)][ValidateSet('zcode', 'opencode', 'cline', 'claudecode', 'codex')][string]$Suite,
         [Parameter(Mandatory = $true)][string]$Instance,
         [Parameter(Mandatory = $true)][ValidateSet('repl', 'prompt', 'server', 'acp')][string]$Mode
     )

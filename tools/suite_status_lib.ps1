@@ -102,6 +102,7 @@ $script:GhostSuites = @{
         WmiFamily          = "Name LIKE 'node%' OR Name LIKE 'claude%'"
         CmdlineFamilyFilter = '(?i)(@anthropic-ai[\\/]+claude-code)|(^|[\\/])claude(\.cmd|\.ps1|\.exe)?$'
         Attribution        = 'markers-only'
+        PrimaryUsageWord   = 'claude'
         ProcFamily         = 'node*'
         ExePrefix          = 'claude'
         PrimaryLock        = ''
@@ -113,6 +114,33 @@ $script:GhostSuites = @{
             @{ Key = 'c3'; Color = 'Green';  CopyExe = ''; CloneHomeRel = 'ClaudeCodeClonesHome\c3'; Markers = @(); LightWorker = $true },
             @{ Key = 'c4'; Color = 'Red';    CopyExe = ''; CloneHomeRel = 'ClaudeCodeClonesHome\c4'; Markers = @(); LightWorker = $true },
             @{ Key = 'c5'; Color = 'Orange'; CopyExe = ''; CloneHomeRel = 'ClaudeCodeClonesHome\c5'; Markers = @(); LightWorker = $true }
+        )
+    }
+    # codex (the Terminal Agents second suite, 2026-11-21): the OpenAI Codex
+    # CLI - a native Rust terminal binary reached through the npm shim
+    # (codex.cmd -> node codex.js -> the vendored codex.exe). Same
+    # markers-only attribution as claude-code: isolation is ENV-ONLY
+    # (CODEX_HOME - never visible in a process command line; live-verified
+    # 2026-11-21), so clone attribution rides the light-worker PID markers
+    # ALONE; unclaimed family processes are the user's own default-profile
+    # codex usage (Primary, honestly labeled, not GHOST-managed).
+    'codex' = @{
+        DisplayName        = 'Codex CLI'
+        WmiFamily          = "Name LIKE 'node%' OR Name LIKE 'codex%'"
+        CmdlineFamilyFilter = '(?i)(@openai[\\/]+codex)|(^|[\\/])codex(\.cmd|\.ps1|\.exe)?$'
+        Attribution        = 'markers-only'
+        PrimaryUsageWord   = 'codex'
+        ProcFamily         = 'codex*'
+        ExePrefix          = 'codex'
+        PrimaryLock        = ''
+        CloneLockProbe     = $null
+        TitleMap           = @{}
+        Instances          = @(
+            @{ Key = 'c1'; Color = 'Blue';   CopyExe = ''; CloneHomeRel = 'CodexClonesHome\c1'; Markers = @(); LightWorker = $true },
+            @{ Key = 'c2'; Color = 'Yellow'; CopyExe = ''; CloneHomeRel = 'CodexClonesHome\c2'; Markers = @(); LightWorker = $true },
+            @{ Key = 'c3'; Color = 'Green';  CopyExe = ''; CloneHomeRel = 'CodexClonesHome\c3'; Markers = @(); LightWorker = $true },
+            @{ Key = 'c4'; Color = 'Red';    CopyExe = ''; CloneHomeRel = 'CodexClonesHome\c4'; Markers = @(); LightWorker = $true },
+            @{ Key = 'c5'; Color = 'Orange'; CopyExe = ''; CloneHomeRel = 'CodexClonesHome\c5'; Markers = @(); LightWorker = $true }
         )
     }
 }
@@ -263,7 +291,7 @@ function Get-GhostMarkersOnlyState {
         LightWorker = '-'
         Lock        = '-'
         Windows     = 0
-        Note        = 'default-profile claude usage (not GHOST-managed); clone attribution is light-worker-marker only'
+        Note        = ('default-profile {0} usage (not GHOST-managed); clone attribution is light-worker-marker only' -f $(if ($Sd.PrimaryUsageWord) { $Sd.PrimaryUsageWord } else { 'app' }))
     }) + $rows
 
     return [pscustomobject]@{
@@ -298,7 +326,7 @@ function Get-GhostSuiteInstanceState {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode')]
+        [ValidateSet('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode', 'codex')]
         [string]$Suite,
         [object[]]$Procs,
         [object[]]$Windows,

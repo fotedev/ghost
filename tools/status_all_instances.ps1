@@ -34,8 +34,8 @@
 [CmdletBinding()]
 param(
     # Comma-separated or repeated; default = every suite.
-    [ValidateSet('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode')]
-    [string[]]$Suites = @('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode')
+    [ValidateSet('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode', 'codex')]
+    [string[]]$Suites = @('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode', 'codex')
 )
 $ErrorActionPreference = 'Continue'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }

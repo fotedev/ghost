@@ -22,9 +22,9 @@ Describe 'All-suites status - script hygiene + surface' {
         ($script:Raw -match 'WriteAllText|Add-Content|Set-Content|Stop-Process|taskkill') | Should -BeFalse
     }
 
-    It 'defaults to every suite and accepts claudecode' {
-        ($script:Raw -match "\[ValidateSet\('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode'\)\]") | Should -BeTrue
-        ($script:Raw -match "@\('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode'\)") | Should -BeTrue
+    It 'defaults to every suite and accepts claudecode + codex' {
+        ($script:Raw -match "\[ValidateSet\('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode', 'codex'\)\]") | Should -BeTrue
+        ($script:Raw -match "@\('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode', 'codex'\)") | Should -BeTrue
     }
 
     It 'accepts comma-separated suite lists (the GHOST.bat arg shape)' {
@@ -63,21 +63,25 @@ Describe 'All-suites status - menu wiring (gid 126 Maintenance [6], gid 130 Term
         ($block.Groups[1].Value -match [regex]::Escape('call :Opt 4 "Instance status"')) | Should -BeTrue
         ($block.Groups[1].Value -match [regex]::Escape('call :Opt 5 "Z.ai gateway setup - verify"')) | Should -BeTrue
         $resolver = [regex]::Match($script:Bat, '(?ms)^:TerminalOne\r?\n(.*?)^:')
-        foreach ($pair in @(@('1', '127'), @('2', '128'), @('3', '129'), @('4', '130'), @('5', '132'))) {
+        foreach ($pair in @(@('1', '127'), @('2', '128'), @('3', '129'), @('4', '130'), @('5', '132'), @('9', '136'))) {
             ($resolver.Groups[1].Value -match [regex]::Escape('if "%~1"=="' + $pair[0] + '" set "RESOLVED=' + $pair[1] + '"')) | Should -BeTrue
         }
     }
 
-    It 'menu.json carries gid 126 in Maintenance and the Terminal Agents section 127-130+132' {
+    It 'menu.json carries gid 126 in Maintenance and the Terminal Agents section 127-130+132+133-136' {
         $maint = @($Menu.sections | Where-Object { $_.name -eq 'Maintenance' })[0]
         (@($maint.rows | Where-Object { $_.gid -eq 126 })).Count | Should -Be 1
         $ta = @($Menu.sections | Where-Object { $_.name -eq 'Terminal Agents' })[0]
         $ta | Should -Not -BeNullOrEmpty
-        (@($ta.rows | ForEach-Object { $_.gid }) -join ',') | Should -Be '127,128,129,130,132'
-        (@($ta.rows | Where-Object { $_.mode -eq 'confirm-run' })).Count | Should -Be 1 -Because 'the reset row must ask first'
+        (@($ta.rows | ForEach-Object { $_.gid }) -join ',') | Should -Be '127,128,129,130,132,133,134,135,136'
+        (@($ta.rows | Where-Object { $_.mode -eq 'confirm-run' })).Count | Should -Be 2 -Because 'both reset rows (claude-code + codex) must ask first'
     }
 
     It 'GHOST.bat dispatches gid 132 = the launcher -Gateway mode (the Z.ai gateway row)' {
         ($script:Bat -match [regex]::Escape('if "%~1"=="132" (call :Run "src\windows\launch_claude_code_light.ps1" -Gateway & exit /b)')) | Should -BeTrue
+    }
+
+    It 'GHOST.bat dispatches gid 136 = the codex-scoped fleet view' {
+        ($script:Bat -match [regex]::Escape('if "%~1"=="136" (call :Run "tools\status_all_instances.ps1" -Suites codex & exit /b)')) | Should -BeTrue
     }
 }

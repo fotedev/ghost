@@ -7,7 +7,7 @@ continuous local numbering (IDE Resets [1]-[8] / ZCode Multi-Instance &
 Clones [1]-[34] / System & GHOST Maintenance [1]-[6] / AutoClaw2
 Multi-Instance & Clones [1]-[25] / Cline Multi-Instance & Clones
 [1]-[23] / OpenCode Multi-Instance & Clones [1]-[27] / Terminal Agents
-[1]-[5]); chain several tasks in one
+[1]-[9]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
 from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
 [1] [3] [4]) or a bare global id — this page cites menu positions as
@@ -104,14 +104,14 @@ scoping — re-run it after moving this repo folder).
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1"                    # Maintenance [6] — the cross-suite fleet view (read-only)
-powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1" -Suites zcode,opencode  # subset (zcode, autoclaw2, cline, opencode, claudecode)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1" -Suites zcode,opencode  # subset (zcode, autoclaw2, cline, opencode, claudecode, codex)
 ```
 
 One read-only report for EVERY instance of EVERY suite — ZCode, AutoClaw2,
-Cline, OpenCode and Claude Code — desktop windows AND headless light workers:
-running state per instance, the signal that proved it, light-worker markers,
-lockfile state and the OS commit/RAM pressure header. The signals are
-honestly labeled and never guessed:
+Cline, OpenCode, Claude Code and Codex — desktop windows AND headless light
+workers: running state per instance, the signal that proved it, light-worker
+markers, lockfile state and the OS commit/RAM pressure header. The signals
+are honestly labeled and never guessed:
 
 - **exe copy** — a main running from the per-color copy (`ZCode-Blue.exe`,
   `OpenCode-Red.exe`, …) is that clone outright (Task Manager shows the same
@@ -131,8 +131,8 @@ Deep per-suite views stay authoritative for detail: ZCode [32]
 commit), the per-suite pressure reports (AutoClaw2 [24], Cline [20],
 OpenCode [24] — log scans), the launcher `-Status` rows (AutoClaw2 [12],
 Cline [8], OpenCode [11]) and the taskbar watchers (ZCode [26],
-AutoClaw2 [23], OpenCode [23]). Terminal Agents [4] is the same fleet tool
-scoped to the claude-code suite.
+AutoClaw2 [23], OpenCode [23]). Terminal Agents [4] / [9] are the same fleet
+tool scoped to the claude-code / codex suite.
 
 ## ZCode captcha watchdog (unattended; no admin needed; ZCode [25])
 
@@ -690,17 +690,22 @@ prefix (D11), refuses IM-bound sessions (D12), and is revertible by import id.
 Spec: `docs\AUTOCLAW2_SYNC_SPEC.md`. The live acceptance runs (A1-A7, C2-C7)
 are still gated on the supervised Phase 0 spikes.
 
-## Terminal Agents (claude-code pilot; per-user, no admin needed)
+## Terminal Agents (claude-code + codex; per-user, no admin needed)
 
 The Terminal Agents submenu is GHOST's home for TERMINAL coding agents —
 CLIs with no desktop window whose interactive REPL already IS a terminal
-TUI. The pilot suite is **claude-code** (npm `@anthropic-ai/claude-code`):
-per-instance homes ride ONE env lever, `CLAUDE_CONFIG_DIR` (Phase-0
-live-verified 2026-11-21 — a fresh dir + `claude mcp list` creates
-`.claude.json` + `backups\` there and `claude auth status` reports it as
-`configDirectory`), and each fresh home auto-generates its own
-`machineID`/`userID` on first run. Evidence map + open items:
-[TERMINAL_AGENTS_SPEC.md](TERMINAL_AGENTS_SPEC.md).
+TUI. Two suites ship today. **claude-code** (npm
+`@anthropic-ai/claude-code`): per-instance homes ride ONE env lever,
+`CLAUDE_CONFIG_DIR` (Phase-0 live-verified 2026-11-21 — a fresh dir +
+`claude mcp list` creates `.claude.json` + `backups\` there and
+`claude auth status` reports it as `configDirectory`), and each fresh home
+auto-generates its own `machineID`/`userID` on first run. **Codex** (npm
+`@openai/codex`): per-instance homes ride the same ONE-lever pattern via
+`CODEX_HOME` (live-verified 2026-11-21 — `--version`, `codex login status`,
+`codex mcp list` and an exec attempt all honored the override and the
+Primary `~\.codex` stayed byte-identical), and a fresh home auto-generates
+its own `installation_id` + SQLite runtime stores on first run. Evidence
+map + open items: [TERMINAL_AGENTS_SPEC.md](TERMINAL_AGENTS_SPEC.md).
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_claude_code_light.ps1" -Instance c1        # Terminal Agents [1] — interactive REPL on the c1 home (terminal TUI, fully supported)
@@ -713,6 +718,15 @@ powershell -ExecutionPolicy Bypass -File "src\windows\reset_claude_code.ps1" -Dr
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_claude_code.ps1" -Instance c1  # reset clone home c1
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1" -Suites claudecode  # Terminal Agents [4] — suite instance status
 powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_claude_code_light.ps1" -Gateway  # Terminal Agents [5] — Z.ai gateway recipe / verify
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_codex_light.ps1" -Instance c1        # Terminal Agents [6] — interactive TUI on the c1 home
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_codex_light.ps1" -Instance c1 -Prompt "task"   # one-shot (codex exec; stdin closed, --skip-git-repo-check)
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_codex_light.ps1" -Instance c1 -Yolo -Prompt "task"  # one-shot that may WRITE files (--yolo bypasses approvals + sandbox)
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_codex_light.ps1" -Instance c1 -Login # Terminal Agents [7] — one-time browser login for THIS home
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_codex_light.ps1" -Instance c1 -Status # read-only row for one instance
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_codex.ps1"               # Terminal Agents [8] — reset the Primary (~\.codex)
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_codex.ps1" -DryRun       # plan only - writes nothing
+powershell -ExecutionPolicy Bypass -File "src\windows\reset_codex.ps1" -Instance c1  # reset clone home c1
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1" -Suites codex  # Terminal Agents [9] — suite instance status
 ```
 
 **The Z.ai gateway lever (no Anthropic account needed)** — Z.ai's GLM Coding
@@ -750,6 +764,24 @@ on the next run), sweeps `backups\.claude.json.backup.*`, `state\`,
 `mcpServers` config. Layout note: the Primary keeps `.claude.json` at the
 PROFILE ROOT (`~\.claude.json`) while a `CLAUDE_CONFIG_DIR` home
 consolidates it inside the home — the resetter handles both shapes.
+
+**Codex honest limits (Phase-0 live probes 2026-11-21, CLI 0.166.0)**: a
+fresh home has NO login and there is NO free-model fallback — a one-shot
+`codex exec` then FAILS WITH AN AUTH ERROR after printing its banner (it
+does NOT hang silently, unlike claude-code), and `codex login status`
+prints "Not logged in" (exit 1). Authenticate first — `-Login`
+(Terminal Agents [7], browser flow) or `codex login --with-api-key`. One-shot
+tasks that write files need `-Yolo`; `codex exec` also READS STDIN, so the
+launcher closes it (`$null |`) and a run cannot stall on an open console
+pipe. Skills are NOT isolated: codex loads them from the SHARED `~\.agents`
+store. The codex resetter (Terminal Agents [8]) deletes `auth.json` +
+`installation_id` (proven to regenerate fresh) + `cap_sid` + the runtime
+SQLite stores (`state_*/logs_*/goals_*/queue_*`) + sandbox/tmp junk, and
+PRESERVES `config.toml`, `AGENTS.md`, `.codex-global-state.json`,
+`history.jsonl`, `session_index.jsonl`, `sessions\`, `memories_*.sqlite`
+and `thread_history_*.sqlite` — after a reset a rerun hits the fresh-home
+guard loudly (nothing to reset) until you re-login. gemini-cli stays
+deferred-by-absence (no CLI on this machine; `~\.gemini` is Antigravity's).
 
 ### AutoClaw2 watchers (AutoClaw2 [23]-[25])
 

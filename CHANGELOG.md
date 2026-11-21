@@ -8,6 +8,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Terminal Agents suite 2: codex (2026-11-21)** — the OpenAI Codex CLI
+  (npm `@openai/codex`) joins as the second Terminal-Agents suite, on the
+  claude-code pilot's exact pattern: ONE env-lever home (`CODEX_HOME`,
+  Phase-0 LIVE-VERIFIED — `--version`, `codex login status`, `codex mcp
+  list` and an exec attempt all honored it while the Primary `~\.codex`
+  stayed byte-identical), light-worker PID markers for attribution, and an
+  evidence-based identity resetter. `launch_codex_light.ps1` (Terminal
+  Agents [6]/[7], gids **133**/**134**): interactive TUI default,
+  `codex exec --skip-git-repo-check` one-shot with STDIN CLOSED (codex
+  exec reads stdin — live-captured), `-Yolo` = `--yolo`, `-Login` verifies
+  `auth.json`. `reset_codex.ps1` (Terminal Agents [8], **gid 135**):
+  deletes `auth.json` + `installation_id` (PROVEN to regenerate fresh) +
+  `cap_sid` + the runtime SQLite stores (`state_*/logs_*/goals_*/queue_*`
+  + wal/shm) + sandbox/tmp junk; `config.toml`, `AGENTS.md`, chats
+  (`sessions\`), memories and thread history PRESERVED; NO TOML/JSON
+  edits at all. `status_all_instances.ps1` + `suite_status_lib.ps1` gain
+  the codex suite (markers-only attribution like claude-code; Terminal
+  Agents [9] = **gid 136**, ceiling 132→136). Honest limits recorded:
+  an unauthenticated `codex exec` FAILS LOUDLY (no claude-style hang) and
+  skills load from the SHARED `~\.agents` store. gemini-cli stays
+  deferred-by-absence (`~\.gemini` is Antigravity's).
+
+### Added
 - **Terminal Agents: the Z.ai gateway lever — claude-code rides the existing GLM plan (2026-11-21)** —
   Z.ai's GLM Coding Plan officially exposes an Anthropic-compatible endpoint
   (`https://api.z.ai/api/anthropic`, documented for Claude Code), so the
