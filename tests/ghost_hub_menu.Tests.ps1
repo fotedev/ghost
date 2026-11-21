@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+﻿# SPDX-License-Identifier: Apache-2.0
 # Parity + schema tests for the GHOST desktop launcher (GHOST.exe hub):
 #   src/desktop/menu.json  - the GUI's menu data (loaded at runtime)
 #   src/desktop/GhostHub.cs - the WinForms shell
@@ -176,7 +176,7 @@ Describe 'menu.json schema' {
             Should -Be 'IDE Resets,ZCode,AutoClaw2,Cline,OpenCode,Maintenance,Terminal Agents'
     }
 
-    It 'every row has a gid in the 1-131 range, unique per section, and no retired/reserved gid' {
+    It 'every row has a gid in the 1-132 range, unique per section, and no retired/reserved gid' {
         foreach ($sec in $Menu.sections) {
             $gids = @($sec.rows | ForEach-Object { $_.gid })
             ($gids | Select-Object -Unique).Count | Should -Be $gids.Count -Because "section '$($sec.name)'"
@@ -185,9 +185,10 @@ Describe 'menu.json schema' {
         $gids.Count | Should -BeGreaterThan 0
         foreach ($g in $gids) {
             $g | Should -BeGreaterThan 0
-            # 131 = the ZCode memory-sync row (gid 131, ZCode [34], appended
-            # 2026-11-21); raise the ceiling when the next gid lands.
-            $g | Should -BeLessOrEqual 131
+            # 132 = the Terminal Agents Z.ai gateway setup row (Terminal
+            # Agents [5], appended 2026-11-21); raise the ceiling when the
+            # next gid lands.
+            $g | Should -BeLessOrEqual 132
             $ReservedGids | Should -Not -Contain $g
         }
     }

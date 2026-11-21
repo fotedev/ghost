@@ -7,6 +7,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Terminal Agents: the Z.ai gateway lever — claude-code rides the existing GLM plan (2026-11-21)** —
+  Z.ai's GLM Coding Plan officially exposes an Anthropic-compatible endpoint
+  (`https://api.z.ai/api/anthropic`, documented for Claude Code), so the
+  claude-code clones no longer need an Anthropic subscription: set
+  `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` once via setx (machine env;
+  the token value is never printed or stored by GHOST) and the gateway IS
+  the auth — no OAuth login, and the launcher's no-login warning goes
+  quiet. `launch_claude_code_light.ps1` gains `-Gateway` (Terminal Agents
+  [5], **gid 132**, ceiling 130→132): prints the exact setx recipe when
+  unset, and runs a REAL verify turn on the c1 home (light-worker marker on)
+  when set. Un-blocks the remaining TA-1 items (real turn + onboarding
+  question) on the user's existing Start Plan — the only user-supervised
+  step left is fetching a Z.ai API key and running the recipe.
+
 ### Verified
 - **TA-1 live acceptance, half-verified (2026-11-21)** — the light-worker
   PID-marker + fleet-view contract VERIFIED LIVE on the claude-code suite

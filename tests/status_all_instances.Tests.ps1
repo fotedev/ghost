@@ -57,22 +57,27 @@ Describe 'All-suites status - menu wiring (gid 126 Maintenance [6], gid 130 Term
         ($resolver.Groups[1].Value -match [regex]::Escape('if "%~1"=="6" set "RESOLVED=126"')) | Should -BeTrue
     }
 
-    It 'Terminal Agents renders [1]-[4] and the resolver maps 1..4 to gids 127..130' {
+    It 'Terminal Agents renders [1]-[5] and the resolver maps the locals to their gids' {
         $block = [regex]::Match($script:Bat, '(?ms)^:TERMINAL\r?\n(.*?)^:')
         ($block.Groups[1].Value -match [regex]::Escape('call :Opt 1 "Launch light worker c1"')) | Should -BeTrue
         ($block.Groups[1].Value -match [regex]::Escape('call :Opt 4 "Instance status"')) | Should -BeTrue
+        ($block.Groups[1].Value -match [regex]::Escape('call :Opt 5 "Z.ai gateway setup - verify"')) | Should -BeTrue
         $resolver = [regex]::Match($script:Bat, '(?ms)^:TerminalOne\r?\n(.*?)^:')
-        foreach ($pair in @(@('1', '127'), @('2', '128'), @('3', '129'), @('4', '130'))) {
+        foreach ($pair in @(@('1', '127'), @('2', '128'), @('3', '129'), @('4', '130'), @('5', '132'))) {
             ($resolver.Groups[1].Value -match [regex]::Escape('if "%~1"=="' + $pair[0] + '" set "RESOLVED=' + $pair[1] + '"')) | Should -BeTrue
         }
     }
 
-    It 'menu.json carries gid 126 in Maintenance and the Terminal Agents section 127-130' {
+    It 'menu.json carries gid 126 in Maintenance and the Terminal Agents section 127-130+132' {
         $maint = @($Menu.sections | Where-Object { $_.name -eq 'Maintenance' })[0]
         (@($maint.rows | Where-Object { $_.gid -eq 126 })).Count | Should -Be 1
         $ta = @($Menu.sections | Where-Object { $_.name -eq 'Terminal Agents' })[0]
         $ta | Should -Not -BeNullOrEmpty
-        (@($ta.rows | ForEach-Object { $_.gid }) -join ',') | Should -Be '127,128,129,130'
+        (@($ta.rows | ForEach-Object { $_.gid }) -join ',') | Should -Be '127,128,129,130,132'
         (@($ta.rows | Where-Object { $_.mode -eq 'confirm-run' })).Count | Should -Be 1 -Because 'the reset row must ask first'
+    }
+
+    It 'GHOST.bat dispatches gid 132 = the launcher -Gateway mode (the Z.ai gateway row)' {
+        ($script:Bat -match [regex]::Escape('if "%~1"=="132" (call :Run "src\windows\launch_claude_code_light.ps1" -Gateway & exit /b)')) | Should -BeTrue
     }
 }

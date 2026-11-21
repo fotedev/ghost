@@ -58,6 +58,33 @@ Describe 'claude-code launcher - script hygiene + contract' {
         ($script:Raw -match [regex]::Escape('Split-Path (Split-Path $PSScriptRoot -Parent) -Parent')) | Should -BeTrue
         ($script:Raw -match [regex]::Escape('Join-Path $PSScriptRoot ''..\tools\suite_status_lib.ps1''')) | Should -BeFalse -Because 'a one-level climb lands in src\tools (nonexistent) and the dot-source dies'
     }
+
+    It '-Gateway exists and masks the token (name + length only - the env-guard convention)' {
+        ($script:Raw -match '\[switch\]\$Gateway') | Should -BeTrue
+        # masked confirmation shape: the token's LENGTH is printed, never its value
+        ($script:Raw -match [regex]::Escape('$tokLen = ([string]$env:ANTHROPIC_AUTH_TOKEN).Length')) | Should -BeTrue
+        # the token VALUE must never be interpolated into any output string
+        ($script:Raw -match '"\$env:ANTHROPIC_AUTH_TOKEN') | Should -BeFalse
+        ($script:Raw -match 'Write-Host \$env:ANTHROPIC_AUTH_TOKEN') | Should -BeFalse
+        ($script:Raw -match 'the value is never printed') | Should -BeTrue
+    }
+
+    It 'the setx recipe prints the Z.ai endpoint and var NAMES (VERIFIED-DOCS provenance)' {
+        ($script:Raw -match [regex]::Escape('setx ANTHROPIC_BASE_URL "https://api.z.ai/api/anthropic"')) | Should -BeTrue
+        ($script:Raw -match [regex]::Escape('setx ANTHROPIC_AUTH_TOKEN "<your-Z.ai-API-key>"')) | Should -BeTrue
+        ($script:Raw -match 'docs\.z\.ai/scenario-example/develop-tools/claude') | Should -BeTrue
+    }
+
+    It 'gateway auth satisfies headless use (the no-login warn is skipped when the pair is set)' {
+        ($script:Raw -match '\$gwAuth = ') | Should -BeTrue
+        ($script:Raw -match '-not \$gwAuth -and') | Should -BeTrue
+        ($script:Raw -match 'HANGS silently') | Should -BeTrue -Because 'the warn teaches the live-captured failure mode'
+    }
+
+    It '-Gateway refuses -Prompt and -Login combinations' {
+        ($script:Raw -match '-Gateway is a setup/verify mode and cannot combine with -Prompt') | Should -BeTrue
+        ($script:Raw -match '-Gateway replaces the OAuth login') | Should -BeTrue
+    }
 }
 
 Describe 'claude-code resetter - script hygiene + planner contract' {
