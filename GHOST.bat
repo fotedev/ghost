@@ -158,6 +158,7 @@ call :Opt 30 "Remove clone shortcuts" "- Desktop + Start menu"
 call :Opt 31 "Rebuild clone Task Manager icons" "- colored rows in Task Manager - run after app updates"
 call :Opt 32 "Clone status" "- all 6 - running, profiles, device-id, pressure"
 call :Opt 33 "Dry-run reset planner" "- All instances - report only"
+call :Opt 34 "Sync clone memories" "- one shared store - junctions clones to Primary"
 echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
@@ -465,6 +466,8 @@ rem [9]; locals 9-29 shifted to 10-30. Gids unchanged - old->new map:
 rem 9-29 -> 10-30 (CHANGELOG 2026-11-10).
 rem Added 2026-11-11: [31] Rebuild clone Task Manager icons = gid 83 (new,
 rem appended in display order - no renumber, gids never move).
+rem Added 2026-11-21: [34] Sync clone memories = gid 131 (new, appended in
+rem display order - no renumber, gids never move).
 set "RESOLVED="
 if "%~1"=="1"  set "RESOLVED=10"
 if "%~1"=="2"  set "RESOLVED=16"
@@ -499,6 +502,7 @@ if "%~1"=="30" set "RESOLVED=72"
 if "%~1"=="31" set "RESOLVED=83"
 if "%~1"=="32" set "RESOLVED=108"
 if "%~1"=="33" set "RESOLVED=109"
+if "%~1"=="34" set "RESOLVED=131"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -659,7 +663,7 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-130; 5 unused = the retired AutoClaw v1
+rem Runs one task by global id (1-131; 5 unused = the retired AutoClaw v1
 rem block 37-40 + 63, kept reserved-dead by the hub-menu test; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
@@ -840,6 +844,7 @@ if "%~1"=="82" (call :Detached "ZCode Primary" "-NoProfile" "src\windows\launch_
 if "%~1"=="83" (call :Run "tools\patch_zcode_exe_identity.ps1" -Target All & exit /b)
 if "%~1"=="108" (call :Run "tools\status_zcode_instances.ps1" & exit /b)
 if "%~1"=="109" (call :RunWith "src\windows\reset_zcode.ps1" "Report only - nothing was written or killed. Close the window when done." "-Target All -DryRun" & exit /b)
+if "%~1"=="131" (call :Run "tools\sync_zcode_memories.ps1" & exit /b)
 if "%~1"=="126" (call :Run "tools\status_all_instances.ps1" & exit /b)
 if "%~1"=="127" (call :Detached "Claude Code Light Worker" "-NoProfile" "src\windows\launch_claude_code_light.ps1" "" "Light worker opened in a separate window - terminal REPL there; exit returns." "Per-instance config home (CLAUDE_CONFIG_DIR). A fresh home has NO login - run the Login row first; -Prompt one-shots need -Yolo for tool approvals." & exit /b)
 if "%~1"=="128" (call :Detached "Claude Code c1 Login" "-NoProfile" "src\windows\launch_claude_code_light.ps1" "-Login" "Login window opened - follow the browser flow for THIS instance's account." "One-time per clone home: it writes the home's own .credentials.json. One credential = one instance." & exit /b)

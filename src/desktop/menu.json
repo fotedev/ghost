@@ -127,7 +127,8 @@
         { "gid": 108, "label": "Clone status", "tail": "- all 6 - running, profiles, device-id, pressure", "mode": "inline", "script": "tools/status_zcode_instances.ps1", "args": [], "notes": [] },
         { "gid": 109, "label": "Dry-run reset planner", "tail": "- All instances - report only", "mode": "inline-note", "script": "src/windows/reset_zcode.ps1", "args": ["-Target", "All", "-DryRun"], "notes": [
           "Report only - nothing was written or killed."
-        ] }
+        ] },
+        { "gid": 131, "label": "Sync clone memories", "tail": "- one shared store - junctions clones to Primary", "mode": "inline", "script": "tools/sync_zcode_memories.ps1", "args": [], "notes": [] }
       ]
     },
     {
