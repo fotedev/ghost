@@ -101,7 +101,12 @@ $CloneHome = Join-Path $UserProfile $cfg.Home
 
 if ($Status) {
     # Read-only row for THIS instance via the shared suite status lib.
-    $lib = Join-Path $PSScriptRoot '..\tools\suite_status_lib.ps1'
+    # PATH NOTE (live-caught 2026-11-21): $PSScriptRoot is <repo>\src\windows -
+    # TWO levels below the repo root - so the lib must climb TWO levels. A
+    # single '..\tools' resolves to <repo>\src\tools (which does not exist)
+    # and the dot-source dies with CommandNotFoundException.
+    $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    $lib = Join-Path $repoRoot 'tools\suite_status_lib.ps1'
     . $lib
     $state = Get-GhostSuiteInstanceState -Suite 'claudecode'
     $row = @($state.Rows | Where-Object { $_.Instance -eq $Instance })[0]
