@@ -689,11 +689,19 @@ powershell -ExecutionPolicy Bypass -File "src\windows\reset_claude_code.ps1" -In
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1" -Suites claudecode  # Terminal Agents [4] — suite instance status
 ```
 
-Honest limits (DERIVED until live acceptance = TA-1): a fresh home has NO
-login, so one-shot runs fail with an auth error until its `-Login` ran (no
-free-model fallback here, unlike the ZCode/OpenCode workers); one-shot tasks
-needing tool approvals fail without `-Yolo`; whether a fresh home needs
-interactive onboarding before headless use is unverified. The resetter
+Honest limits (live acceptance 2026-11-21, half-verified — TA-1): a fresh
+home has NO login, and there is NO free-model fallback here (unlike the
+ZCode/OpenCode workers) — an UNAUTHENTICATED headless `-p` **HANGS silently
+forever** in a non-TTY session (live-captured: 120s+ with zero output,
+waiting on interactive login that never completes; the fleet view honestly
+reports the stuck worker RUNNING via its marker until you kill it). So
+ALWAYS `-Login` first, and a hung one-shot IS the unauthenticated signature.
+One-shot tasks needing tool approvals fail without `-Yolo`; whether a fresh
+home needs interactive onboarding remains untested (gated on a paid
+Anthropic subscription). The marker + fleet-view contract itself is
+VERIFIED LIVE on this suite: a mid-run capture showed
+`c1 RUNNING / light worker / YES (pid …, prompt)` and a clean `stopped`
+after the worker died. The resetter
 scrubs identity + telemetry keys and the OAuth credentials (fresh machineID
 on the next run), sweeps `backups\.claude.json.backup.*`, `state\`,
 `cache\`, `statsig\` and PRESERVES transcripts (`projects\`), `sessions\`,

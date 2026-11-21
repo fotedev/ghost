@@ -33,11 +33,26 @@ All findings below were probed on the dev host; nothing is invented:
 | Headless surface | `claude -p/--print` one-shot; default = interactive REPL (a terminal TUI) | natively headless AND TUI-capable |
 | Permissions | `--dangerously-skip-permissions` (+ `--allow-dangerously-skip-permissions` opt-in flag) | one-shot tasks needing tool approvals fail without `-Yolo` |
 
-**Honest limits (DERIVED until live acceptance = TA-1):** whether a fresh
-home needs interactive onboarding before headless use; how a long REPL
-session behaves under the light-worker marker contract. There is NO
-free-model fallback for claude-code (unlike the ZCode/OpenCode workers) — a
-fresh home fails auth errors until its own `-Login` ran.
+**Honest limits (LIVE acceptance 2026-11-21, half-verified — TA-1):**
+- There is NO free-model fallback for claude-code (unlike the ZCode/OpenCode
+  workers), and the user holds NO paid Anthropic subscription — so until a
+  home's own `-Login` ran (gated on Pro/Max or Console credits), headless
+  use is UNAVAILABLE.
+- **The unauthenticated failure mode is a HANG, not an error** (live-captured
+  2026-11-21): `claude -p "…"` without credentials sits silently forever in a
+  non-TTY session (120s+ observed, zero output — waiting on interactive
+  login/onboarding that can never complete headlessly). The launcher's
+  light-worker marker honestly reports the stuck worker RUNNING the whole
+  time; killing the claude child lets the launcher's cleanup remove the
+  marker and the fleet row returns to `stopped`. Rule: ALWAYS `-Login`
+  first; a hung `-p` IS the unauthenticated signature.
+- **The marker + fleet-view contract is VERIFIED LIVE** on this suite: the
+  mid-run capture showed `c1 RUNNING / signal light worker /
+  YES (pid 15312, prompt)` with the marker JSON on disk, and a clean
+  `stopped` after the child died.
+- Whether a fresh home needs interactive onboarding before headless use
+  remains untested (gated on a subscription) — with the hang above, treat
+  every unauthenticated headless run as unusable regardless.
 
 ## 3. Components
 
@@ -78,9 +93,13 @@ NEVER touched (audited in the plan output): `projects\` transcripts,
 
 ## 5. Open items
 
-- **TA-1 (OPEN, user-supervised)** — live acceptance: one real `-Login` on
-  a clone home + one real `-Prompt` turn; confirm the fleet view shows the
-  worker running via its marker and that the reset + re-login cycle holds.
+- **TA-1 (half-DONE 2026-11-21, remainder gated on an Anthropic account)** —
+  the fleet-view + marker contract is VERIFIED LIVE (see the honest limits
+  above); the remaining items — one real `-Login` on a clone home, one real
+  `-Prompt` turn, the onboarding question, and the reset + re-login cycle —
+  need a subscription the user does not hold. Possible future direction
+  (idea only, not built): an Anthropic-compatible gateway env lever
+  (`ANTHROPIC_BASE_URL`-style) so a clone home could ride an existing plan.
 - **TA-2 (BACKLOG)** — codex (`CODEX_HOME` env lever, TOML config at
   `~\.codex\config.toml`) and gemini-cli: same pattern, own Phase-0 probes
   first (no invented paths).
