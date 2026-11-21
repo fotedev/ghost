@@ -35,7 +35,17 @@ src/windows/                        # current .ps1 resetters (unversioned names)
                                #     transcripts/sessions/history/settings/skills/mcpServers PRESERVED;
                                #     LAYOUT ASYMMETRY: Primary .claude.json at the PROFILE ROOT
                                #     (~\.claude.json) vs clone consolidated INSIDE CLAUDE_CONFIG_DIR -
-                               #     both handled) + ghost_light_marker.ps1 (the ONE shared
+                               #     both handled) + the Z.ai GATEWAY LEVER (2026-11-21, same day):
+                               #     Z.ai's GLM plan officially exposes an Anthropic-compatible
+                               #     endpoint (https://api.z.ai/api/anthropic, VERIFIED-DOCS) -
+                               #     `launch_claude_code_light.ps1 -Gateway` (Terminal Agents [5],
+                               #     gid 132, ceiling 132) prints the setx recipe for
+                               #     ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN when unset and runs a
+                               #     real verify turn when set; gateway auth REPLACES OAuth (no
+                               #     Anthropic subscription needed - the user has none) and the
+                               #     no-login warn is skipped when the pair is set; secrets ride
+                               #     machine-env VAR NAMES only (token value never printed)
+                               #     + ghost_light_marker.ps1 (the ONE shared
                                #     light-worker PID-marker contract: <clone-home>\.ghost-light-worker.json
                                #     written by every light launcher for the whole run, removed on exit;
                                #     readers validate pid liveness + PowerShell/pwsh process-name sanity,

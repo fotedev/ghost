@@ -47,6 +47,7 @@ touches, and emits an audit log plus a self-contained restore script.
 | OpenCode light headless worker (CLI only, clone XDG state) | `launch_opencode_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` / `-Server` / `-Login` / `-StopService`) | — | — |
 | Cline light headless worker (cline-cli.exe on the clone's CLINE_DIR state) | `launch_cline_cli_light.ps1 -Instance c1\|...\|c5` (`-Prompt` one-shot / `-Json` / `-Auth`) | — | — |
 | Claude Code light worker (terminal TUI/CLI, per-instance `CLAUDE_CONFIG_DIR` home) | `launch_claude_code_light.ps1 -Instance c1\|...\|c5` (`-Prompt` one-shot / `-Yolo` / `-Login` / `-Status`) — Terminal Agents [1]/[2] | — | — |
+| Z.ai gateway lever (claude-code rides the existing GLM plan — no Anthropic account; ANTHROPIC_BASE_URL/AUTH_TOKEN via setx) | `launch_claude_code_light.ps1 -Gateway` — Terminal Agents [5] (recipe when unset, real verify turn when set) | — | — |
 | Claude Code identity reset (fresh machineID on next run; transcripts + settings + mcpServers kept) | `reset_claude_code.ps1` (`-Instance c1\|...\|c5` / `-ConfigDir <dir>`, `-DryRun`) — Terminal Agents [3] | — | — |
 | Light-worker PID marker (shared contract: makes headless workers visible to the status tools) | `ghost_light_marker.ps1` (write/read `.ghost-light-worker.json` per clone home; consumed by every light launcher + the status lib) | — | — |
 | All-suites instance status (who is running, every suite + headless workers) | `status_all_instances.ps1` (`-Suites zcode,autoclaw2,cline,opencode,claudecode`) — Maintenance [6] | — | — |

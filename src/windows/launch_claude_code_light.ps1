@@ -39,6 +39,22 @@
 #   -Yolo              one-shot with --dangerously-skip-permissions
 #   -Login             one-time interactive `claude auth login` for THIS home
 #   -Status            read-only instance report (suite_status_lib row)
+#   -Gateway           setup/verify for the Z.ai gateway lever (see below)
+#
+# GATEWAY LEVER (Z.ai GLM Coding Plan - VERIFIED-DOCS, 2026-11-21:
+# docs.z.ai/scenario-example/develop-tools/claude + docs.z.ai/devpack/tool/
+# others): the plan officially exposes an ANTHROPIC-compatible endpoint, so
+# claude-code clones can ride the user's EXISTING Z.ai plan with NO Anthropic
+# subscription and NO OAuth login:
+#   ANTHROPIC_BASE_URL   = https://api.z.ai/api/anthropic
+#   ANTHROPIC_AUTH_TOKEN = <a Z.ai API key from the user's own console>
+# Set both via setx (machine env) once; they flow into every spawned claude
+# automatically. Secrets ride machine-env VAR NAMES only (the
+# sync_mcp_registry env-guard convention) - GHOST never prints or stores the
+# token value. The key is SHARED PLAN ACCESS, not an identity: the
+# per-instance CLAUDE_CONFIG_DIR homes still isolate sessions, history and
+# the generated machineID. -Gateway prints the recipe when unset and runs a
+# real verify turn when set.
 #
 # VISIBILITY: every run mode writes <CloneHome>\.ghost-light-worker.json
 # (launcher pid + mode) for the whole run and removes it on exit - the
@@ -57,6 +73,8 @@ param(
     [switch]$Yolo,
     [switch]$Login,
     [switch]$Status,
+    # Z.ai gateway setup/verify (see the GATEWAY LEVER note above).
+    [switch]$Gateway,
     [switch]$NoLoginWarn
 )
 $ErrorActionPreference = 'Stop'
@@ -121,6 +139,52 @@ if ($Status) {
     exit 0
 }
 
+if ($Gateway) {
+    if (-not [string]::IsNullOrWhiteSpace($Prompt)) { throw "-Gateway is a setup/verify mode and cannot combine with -Prompt." }
+    if ($Login) { throw "-Gateway replaces the OAuth login - do not combine with -Login." }
+    New-Item -ItemType Directory -Path $CloneHome -Force | Out-Null
+    $env:CLAUDE_CONFIG_DIR = $CloneHome
+    Write-Host "=== Z.ai gateway lever - Claude Code $($cfg.Color) ===" -ForegroundColor Cyan
+    $hasUrl = -not [string]::IsNullOrWhiteSpace($env:ANTHROPIC_BASE_URL)
+    $hasToken = -not [string]::IsNullOrWhiteSpace($env:ANTHROPIC_AUTH_TOKEN)
+    if ($hasUrl -and $hasToken) {
+        Write-Host ("[gateway] ANTHROPIC_BASE_URL   : {0} (machine env)" -f $env:ANTHROPIC_BASE_URL)
+        $tokLen = ([string]$env:ANTHROPIC_AUTH_TOKEN).Length
+        Write-Host ("[gateway] ANTHROPIC_AUTH_TOKEN : set ({0} chars - the value is never printed)" -f $tokLen)
+        Write-Host '[gateway] With these set, claude auth login is NOT needed - the gateway IS the auth.' -ForegroundColor Green
+        # Live verify: one real turn on THIS clone home (marker contract on).
+        . (Join-Path $PSScriptRoot 'ghost_light_marker.ps1')
+        $gwMarker = Join-Path $CloneHome '.ghost-light-worker.json'
+        Write-GhostLightMarker -Path $gwMarker -Suite 'claudecode' -Instance $Instance -Mode 'prompt'
+        Write-Host '[gateway] Verify turn: claude -p "Reply with exactly: GHOST GATEWAY OK"' -ForegroundColor Cyan
+        $exit = 1
+        try {
+            & $ClaudeExe -p 'Reply with exactly: GHOST GATEWAY OK'
+            $exit = $LASTEXITCODE
+        } finally {
+            Remove-GhostLightMarker -Path $gwMarker
+        }
+        if ($exit -eq 0) {
+            Write-Host '[gateway] OK - this clone home rides the Z.ai plan through the Anthropic-compatible endpoint.' -ForegroundColor Green
+            exit 0
+        }
+        Write-Host ("[gateway] FAILED - exit {0}. Check the key/plan in the Z.ai console; ANTHROPIC_BASE_URL must be https://api.z.ai/api/anthropic." -f $exit) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host '[gateway] NOT configured - the machine env lacks the gateway pair.' -ForegroundColor Yellow
+    Write-Host '[gateway] One-time recipe (Z.ai GLM Coding Plan; docs.z.ai/scenario-example/develop-tools/claude):' -ForegroundColor Yellow
+    Write-Host '[gateway]   1. Get an API key from your Z.ai console (the GLM Coding Plan page).' -ForegroundColor Yellow
+    Write-Host '[gateway]   2. In a terminal run:' -ForegroundColor Yellow
+    Write-Host '[gateway]        setx ANTHROPIC_BASE_URL "https://api.z.ai/api/anthropic"' -ForegroundColor Yellow
+    Write-Host '[gateway]        setx ANTHROPIC_AUTH_TOKEN "<your-Z.ai-API-key>"' -ForegroundColor Yellow
+    Write-Host '[gateway]   3. Open a NEW terminal (setx does not affect the current one) and run' -ForegroundColor Yellow
+    Write-Host '[gateway]      this script again with -Gateway - it runs a real verify turn.' -ForegroundColor Yellow
+    Write-Host '[gateway] Notes: the key is SHARED PLAN ACCESS, not an identity - the per-instance' -ForegroundColor Yellow
+    Write-Host '[gateway] CLAUDE_CONFIG_DIR homes still isolate sessions, history and identity. The' -ForegroundColor Yellow
+    Write-Host '[gateway] token value is never printed or stored by GHOST (machine env only).' -ForegroundColor Yellow
+    exit 0
+}
+
 if ($Login) {
     if (-not [string]::IsNullOrWhiteSpace($Prompt)) { throw "-Login is an interactive mode and cannot combine with -Prompt." }
     New-Item -ItemType Directory -Path $CloneHome -Force | Out-Null
@@ -156,14 +220,18 @@ $env:CLAUDE_CONFIG_DIR = $CloneHome
 . (Join-Path $PSScriptRoot 'ghost_light_marker.ps1')
 $LightMarkerPath = Join-Path $CloneHome '.ghost-light-worker.json'
 
-# Login check: a fresh home has no .credentials.json - one-shot runs will
-# fail with an auth error, so say so loudly (unless silenced). There is no
-# free-model fallback for claude-code.
-if (-not $NoLoginWarn -and -not (Test-Path -LiteralPath (Join-Path $CloneHome '.credentials.json'))) {
-    Write-Host "[model] WARNING: $($cfg.Color) has no account login - one-shot runs will fail with an auth" -ForegroundColor Yellow
-    Write-Host '[model] error (no free-model fallback for claude-code).' -ForegroundColor Yellow
-    Write-Host '[model] One-time fix: run this script again with -Login (interactive browser flow; it' -ForegroundColor Yellow
-    Write-Host '[model] writes <clone-home>\.credentials.json). One credential = one instance.' -ForegroundColor Yellow
+# Login check: a fresh home has no .credentials.json - and WITHOUT auth a
+# headless one-shot HANGS silently (live-captured 2026-11-21: an
+# unauthenticated `claude -p` waits forever on interactive login it can
+# never complete). Gateway auth satisfies headless use without any
+# .credentials.json, so the warn is skipped when the gateway pair is set.
+$gwAuth = (-not [string]::IsNullOrWhiteSpace($env:ANTHROPIC_BASE_URL)) -and (-not [string]::IsNullOrWhiteSpace($env:ANTHROPIC_AUTH_TOKEN))
+if (-not $NoLoginWarn -and -not $gwAuth -and -not (Test-Path -LiteralPath (Join-Path $CloneHome '.credentials.json'))) {
+    Write-Host "[model] WARNING: $($cfg.Color) has no account login and no gateway pair - a headless one-shot" -ForegroundColor Yellow
+    Write-Host '[model] HANGS silently (no free-model fallback for claude-code; live-captured).' -ForegroundColor Yellow
+    Write-Host '[model] One-time fix - EITHER run this script again with -Gateway (Z.ai GLM plan recipe; no' -ForegroundColor Yellow
+    Write-Host '[model] Anthropic account needed) OR with -Login (interactive browser flow; it writes' -ForegroundColor Yellow
+    Write-Host '[model] <clone-home>\.credentials.json). One credential = one instance.' -ForegroundColor Yellow
 }
 
 if ([string]::IsNullOrWhiteSpace($Cwd)) { $Cwd = $UserProfile }

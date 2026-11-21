@@ -32,6 +32,7 @@ All findings below were probed on the dev host; nothing is invented:
 | Auth | `~\.claude\.credentials.json` (OAuth token) inside the config dir; `claude auth login/logout/status` | reset deletes the file (re-login required); `-Login` runs `auth login` per home |
 | Headless surface | `claude -p/--print` one-shot; default = interactive REPL (a terminal TUI) | natively headless AND TUI-capable |
 | Permissions | `--dangerously-skip-permissions` (+ `--allow-dangerously-skip-permissions` opt-in flag) | one-shot tasks needing tool approvals fail without `-Yolo` |
+| **Gateway lever** | Z.ai's GLM Coding Plan officially exposes an Anthropic-compatible endpoint (`https://api.z.ai/api/anthropic`) documented FOR Claude Code: `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` replace OAuth entirely ([docs.z.ai/scenario-example/develop-tools/claude](https://docs.z.ai/scenario-example/develop-tools/claude), [docs.z.ai/devpack/tool/others](https://docs.z.ai/devpack/tool/others)) | **VERIFIED-DOCS 2026-11-21** (upstream official); live use gated on the user's own Z.ai API key; secrets ride machine-env var names only |
 
 **Honest limits (LIVE acceptance 2026-11-21, half-verified — TA-1):**
 - There is NO free-model fallback for claude-code (unlike the ZCode/OpenCode
@@ -93,13 +94,18 @@ NEVER touched (audited in the plan output): `projects\` transcripts,
 
 ## 5. Open items
 
-- **TA-1 (half-DONE 2026-11-21, remainder gated on an Anthropic account)** —
-  the fleet-view + marker contract is VERIFIED LIVE (see the honest limits
-  above); the remaining items — one real `-Login` on a clone home, one real
-  `-Prompt` turn, the onboarding question, and the reset + re-login cycle —
-  need a subscription the user does not hold. Possible future direction
-  (idea only, not built): an Anthropic-compatible gateway env lever
-  (`ANTHROPIC_BASE_URL`-style) so a clone home could ride an existing plan.
+- **TA-1 (half-DONE 2026-11-21; the real turn is now UN-BLOCKED via the
+  Z.ai gateway lever)** — the fleet-view + marker contract is VERIFIED LIVE
+  (see the honest limits above). The remaining items — one real `-Prompt`
+  turn, the onboarding question, and the reset + re-login cycle — needed an
+  Anthropic subscription the user does not hold, SO the **gateway lever
+  shipped (2026-11-21)**: set `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
+  + `ANTHROPIC_AUTH_TOKEN=<Z.ai API key>` once via setx and Terminal Agents
+  [5] runs a real verify turn on c1 riding the EXISTING Z.ai plan — no
+  Anthropic account, no OAuth login. With the pair set the launcher's
+  no-login warning goes quiet (gateway auth satisfies headless use). The
+  user-supervised step is fetching the key from the Z.ai console and
+  running the two setx commands (the recipe is printed by [5] when unset).
 - **TA-2 (BACKLOG)** — codex (`CODEX_HOME` env lever, TOML config at
   `~\.codex\config.toml`) and gemini-cli: same pattern, own Phase-0 probes
   first (no invented paths).

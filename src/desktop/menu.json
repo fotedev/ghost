@@ -384,7 +384,10 @@
           "One-time per clone home: it writes the home's own .credentials.json. One credential = one instance."
         ] },
         { "gid": 129, "label": "Reset Primary identity", "tail": "- ~\\.claude + ~\\.claude.json - chats + settings kept - asks first", "mode": "confirm-run", "confirmTitle": "Claude Code reset - Primary identity (~\\.claude + ~\\.claude.json)", "confirmText": "Removes the identity + telemetry keys and the OAuth credentials so the next run generates a FRESH machineID. Transcripts, sessions, history, settings, skills + mcpServers are PRESERVED. Re-login required afterwards. Clone-home resets: run the script with -Instance cN.", "script": "src/windows/reset_claude_code.ps1", "args": [], "notes": [] },
-        { "gid": 130, "label": "Instance status", "tail": "- read-only - Primary + c1..c5 - light-worker markers", "mode": "inline", "script": "tools/status_all_instances.ps1", "args": ["-Suites", "claudecode"], "notes": [] }
+        { "gid": 130, "label": "Instance status", "tail": "- read-only - Primary + c1..c5 - light-worker markers", "mode": "inline", "script": "tools/status_all_instances.ps1", "args": ["-Suites", "claudecode"], "notes": [] },
+        { "gid": 132, "label": "Z.ai gateway setup - verify", "tail": "- rides the GLM plan - no Anthropic account needed", "mode": "inline", "script": "src/windows/launch_claude_code_light.ps1", "args": ["-Gateway"], "notes": [
+          "Prints the one-time setx recipe when ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN are unset, and runs a real verify turn on c1 when they are (the token value is never printed)."
+        ] }
       ]
     }
   ]

@@ -7,7 +7,7 @@ continuous local numbering (IDE Resets [1]-[8] / ZCode Multi-Instance &
 Clones [1]-[34] / System & GHOST Maintenance [1]-[6] / AutoClaw2
 Multi-Instance & Clones [1]-[25] / Cline Multi-Instance & Clones
 [1]-[23] / OpenCode Multi-Instance & Clones [1]-[27] / Terminal Agents
-[1]-[4]); chain several tasks in one
+[1]-[5]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
 from the main menu type a sub-path like `2 1 3 4` (open ZCode, run its
 [1] [3] [4]) or a bare global id — this page cites menu positions as
@@ -712,7 +712,21 @@ powershell -ExecutionPolicy Bypass -File "src\windows\reset_claude_code.ps1"    
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_claude_code.ps1" -DryRun       # plan only - writes nothing
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_claude_code.ps1" -Instance c1  # reset clone home c1
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\status_all_instances.ps1" -Suites claudecode  # Terminal Agents [4] — suite instance status
+powershell -NoProfile -ExecutionPolicy Bypass -File "src\windows\launch_claude_code_light.ps1" -Gateway  # Terminal Agents [5] — Z.ai gateway recipe / verify
 ```
+
+**The Z.ai gateway lever (no Anthropic account needed)** — Z.ai's GLM Coding
+Plan officially exposes an Anthropic-compatible endpoint
+([docs.z.ai/scenario-example/develop-tools/claude](https://docs.z.ai/scenario-example/develop-tools/claude)),
+so a claude-code clone can ride an EXISTING Z.ai plan:
+`setx ANTHROPIC_BASE_URL "https://api.z.ai/api/anthropic"` +
+`setx ANTHROPIC_AUTH_TOKEN "<your-Z.ai-API-key>"`, then Terminal Agents [5]
+runs a real verify turn. With the pair set, `claude auth login` is NOT
+needed (the gateway IS the auth) and the launcher's no-login warning goes
+quiet. Secrets ride machine-env var names only — GHOST never prints or
+stores the token value; the key is shared plan access, not an identity (the
+per-instance `CLAUDE_CONFIG_DIR` homes still isolate sessions/history and
+the generated `machineID`).
 
 Honest limits (live acceptance 2026-11-21, half-verified — TA-1): a fresh
 home has NO login, and there is NO free-model fallback here (unlike the
@@ -720,7 +734,9 @@ ZCode/OpenCode workers) — an UNAUTHENTICATED headless `-p` **HANGS silently
 forever** in a non-TTY session (live-captured: 120s+ with zero output,
 waiting on interactive login that never completes; the fleet view honestly
 reports the stuck worker RUNNING via its marker until you kill it). So
-ALWAYS `-Login` first, and a hung one-shot IS the unauthenticated signature.
+authenticate FIRST — via the Z.ai gateway pair (Terminal Agents [5], no
+Anthropic account needed) or `-Login` (needs a subscription) — and a hung
+one-shot IS the unauthenticated signature.
 One-shot tasks needing tool approvals fail without `-Yolo`; whether a fresh
 home needs interactive onboarding remains untested (gated on a paid
 Anthropic subscription). The marker + fleet-view contract itself is
