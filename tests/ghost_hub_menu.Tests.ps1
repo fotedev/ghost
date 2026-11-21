@@ -176,7 +176,7 @@ Describe 'menu.json schema' {
             Should -Be 'IDE Resets,ZCode,AutoClaw2,Cline,OpenCode,Maintenance,Terminal Agents'
     }
 
-    It 'every row has a gid in the 1-130 range, unique per section, and no retired/reserved gid' {
+    It 'every row has a gid in the 1-131 range, unique per section, and no retired/reserved gid' {
         foreach ($sec in $Menu.sections) {
             $gids = @($sec.rows | ForEach-Object { $_.gid })
             ($gids | Select-Object -Unique).Count | Should -Be $gids.Count -Because "section '$($sec.name)'"
@@ -185,10 +185,9 @@ Describe 'menu.json schema' {
         $gids.Count | Should -BeGreaterThan 0
         foreach ($g in $gids) {
             $g | Should -BeGreaterThan 0
-            # 130 = the Terminal Agents rows (claude-code worker/login/reset/
-            # status, appended 2026-11-21); raise the ceiling when the next
-            # gid lands.
-            $g | Should -BeLessOrEqual 130
+            # 131 = the ZCode memory-sync row (gid 131, ZCode [34], appended
+            # 2026-11-21); raise the ceiling when the next gid lands.
+            $g | Should -BeLessOrEqual 131
             $ReservedGids | Should -Not -Contain $g
         }
     }

@@ -17,6 +17,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   TERMINAL_AGENTS_SPEC §2/§5, cli.md honest limits.
 
 ### Added
+- **ZCode clone memory sync — one shared memory store for all instances
+  (2026-11-21)** — each clone's `.zcode\cli\memories` is a private seed-time
+  copy, so memory saved in one instance never reached the others (live
+  measurement: five clone stores of 233 markdown files each vs 957 on the
+  Primary, MEMORY.md index pointers diverged by hundreds of lines). New
+  `tools/sync_zcode_memories.ps1` (ZCode submenu [34], gid 131) applies the
+  skills-sync junction pattern to the memory stores: newer-wins robocopy
+  merge clone→Primary (`/E /XO`, Primary never downgraded; junk
+  `_backup-merge-*` / `memories.pre-sync-*` dirs excluded everywhere), a
+  UTF-8-safe MEMORY.md index union with a mojibake peel, whole-dir
+  move-aside backup (`memories.pre-sync-<ts>`), junction onto the Primary
+  store, verify-after everywhere (junction LinkType + resolved target +
+  content probe; index writes re-read + compared), JSONL audit at
+  `<CloneHome>\.zcode\memory-sync-audit.jsonl`. Encoding is the whole point:
+  the peel exists because the 2026-11-21 live incident showed PS 5.1
+  `Get-Content` ANSI defaults re-appending UTF-8 index lines as layered
+  mojibake (one real index: 7749 lines holding 845 unique) — the lib
+  (`tools/zcode_memory_merge.ps1`, pure + unit-tested) reads/writes explicit
+  no-BOM UTF-8, peels CP1252-as-UTF-8 layers with an EXCEPTION-fallback
+  encoder (bare GetEncoding(1252) BEST-FITS unmappable chars like Arabic
+  alef to '?', silently corrupting them — caught by the fixtures), and
+  preserves single-line arrays through the return unwrap. Guards mirror the
+  asset sync: RUNNING instances skipped unless `-AllowRunning` (owner
+  override), unseeded homes skipped, already-junctioned stores verified +
+  idempotent-skipped. `-Target Second|Third|Fourth|Fifth|Sixth|All`,
+  `-DryRun`. Derived from the live all-with-all sync performed 2026-11-21;
+  live acceptance on a fresh multi-clone machine pending. Docs: cli.md
+  "ZCode clone memory sync", getting-started ZCode [34], README task table.
 - **Terminal Agents family + the claude-code pilot (2026-11-21)** — GHOST's
   home for TERMINAL coding agents (CLIs whose interactive REPL already is a
   terminal TUI, so no desktop isolation layer is needed). Pilot = claude-code

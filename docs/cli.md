@@ -4,7 +4,7 @@ Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 **`./ghost.sh`** (Linux). This page is the direct-command cheat sheet for
 scripts and CI. `GHOST.bat` groups its tasks into seven submenus with
 continuous local numbering (IDE Resets [1]-[8] / ZCode Multi-Instance &
-Clones [1]-[33] / System & GHOST Maintenance [1]-[6] / AutoClaw2
+Clones [1]-[34] / System & GHOST Maintenance [1]-[6] / AutoClaw2
 Multi-Instance & Clones [1]-[25] / Cline Multi-Instance & Clones
 [1]-[23] / OpenCode Multi-Instance & Clones [1]-[27] / Terminal Agents
 [1]-[4]); chain several tasks in one
@@ -307,6 +307,31 @@ change — idle-guarded, never mid-turn — so the currently open session gets
 the new MCP immediately. `-InstallAutostart` writes a hidden Startup-folder
 shortcut (like the taskbar watcher); single-instance via a named mutex plus
 a startup process scan. Log: `%LOCALAPPDATA%\watch-zcode-mcp-sync\mcp-sync.log`.
+
+## ZCode clone memory sync (per-user, no admin needed)
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sync_zcode_memories.ps1" [-Target Second|Third|Fourth|Fifth|Sixth|All] [-DryRun] [-AllowRunning]
+```
+
+Each clone's `~\ZCode<Color>Home\.zcode\cli\memories` is a private copy
+created at seed time, so memory saved in one instance never reaches the
+others (2026-11-21 live measurement: five clone stores of 233 markdown files
+each vs 957 on the Primary). This syncs the per-project memory stores the
+same way the skills sync handles `~\.agents`: a newer-wins robocopy merge
+(clone → Primary, `/E /XO` — the Primary is never downgraded; junk
+`_backup-merge-*` / `memories.pre-sync-*` dirs are excluded everywhere), a
+UTF-8-safe `MEMORY.md` index union with a mojibake peel
+(`tools\zcode_memory_merge.ps1` — never PS 5.1 `Get-Content` ANSI defaults,
+which re-append UTF-8 lines as layered mojibake), then the clone store is
+moved aside whole (`memories.pre-sync-<ts>`) and junctioned onto the Primary
+store, so all instances literally share one memory set from then on.
+Verify-after on every write; audit at
+`<CloneHome>\.zcode\memory-sync-audit.jsonl`; superseded Primary indexes are
+backed up under `~\.zcode\memory-sync-backups\<ts>\`. A RUNNING instance is
+skipped with a warning unless `-AllowRunning` is passed; an unseeded home is
+skipped; already-junctioned stores are verified + idempotent-skipped.
+ZCode [34].
 ZCode [20] (resident) / ZCode [21] (one-shot + live apply). You normally never
 start it yourself: every clone launch (launcher step 2e) starts it hidden
 and installs its autostart shortcut if missing — install-and-forget.

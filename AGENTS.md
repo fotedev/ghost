@@ -576,6 +576,40 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     <CloneHome>\.zcode\asset-sync-audit.jsonl; -Target
                                    #     Second|Third|Fourth|Fifth|Sixth|All + -DryRun + -McpOnly;
                                    #     child-process only (exit codes — never dot-source));
+                                   #   sync_zcode_memories.ps1 — junctions every clone's
+                                   #     cli\memories onto the Primary store so ALL instances
+                                   #     share one memory set (ZCode submenu [34], gid 131;
+                                   #     2026-11-21: clone stores were private seed-time copies,
+                                   #     233 md files each vs 957 on the Primary, index pointers
+                                   #     diverged by hundreds of lines). Per clone: newer-wins
+                                   #     robocopy /E /XO clone→Primary (Primary never downgraded;
+                                   #     junk _backup-merge-* / memories.pre-sync-* dirs excluded
+                                   #     everywhere), UTF-8-safe MEMORY.md index union with mojibake
+                                   #     peel, whole-dir move-aside backup (memories.pre-sync-<ts>),
+                                   #     junction → Primary, verify-after everywhere + JSONL audit
+                                   #     at <CloneHome>\.zcode\memory-sync-audit.jsonl. RUNNING
+                                   #     instance = SKIP + WARN unless -AllowRunning (owner override);
+                                   #     unseeded home = SKIP; already-junctioned = verified +
+                                   #     idempotent skip. -Target Second|Third|Fourth|Fifth|Sixth|All
+                                   #     + -DryRun + -AllowRunning; derived from the 2026-11-21 live
+                                   #     all-with-all sync, fresh-machine live acceptance pending);
+                                   #   zcode_memory_merge.ps1 — pure merge core for the memory sync
+                                   #     (ConvertFrom-MojibakeLayers / Get-MemoryIndexLines /
+                                   #     Merge-MemoryIndexLines / Write-MemoryIndexLines): the
+                                   #     single copy of the index-union invariant + the mojibake
+                                   #     peel, unit-tested by tests/zcode_memory_merge.Tests.ps1
+                                   #     (18 fixtures; all mojibake built PROGRAMMATICALLY so the
+                                   #     test file stays pure-ASCII). Encoding is the whole point:
+                                   #     PS 5.1 Get-Content defaults to ANSI — reading UTF-8 index
+                                   #     files and re-appending layers the mojibake one level deeper
+                                   #     per pass (2026-11-21 live incident: one index reached 7749
+                                   #     lines holding 845 unique); the lib is explicit no-BOM UTF-8
+                                   #     everywhere and NEVER touches Get-Content/Add-Content. Trap
+                                   #     recorded in the fixtures: bare .NET GetEncoding(1252)
+                                   #     BEST-FITS unmappable chars (Arabic alef → '?') instead of
+                                   #     throwing — the lib uses an EXCEPTION-fallback encoder, and
+                                   #     single-line reads return an array (return ,$lines, the
+                                   #     PowerShell return-unwrap guard);
                                    #   zcode_mcp_merge.ps1 — pure merge core extracted from
                                    #     sync_zcode_assets.ps1 (ConvertTo-DeepHashtable /
                                    #     Test-DeepEqual / Write-JsonNoBom / Invoke-McpMerge): the
@@ -1823,7 +1857,15 @@ Each IDE script is a **thin target manifest**: dot-source utils -> Assert-Admin 
   [19]/[20], gids 68/69; [18] gid 67 = one-shot `-McpOnly`) keeps every
   clone converged on every Primary change; a synced definition lands on
   each instance's next chat with no restart. `tools/zcode_mcp_merge.ps1`
-  is the single (unit-tested) copy of the merge logic. Install-and-forget:
+  is the single (unit-tested) copy of the merge logic. Memory drift is solved
+  the same way: `tools/sync_zcode_memories.ps1` (ZCode [34], gid 131;
+  2026-11-21) newer-wins-merges each clone's `cli\memories` into the Primary
+  and junctions the clone onto the shared store, so all instances literally
+  share one memory set; `tools/zcode_memory_merge.ps1` is the single
+  (unit-tested) copy of the index-union + mojibake-peel logic — explicit
+  no-BOM UTF-8 only, because PS 5.1 `Get-Content` ANSI defaults re-appended
+  UTF-8 index lines as layered mojibake in the 2026-11-21 live incident.
+  Install-and-forget:
   launcher step 2e (2026-10-27) ensures the MCP sync + taskbar identity
   watchers are RUNNING (hidden) and installs their Startup .lnks once on
   every clone launch — mutex-probe guard, best-effort, never blocks the
