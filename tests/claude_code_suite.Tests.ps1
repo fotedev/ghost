@@ -53,6 +53,11 @@ Describe 'claude-code launcher - script hygiene + contract' {
         ($script:Raw -match 'suite_status_lib\.ps1') | Should -BeTrue
         ($script:Raw -match "-Suite 'claudecode'") | Should -BeTrue
     }
+
+    It '-Status climbs TWO levels to the repo root for the lib (live-caught 2026-11-21: src\windows is two deep)' {
+        ($script:Raw -match [regex]::Escape('Split-Path (Split-Path $PSScriptRoot -Parent) -Parent')) | Should -BeTrue
+        ($script:Raw -match [regex]::Escape('Join-Path $PSScriptRoot ''..\tools\suite_status_lib.ps1''')) | Should -BeFalse -Because 'a one-level climb lands in src\tools (nonexistent) and the dot-source dies'
+    }
 }
 
 Describe 'claude-code resetter - script hygiene + planner contract' {
