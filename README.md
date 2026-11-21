@@ -50,7 +50,9 @@ touches, and emits an audit log plus a self-contained restore script.
 | Z.ai gateway lever (claude-code rides the existing GLM plan — no Anthropic account; ANTHROPIC_BASE_URL/AUTH_TOKEN via setx) | `launch_claude_code_light.ps1 -Gateway` — Terminal Agents [5] (recipe when unset, real verify turn when set) | — | — |
 | Claude Code identity reset (fresh machineID on next run; transcripts + settings + mcpServers kept) | `reset_claude_code.ps1` (`-Instance c1\|...\|c5` / `-ConfigDir <dir>`, `-DryRun`) — Terminal Agents [3] | — | — |
 | Light-worker PID marker (shared contract: makes headless workers visible to the status tools) | `ghost_light_marker.ps1` (write/read `.ghost-light-worker.json` per clone home; consumed by every light launcher + the status lib) | — | — |
-| All-suites instance status (who is running, every suite + headless workers) | `status_all_instances.ps1` (`-Suites zcode,autoclaw2,cline,opencode,claudecode`) — Maintenance [6] | — | — |
+| Codex light worker (terminal TUI/CLI, per-instance `CODEX_HOME` state home) | `launch_codex_light.ps1 -Instance c1\|...\|c5` (`-Prompt` one-shot via `codex exec`, stdin closed / `-Yolo` / `-Login` / `-Status`) — Terminal Agents [6]/[7] | — | — |
+| Codex identity reset (fresh `installation_id` on next run; config.toml + AGENTS.md + chats + memories kept) | `reset_codex.ps1` (`-Instance c1\|...\|c5` / `-CodexDir <dir>`, `-DryRun`) — Terminal Agents [8] | — | — |
+| All-suites instance status (who is running, every suite + headless workers) | `status_all_instances.ps1` (`-Suites zcode,autoclaw2,cline,opencode,claudecode,codex`) — Maintenance [6] | — | — |
 | Suite status classifier lib (shared copy-exe/marker/lock/title rules behind the status tools) | `suite_status_lib.ps1` (`Get-GhostSuiteInstanceState -Suite <s>`; injectable snapshots for tests) | — | — |
 | Reset AutoClaw2 (Primary + clones, chats/work kept) | `reset_autoclaw2.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — | — |
 | Reset Cline (Primary + clones, chats/tasks kept) | `reset_cline.ps1` (`-Target Primary\|c1\|...\|c5\|All`, `-KeepLogin`, `-DryRun`) | — | — |
@@ -192,8 +194,10 @@ ghost/
 │   │               #   + reset_autoclaw2/reset_cline/reset_opencode.ps1
 │   │               #   (per-clone identity resets, chats/work preserved)
 │   │               #   + the Terminal Agents pilot (launch_claude_code_light.ps1,
-│   │               #   reset_claude_code.ps1) + ghost_light_marker.ps1 (the shared
-│   │               #   light-worker PID-marker contract)
+│   │               #   reset_claude_code.ps1) + the codex suite
+│   │               #   (launch_codex_light.ps1, reset_codex.ps1) +
+│   │               #   ghost_light_marker.ps1 (the shared light-worker
+│   │               #   PID-marker contract)
 │   ├── linux/      # .sh resetters + id_reset_common.sh
 │   │               #   + the ZCode Linux clone layer (launch_zcode_clone.sh,
 │   │               #   launch_zcode_cli_light.sh, reset_zcode.sh --instance,

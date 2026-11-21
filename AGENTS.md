@@ -49,7 +49,25 @@ src/windows/                        # current .ps1 resetters (unversioned names)
                                #     light-worker PID-marker contract: <clone-home>\.ghost-light-worker.json
                                #     written by every light launcher for the whole run, removed on exit;
                                #     readers validate pid liveness + PowerShell/pwsh process-name sanity,
-                               #     so a hard-killed worker reads as stale, never as running)
+                               #     so a hard-killed worker reads as stale, never as running;
+                               #     Suite ValidateSet now covers codex too)
+                               #   2026-11-21 TERMINAL AGENTS SUITE 2 (codex): launch_codex_light.ps1
+                               #     (-Instance c1..c5; TUI default/-Prompt via `codex exec --skip-git-repo-check`
+                               #     with STDIN CLOSED [codex exec reads stdin - live-verified]/-Yolo=--yolo/
+                               #     -Login/-Status; the ONE isolation lever = CODEX_HOME, Phase-0
+                               #     LIVE-VERIFIED 2026-11-21: --version/login status/mcp list/exec all
+                               #     honored it and the Primary ~\.codex stayed byte-identical; a real run
+                               #     auto-generates installation_id + 6 SQLite stores + .sandbox*/.tmp;
+                               #     --version shape = `codex-cli N.N.N`; unauthenticated exec FAILS LOUDLY
+                               #     - no claude-style hang; skills come from the SHARED ~\.agents store)
+                               #     + reset_codex.ps1 (USER-SCOPE only - never elevates, never kills;
+                               #     W1-9 dry-run planner; auth.json + installation_id [PROVEN to
+                               #     regenerate] + cap_sid + runtime sqlite state_*/logs_*/goals_*/queue_*
+                               #     + wal/shm + version.json/.sandbox_migration/.sandbox/.tmp sweeps;
+                               #     NO layout asymmetry - Primary and clones consolidate inside the home;
+                               #     config.toml/AGENTS.md/.codex-global-state.json/history.jsonl/
+                               #     session_index.jsonl/sessions/memories_*/thread_history_* PRESERVED;
+                               #     a rerun after a real reset hits the fresh-home guard loudly)
 src/linux/                     # .sh scripts (id_reset_common.sh + per-IDE resetters);
                                #   2026-11-17 DEEPENING WAVE toward the Windows store maps:
                                #   reset_zcode v0.2 (+~/.zcode/v2 telemetry-state deviceMid,

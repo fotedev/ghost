@@ -387,7 +387,17 @@
         { "gid": 130, "label": "Instance status", "tail": "- read-only - Primary + c1..c5 - light-worker markers", "mode": "inline", "script": "tools/status_all_instances.ps1", "args": ["-Suites", "claudecode"], "notes": [] },
         { "gid": 132, "label": "Z.ai gateway setup - verify", "tail": "- rides the GLM plan - no Anthropic account needed", "mode": "inline", "script": "src/windows/launch_claude_code_light.ps1", "args": ["-Gateway"], "notes": [
           "Prints the one-time setx recipe when ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN are unset, and runs a real verify turn on c1 when they are (the token value is never printed)."
-        ] }
+        ] },
+        { "gid": 133, "label": "Launch light worker c1", "tail": "- CODEX_HOME per-instance - terminal TUI or codex exec one-shot", "mode": "detached", "title": "Codex CLI Light Worker", "psFlags": "-NoProfile", "script": "src/windows/launch_codex_light.ps1", "args": [], "notes": [
+          "Light worker opened in a separate window - terminal TUI there; exit returns.",
+          "Per-instance state home via CODEX_HOME. A fresh home has NO login - run the Login row first; one-shot tasks that write files need -Yolo."
+        ] },
+        { "gid": 134, "label": "Login c1 account", "tail": "- one-time browser login for the c1 home", "mode": "detached", "title": "Codex CLI c1 Login", "psFlags": "-NoProfile", "script": "src/windows/launch_codex_light.ps1", "args": ["-Login"], "notes": [
+          "Login window opened - follow the browser flow for THIS instance's account.",
+          "One-time per clone home: it writes the home's own auth.json. One credential = one instance."
+        ] },
+        { "gid": 135, "label": "Reset Primary identity", "tail": "- ~\\.codex - config + chats + memories kept - asks first", "mode": "confirm-run", "confirmTitle": "Codex reset - Primary identity (~\\.codex)", "confirmText": "Removes the credential (auth.json), the install id and the runtime SQLite stores so the next run generates a FRESH identity. config.toml, AGENTS.md, chats/sessions, memories and thread history are PRESERVED. Re-login required afterwards. Clone-home resets: run the script with -Instance cN.", "script": "src/windows/reset_codex.ps1", "args": [], "notes": [] },
+        { "gid": 136, "label": "Instance status", "tail": "- read-only - Primary + c1..c5 - light-worker markers", "mode": "inline", "script": "tools/status_all_instances.ps1", "args": ["-Suites", "codex"], "notes": [] }
       ]
     }
   ]

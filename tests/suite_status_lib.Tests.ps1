@@ -20,9 +20,9 @@ Describe 'Suite status lib - script hygiene + surface' {
         ($script:Raw -match "(?<!`r)`n") | Should -BeFalse
     }
 
-    It 'covers all five suites (zcode, autoclaw2, cline, opencode, claudecode)' {
+    It 'covers all six suites (zcode, autoclaw2, cline, opencode, claudecode, codex)' {
         $names = Get-GhostSuiteNames
-        foreach ($s in @('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode')) {
+        foreach ($s in @('zcode', 'autoclaw2', 'cline', 'opencode', 'claudecode', 'codex')) {
             $names | Should -Contain $s
         }
     }
@@ -47,6 +47,23 @@ Describe 'Suite status lib - script hygiene + surface' {
             $inst.LightWorker | Should -BeTrue
         }
         $script:GhostSuites['claudecode'].WmiFamily | Should -Match 'node'
+    }
+
+    It 'codex is markers-only attribution (CODEX_HOME is env-only, never in argv)' {
+        $script:GhostSuites['codex'].Attribution | Should -Be 'markers-only'
+        foreach ($inst in $script:GhostSuites['codex'].Instances) {
+            $inst.Markers.Count | Should -Be 0 -Because "codex has no command-line clone markers ($($inst.Key))"
+            $inst.LightWorker | Should -BeTrue
+            $inst.CloneHomeRel | Should -Match '^CodexClonesHome\\c[1-5]$'
+        }
+        $script:GhostSuites['codex'].WmiFamily | Should -Match 'codex'
+        # the family filter must narrow the wide node% family to codex-shaped
+        # processes only: the npm-shim cmdline path or the native exe NAME
+        # (the classifier matches Name OR CommandLine)
+        ('node "C:\U\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js" exec "hi"' -match $script:GhostSuites['codex'].CmdlineFamilyFilter) | Should -BeTrue
+        ('codex.exe' -match $script:GhostSuites['codex'].CmdlineFamilyFilter) | Should -BeTrue
+        ('codex' -match $script:GhostSuites['codex'].CmdlineFamilyFilter) | Should -BeTrue
+        ('node "C:\U\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js"' -match $script:GhostSuites['codex'].CmdlineFamilyFilter) | Should -BeFalse
     }
 
     It 'zcode defs match the frozen instance table (colors + copy exe names)' {
@@ -163,6 +180,35 @@ Describe 'Suite status lib - functional classifier (fake snapshots)' {
             # unclaimed family procs are the user's own usage
             $primary = @($state.Rows | Where-Object { $_.Instance -eq 'Primary' })[0]
             $primary.State | Should -Be 'stopped'
+        }
+        finally {
+            Remove-GhostLightMarker -Path $markerPath
+            Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'codex: an alive light-worker marker claims its launcher child processes (markers-only attribution)' {
+        $tmpDir = Join-Path $env:TEMP ("ghost-cx-test-" + [guid]::NewGuid().ToString('N'))
+        $cloneHome = Join-Path $tmpDir 'CodexClonesHome\c1'
+        New-Item -ItemType Directory -Path $cloneHome -Force | Out-Null
+        . (Join-Path $PSScriptRoot "..\src\windows\ghost_light_marker.ps1")
+        $markerPath = Join-Path $cloneHome '.ghost-light-worker.json'
+        Write-GhostLightMarker -Path $markerPath -Suite 'codex' -Instance 'c1' -Mode 'prompt'
+        $procs = @(
+            (New-FakeProc -Id 610 -Parent $PID -Name 'codex.exe' -Cmd '"C:\...\@openai\codex-win32-x64\vendor\bin\codex.exe" exec "task"'),
+            (New-FakeProc -Id 611 -Parent $PID -Name 'node.exe' -Cmd 'node "C:\Users\X\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"')
+        )
+        try {
+            $state = Get-GhostSuiteInstanceState -Suite codex -Procs $procs -Windows @() -UserProfileOverride $tmpDir
+            $c1 = @($state.Rows | Where-Object { $_.Instance -eq 'c1' })[0]
+            $c1.State | Should -Be 'RUNNING'
+            $c1.Signal | Should -Be 'light worker'
+            $c1.Pids | Should -Contain 610
+            $c1.Pids | Should -Contain 611
+            $c1.LightWorker | Should -Match 'YES \(pid'
+            $primary = @($state.Rows | Where-Object { $_.Instance -eq 'Primary' })[0]
+            $primary.State | Should -Be 'stopped'
+            $primary.Note | Should -Match 'default-profile codex usage'
         }
         finally {
             Remove-GhostLightMarker -Path $markerPath

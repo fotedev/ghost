@@ -19,7 +19,7 @@ if defined ESC (echo %ESC%[92m[ 3] %ESC%[97mSystem ^& GHOST Maintenance %ESC%[90
 if defined ESC (echo %ESC%[92m[ 4] %ESC%[97mAutoClaw2 Multi-Instance ^& Clones %ESC%[90m- launchers, shortcuts%ESC%[0m) else echo [ 4] AutoClaw2 Multi-Instance ^& Clones - launchers, shortcuts
 if defined ESC (echo %ESC%[92m[ 5] %ESC%[97mCline Multi-Instance ^& Clones %ESC%[90m- launchers, clone status%ESC%[0m) else echo [ 5] Cline Multi-Instance ^& Clones - launchers, clone status
 if defined ESC (echo %ESC%[92m[ 6] %ESC%[97mOpenCode Multi-Instance ^& Clones %ESC%[90m- launchers, clone-home patch%ESC%[0m) else echo [ 6] OpenCode Multi-Instance ^& Clones - launchers, clone-home patch
-if defined ESC (echo %ESC%[92m[ 7] %ESC%[97mTerminal Agents %ESC%[90m- claude-code light workers + resets%ESC%[0m) else echo [ 7] Terminal Agents - claude-code light workers + resets
+if defined ESC (echo %ESC%[92m[ 7] %ESC%[97mTerminal Agents %ESC%[90m- claude-code + codex light workers + resets%ESC%[0m) else echo [ 7] Terminal Agents - claude-code + codex light workers + resets
 echo.
 call :Opt U "Check for updates / update GHOST" "- from GitHub"
 call :Opt 0 "Exit" ""
@@ -393,6 +393,12 @@ call :Opt 3 "Reset Primary identity" "- ~\.claude + ~\.claude.json - chats + set
 call :Opt 4 "Instance status" "- read-only - Primary + c1..c5 - light-worker markers"
 call :Opt 5 "Z.ai gateway setup - verify" "- rides the GLM plan - no Anthropic account needed"
 echo.
+call :Div "Codex CLI"
+call :Opt 6 "Launch light worker c1" "- CODEX_HOME per-instance - terminal TUI or codex exec one-shot"
+call :Opt 7 "Login c1 account" "- one-time browser login for the c1 home"
+call :Opt 8 "Reset Primary identity" "- ~\.codex - config + chats + memories kept - asks first"
+call :Opt 9 "Instance status" "- read-only - Primary + c1..c5 - light-worker markers"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto TERMINAL_PROMPT
@@ -659,13 +665,17 @@ if "%~1"=="2" set "RESOLVED=128"
 if "%~1"=="3" set "RESOLVED=129"
 if "%~1"=="4" set "RESOLVED=130"
 if "%~1"=="5" set "RESOLVED=132"
+if "%~1"=="6" set "RESOLVED=133"
+if "%~1"=="7" set "RESOLVED=134"
+if "%~1"=="8" set "RESOLVED=135"
+if "%~1"=="9" set "RESOLVED=136"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-132; 5 unused = the retired AutoClaw v1
+rem Runs one task by global id (1-136; 5 unused = the retired AutoClaw v1
 rem block 37-40 + 63, kept reserved-dead by the hub-menu test; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
@@ -681,7 +691,9 @@ rem Cline light worker + its CLI account login, 2026-11-17; 126 = the
 rem all-suites instance status (Maintenance [6]); 127-130 = the Terminal
 rem Agents submenu - claude-code light worker + login + reset + status,
 rem appended 2026-11-21; 131 = the ZCode memory-sync row (ZCode [34]);
-rem 132 = the Terminal Agents Z.ai gateway setup row, appended 2026-11-21).
+rem 132 = the Terminal Agents Z.ai gateway setup row, appended 2026-11-21;
+rem 133-136 = the Terminal Agents Codex CLI rows (light worker + login +
+rem reset + status), appended 2026-11-21).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -854,6 +866,10 @@ if "%~1"=="128" (call :Detached "Claude Code c1 Login" "-NoProfile" "src\windows
 if "%~1"=="129" (call :ConfirmRun "Claude Code reset - Primary identity (~\.claude + ~\.claude.json)" "src\windows\reset_claude_code.ps1" "Removes the identity + telemetry keys and the OAuth credentials so the next run generates a FRESH machineID. Transcripts, sessions, history, settings, skills + mcpServers are PRESERVED. Re-login required afterwards. Clone-home resets: run the script with -Instance cN." & exit /b)
 if "%~1"=="130" (call :Run "tools\status_all_instances.ps1" -Suites claudecode & exit /b)
 if "%~1"=="132" (call :Run "src\windows\launch_claude_code_light.ps1" -Gateway & exit /b)
+if "%~1"=="133" (call :Detached "Codex CLI Light Worker" "-NoProfile" "src\windows\launch_codex_light.ps1" "" "Light worker opened in a separate window - terminal TUI there; exit returns." "Per-instance state home (CODEX_HOME). A fresh home has NO login - run the Login row first; one-shot tasks that write files need -Yolo." & exit /b)
+if "%~1"=="134" (call :Detached "Codex CLI c1 Login" "-NoProfile" "src\windows\launch_codex_light.ps1" "-Login" "Login window opened - follow the browser flow for THIS instance's account." "One-time per clone home: it writes the home's own auth.json. One credential = one instance." & exit /b)
+if "%~1"=="135" (call :ConfirmRun "Codex reset - Primary identity (~\.codex)" "src\windows\reset_codex.ps1" "Removes the credential (auth.json), the install id and the runtime SQLite stores so the next run generates a FRESH identity. config.toml, AGENTS.md, chats/sessions, memories and thread history are PRESERVED. Re-login required afterwards. Clone-home resets: run the script with -Instance cN." & exit /b)
+if "%~1"=="136" (call :Run "tools\status_all_instances.ps1" -Suites codex & exit /b)
 call :UnknownTask "%~1"
 exit /b
 
