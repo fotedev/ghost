@@ -596,7 +596,7 @@ and confirm its UI lists the sessions after the next launch.
 ### OpenCode config sync + suite watchers (OpenCode [21]-[25])
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sync_opencode_config.ps1" -Target All         # [21] — live sync (running clones skipped)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sync_opencode_config.ps1" -Target All         # [21] — live sync (running clones synced live; -SkipRunning opts out)
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\watch_opencode_config_sync.ps1"               # [22] — resident watcher (syncs on Primary change)
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\watch_suite_taskbar.ps1" -Suite opencode      # [23] — taskbar identity watcher
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\diagnose_suite_pressure.ps1" -Suite opencode  # [24] — read-only pressure report
@@ -607,9 +607,17 @@ Definitions-only Primary → clone sync of the `mcp` + provider blocks in
 `opencode.jsonc` (Primary definitions win, clone-local `enabled` toggles
 survive, clone-only entries stay; apiKey-shaped values coming FROM the
 Primary are scrubbed loudly — each clone fills its own key). A
-lockfile-held clone is RUNNING and is skipped; a config-less clone is
-skipped (its first run is anonymous). The resident watcher stat-guards the
-Primary config and spawns the sync on every change (log at
+lockfile-held clone is RUNNING and is **synced live**: the v2.3.2 desktop
+service re-reads its config on change (CS-7 Phase-0 LIVE-VERIFIED
+2026-11-22 — the probe fired `config.updated` in the clone's service log
+within ~2s of an external edit, for both in-place and atomic writes), and
+after the write the tool polls the clone's own
+`data\opencode\log\opencode.log` for the fresh event (`[live] reload
+VERIFIED`; "NOT observed" is a WARN only — the v1 npm CLI binary is
+startup-only and new sessions always boot fresh). `-SkipRunning` restores
+the old skip. A config-less clone is skipped (its first run is anonymous).
+The resident watcher stat-guards the Primary config and spawns the sync on
+every change (log at
 `%LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log`). The taskbar
 watcher re-stamps window AUMIDs and heals the Primary lnk; the pressure
 report is the suite twin of the ZCode freeze diagnostic.

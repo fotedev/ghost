@@ -10,8 +10,9 @@ failed sync warns and never blocks the launch). **CS-1 v2 shipped
 `tools\watch_opencode_config_sync.ps1` (mutex `OpencodeConfigSyncWatcher`,
 log `%LOCALAPPDATA%\watch-opencode-config-sync\config-sync.log`,
 launch-ensure step [2c/5], GHOST.bat OpenCode [21]/[22] = gids 110/111,
-19 static Pester tests) — deliberately NO `-ApplyLive` (a running clone's
-re-read timing is unverified; TASK_BACKLOG). §3's "no resident watcher in
+19 static Pester tests) — the "-ApplyLive deliberately absent" note is now
+SUPERSEDED by the CS-7 verdict below (§Phase-0, 2026-11-22): live-apply is
+the CHILD'S DEFAULT, no flag needed. §3's "no resident watcher in
 v1" is superseded by this entry. In-session acceptance ran
 the plan's §5 items 1/3/4/5 on %TEMP% fixtures (dry-run zero-write; the
 written clone config AND the audit JSONL Select-String clean for the
@@ -21,6 +22,35 @@ runs stay user-supervised. Source: OPENCODE_CLONES_SPEC.md §7 future work —
 definitions-only Primary→clone sync (`sync_zcode_assets` pattern) is future
 work — never copy live secrets wholesale without a scrub design." This doc IS
 that scrub design. Backlog ID: CS-1.
+
+## Phase-0 (CS-7): does a RUNNING clone re-read its config? — LIVE-VERIFIED YES
+
+Controlled probe, 2026-11-22, on clone c1 running its OWN v2.3.2 service
+(staged at `c1\desktop\cli\2.3.2-x64\opencode-cli.exe serve --service`),
+whose log (`c1\data\opencode\log\opencode.log`) shows the directory
+watcher armed on `c1\config\opencode` at boot:
+
+| Question | Evidence | Verdict |
+|---|---|---|
+| External edit → live reload? | a real content change (4 `enabled` flips) fired `config.updated` in the clone's service log **within ~2s** | **LIVE-VERIFIED** for the v2.3.2 desktop service |
+| Does the write STYLE matter? | both an in-place truncate+write AND the atomic temp+`File.Replace` swap fired the reload (~2s each) | both safe — the atomic writer ships |
+| The v1 npm CLI (1.18.32) | 280 `message=loading` lines ALL within ~0.4s of boot, none after | startup-only — new sessions boot fresh; a long-lived TUI needs a restart |
+| The historical Primary "bursts" (23 `config.updated` events) | each carries `event.location.directory` = a PROJECT dir — workspace-scoped session events, coincident with (not caused by) the swarm tool's config writes | NOT evidence of global-config reload |
+| Service sharing | a launched clone JOINS an already-running 2.3.2 service on port 28894 (c1 reused the Primary's orphaned daemon; after stopping it, c1 spawned its own) | recorded as the new TASK_BACKLOG CS-10 spike (shared-service isolation scope unverified) |
+
+Probe pitfalls recorded (do not repeat): the first two "zero events" runs
+were EDITOR NO-OPS — a rename-style `sed -i` write vs. the service's
+PS-formatted content (`"enabled":  true`, double space), then a
+single-space pattern vs. double-space — a live probe must DIFF CONTENT,
+never trust the editor's success.
+
+Consequence shipped (TASK_BACKLOG CS-7): `sync_opencode_config.ps1` syncs
+RUNNING clones BY DEFAULT (with the live-reload verify-after polling the
+clone's own log; `-SkipRunning` opt-out; `-ReloadProbeSeconds`, default 8),
+the watcher needs no flag, the merge write went ATOMIC, and the merge
+containers were fixed to the real shape (`mcp.servers.*` nested + direct
+`mcp.*` entries — the flat walk let the Primary's whole `servers` block
+silently drop clone-only servers inside it).
 
 ## 1. Verified ground truth (do not contradict)
 

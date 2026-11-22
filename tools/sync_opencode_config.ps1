@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   OpenCode definitions-only Primary -> clone config sync (CS-1,
@@ -12,20 +12,31 @@
   already has survives.
 
 .DESCRIPTION
-  Per-clone flow: lockfile-held = RUNNING -> SKIP + WARN; config file
-  missing -> SKIP (first run - the clone starts anonymous by design, the
-  sync never creates one); backup config-pre-sync-<ts>.json into the clone
-  home; merge via tools\opencode_config_merge.ps1; verify-after re-read +
-  deep-compare; JSONL audit at <CloneHome>\config-sync-audit.jsonl (paths +
-  key NAMES only - never values, so no secret can leak into the audit).
-  The Primary is opened READ-ONLY and its file hash is re-checked after
-  every run (plan acceptance 5).
+  Per-clone flow (the CS-7 Phase-0 verdict, LIVE-VERIFIED 2026-11-22):
+  lockfile-held = RUNNING -> SYNCED TOO (a running desktop clone's service
+  re-reads its config on change - controlled live probe on c1: the
+  service's own directory watcher armed, an external edit fired
+  config.updated within ~2s, for BOTH write styles - in-place AND the
+  atomic temp+Replace swap; the v1 npm CLI binary is startup-only, so its
+  sessions pick the sync up at next boot). -SkipRunning restores the old
+  skip as an opt-out. After a verified write to a RUNNING clone the child
+  POLLS the clone's own service log for a fresh `config.updated` event
+  (the live-reload verify-after; -ReloadProbeSeconds, default 8) and
+  reports VERIFIED / NOT observed. Config file missing -> SKIP (first run
+  - the clone starts anonymous by design, the sync never creates one);
+  backup config-pre-sync-<ts>.json into the clone home; merge via
+  tools\opencode_config_merge.ps1; verify-after re-read + deep-compare;
+  JSONL audit at <CloneHome>\config-sync-audit.jsonl (paths + key NAMES
+  only - never values, so no secret can leak into the audit). Writes are
+  ATOMIC (temp + File.Replace - the merge core's CS-7 hardening, proven
+  live to still fire the service's reload), so a service reading during
+  the write never sees a torn file. The Primary is opened READ-ONLY and
+  its file hash is re-checked after every run (plan acceptance 5).
 
   Placement: launcher pre-launch step in src\windows\launch_opencode_clone.ps1
-  (the primary path - runs BEFORE the clone starts, so there is no
-  running-instance race there) plus this manual one-shot (-Instance/-Target).
-  A failed sync warns and never blocks the launch (the launcher ignores the
-  child exit code beyond a warning line).
+  (the primary path - runs BEFORE the clone starts) plus this manual
+  one-shot (-Instance/-Target). A failed sync warns and never blocks the
+  launch (the launcher ignores the child exit code beyond a warning line).
 
   -DryRun prints the would-apply entry list and writes nothing.
 
@@ -33,6 +44,7 @@
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_opencode_config.ps1 -Instance c1
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_opencode_config.ps1 -Target All
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_opencode_config.ps1 -Target All -DryRun
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync_opencode_config.ps1 -Target All -SkipRunning
 #>
 param(
     [ValidatePattern('^c[1-5]$')]
@@ -42,6 +54,14 @@ param(
     [string]$Target,
 
     [switch]$DryRun,
+
+    # CS-7 opt-out: skip lockfile-held (running) clones instead of syncing
+    # them live (the default since the live-reload verification).
+    [switch]$SkipRunning,
+
+    # Seconds to poll a running clone's service log for the config.updated
+    # event after a verified write (the live-reload verify-after).
+    [int]$ReloadProbeSeconds = 8,
 
     # Fixture-testing overrides (the probe suite points these at %TEMP%).
     [string]$PrimaryConfig,
@@ -115,7 +135,21 @@ foreach ($inst in $instances) {
     if (-not (Test-Path -LiteralPath $cloneHome)) { Write-Host "[skip] $inst`: no clone home."; continue }
 
     # Running clone: the per-clone single-instance lockfile (same probe shape
-    # as the launcher's Test-LockfileHeld) - held = RUNNING -> SKIP + WARN.
+    # as the launcher's Test-LockfileHeld) - held = RUNNING.
+    # CS-7 Phase-0 VERDICT (LIVE-VERIFIED 2026-11-22, controlled probe on
+    # clone c1 running its own v2.3.2 service with the config directory
+    # watcher armed): an externally edited opencode config fired
+    # `config.updated` within ~2s, for BOTH write styles - in-place AND the
+    # atomic temp+Replace swap. A running desktop clone therefore picks the
+    # sync up LIVE; the default below is to sync it (with the reload probe
+    # as the verify-after). -SkipRunning restores the old skip as an opt-out
+    # (the v1 npm CLI binary is startup-only - its long-lived sessions do
+    # not re-read; new sessions always boot fresh). Probe history: the
+    # first two "zero events" runs were EDITOR NO-OPS (a rename-style sed
+    # -i write vs. the service's PS-formatted content, then a single-space
+    # pattern vs. double-space) - a live probe must diff content, not trust
+    # the editor's success.
+    $running = $false
     if (Test-Path -LiteralPath $lockfile) {
         $lockHeld = $false
         try {
@@ -123,8 +157,12 @@ foreach ($inst in $instances) {
             $fs.Close()
         } catch { $lockHeld = $true }
         if ($lockHeld) {
-            Write-Warning "$inst appears RUNNING (lockfile held) - SKIPPED (mirroring sync_zcode_assets semantics; the launcher's pre-launch step covers it next launch)."
-            continue
+            $running = $true
+            if ($SkipRunning) {
+                Write-Warning "$inst appears RUNNING (lockfile held) - SKIPPED (-SkipRunning requested; the launcher's pre-launch step covers it next launch)."
+                continue
+            }
+            Write-Host "[$inst] RUNNING (lockfile held) - syncing live (the v2.3.2 service re-reads config on change; CS-7 Phase-0 LIVE-VERIFIED 2026-11-22)."
         }
     }
 
@@ -179,14 +217,43 @@ foreach ($inst in $instances) {
             $exitCode = 1
         }
 
+        # CS-7 live-reload verify-after: for a RUNNING clone, poll its own
+        # service log for a FRESH config.updated event (more than the
+        # pre-write baseline). Absence is a WARN, never a failure - a
+        # startup-only binary (v1 npm CLI) simply picks the sync up at next
+        # boot/session.
+        $liveReload = $false
+        if ($running -and $verifyOk) {
+            $svcLog = Join-Path $cloneHome 'data\opencode\log\opencode.log'
+            $baseline = 0
+            if (Test-Path -LiteralPath $svcLog) {
+                $baseline = @(Select-String -LiteralPath $svcLog -Pattern 'config.updated' -SimpleMatch -ErrorAction SilentlyContinue).Count
+            }
+            $deadline = (Get-Date).AddSeconds($ReloadProbeSeconds)
+            while ((Get-Date) -lt $deadline) {
+                Start-Sleep -Seconds 1
+                if (Test-Path -LiteralPath $svcLog) {
+                    $now = @(Select-String -LiteralPath $svcLog -Pattern 'config.updated' -SimpleMatch -ErrorAction SilentlyContinue).Count
+                    if ($now -gt $baseline) { $liveReload = $true; break }
+                }
+            }
+            if ($liveReload) {
+                Write-Host "  [live] reload VERIFIED - config.updated fired in the clone's service log." -ForegroundColor Green
+            } else {
+                Write-Warning "$inst`: [live] reload NOT observed within ${ReloadProbeSeconds}s - the binary may be startup-only; next session/launch picks it up."
+            }
+        }
+
         $audit = [ordered]@{
-            ts        = (Get-Date).ToString('o')
-            instance  = $inst
-            config    = $cfgPath
-            backup    = $backupPath
-            changed   = @($result.Changed)
-            scrubbed  = @($result.Scrubbed)   # key NAMES only - never values
-            verified  = $verifyOk
+            ts         = (Get-Date).ToString('o')
+            instance   = $inst
+            config     = $cfgPath
+            backup     = $backupPath
+            changed    = @($result.Changed)
+            scrubbed   = @($result.Scrubbed)   # key NAMES only - never values
+            verified   = $verifyOk
+            running    = $running
+            liveReload = $liveReload
         }
         $auditPath = Join-Path $cloneHome 'config-sync-audit.jsonl'
         [System.IO.File]::AppendAllText($auditPath, (($audit | ConvertTo-Json -Depth 10 -Compress) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
