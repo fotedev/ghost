@@ -87,6 +87,31 @@ would identify a device or account, it does not get committed.
 4. Open a PR using the template; CI must be green.
 5. Update `CHANGELOG.md` for user-visible changes.
 
+## Releases
+
+Releases are fully automated by `.github/workflows/release.yml` — pushing a
+`vX.Y.Z` tag is the only manual step:
+
+1. Finalize the release notes: rename `## [Unreleased]` in `CHANGELOG.md`
+   to `## [X.Y.Z] - <date>` via a squash PR (the section's content becomes
+   the release notes verbatim; the next wave re-adds a fresh
+   `[Unreleased]` heading at the top).
+2. After the PR merges, from an up-to-date checkout of `main`:
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+3. The workflow then: runs the full CI gates → guards that a
+   `## [X.Y.Z]` section exists in `CHANGELOG.md` (a tag without one FAILS
+   the release — write the section first, delete + re-push the tag) →
+   builds `GHOST.exe` (in-box `csc`) and `ghost-vX.Y.Z.zip` (a plain
+   `git archive`, mirroring what `tools/update_ghost.ps1` fetches) →
+   publishes the GitHub Release with the CHANGELOG section as notes →
+   verify-after that both assets landed.
+
+Verify a release with `gh release view vX.Y.Z` — it must carry both
+`ghost-vX.Y.Z.zip` and `GHOST.exe`.
+
 ## License
 
 By contributing you agree that your contributions are licensed under the
