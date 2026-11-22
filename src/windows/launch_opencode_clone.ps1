@@ -328,6 +328,45 @@ if (Test-Path -LiteralPath $ExeIdentityTool) {
 # too (engine v2: the app's main bundle is ESM - no require - so the
 # injected resolver reads ONLY argv). Each flag is quoted as ONE argument so
 # spaced values stay single argv entries; the injected parser strips quotes.
+#
+# CS-10 SERVICE-SHARING GUARD + XDG PREEMPTION (2026-11-23): OpenCode v2.3.2
+# introduced a machine-global background-service registry at
+# `$XDG_STATE_HOME\opencode\service.json` ({id, version, url, pid, password},
+# /api/info basic-auth health probe) and the desktop main entry calls
+# Service.discover() at startup as PURE READ-ONLY REUSE - a live compatible
+# record means the instance JOINS that service instead of spawning its own.
+# The service process owns the data home (its spawn env carries the XDG
+# redirection; clients talk HTTP), so a joining clone's sessions land in the
+# service's data home = the Primary's ~/.local/share/opencode/opencode.db -
+# a clone-isolation break. The patched in-app clone-home branch sets
+# XDG_STATE_HOME too, but evidently runs AFTER the startup discover() read
+# (observed live: c1 joined the Primary's daemon while the patch was
+# applied and the flag was on argv). The launcher therefore PREEMPTS at the
+# process-env level: the four XDG_* levers are set here (Start-Process
+# inherits them), so EVERY in-app read - whenever it runs - resolves the
+# clone's own state home, finds no registry, and spawns the clone's OWN
+# service (the v1-era per-instance model the suite's isolation was built
+# on). Idempotent with the in-app branch (same values). The levers are
+# restored after the spawn so the launcher's other helper children keep the
+# machine-default env.
+$svcRegistry = Join-Path $env:USERPROFILE '.local\state\opencode\service.json'
+if (Test-Path -LiteralPath $svcRegistry) {
+    try {
+        $svcRec = Get-Content -LiteralPath $svcRegistry -Raw -Encoding UTF8 | ConvertFrom-Json
+        $svcAlive = $false
+        if ($svcRec.pid) {
+            $svcProc = Get-Process -Id $svcRec.pid -ErrorAction SilentlyContinue
+            $svcAlive = ($null -ne $svcProc -and $svcProc.ProcessName -like 'opencode*')
+        }
+        if ($svcAlive) {
+            Write-Warning ("Primary OpenCode service is RUNNING (pid {0}, {1}, v{2}) - the clone will spawn its OWN isolated service (XDG preempted); its sessions stay clone-local. Do not mistake the shared daemon for clone activity." -f $svcRec.pid, $svcRec.url, $svcRec.version)
+        } else {
+            Write-Host ("[launch] stale machine service registry (pid {0} not running) - the clone spawns its own service." -f $svcRec.pid)
+        }
+    } catch {
+        Write-Host "[launch] could not read the machine service registry ($svcRegistry): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
 Write-Host "[4/5] Launching OpenCode $($InstanceDefs[$Instance].Color) clone ..."
 $installDir = Split-Path $ExePath -Parent
 $launchArgs = @(
@@ -336,8 +375,29 @@ $launchArgs = @(
 )
 if ($identity.title) { $launchArgs += "`"--opencode-clone-title=$($identity.title)`"" }
 if ($identity.iconPath) { $launchArgs += "`"--opencode-clone-icon=$($identity.iconPath)`"" }
-$proc = Start-Process -FilePath $LaunchExe -WorkingDirectory $installDir -ArgumentList $launchArgs -PassThru
+# The XDG preempt: saved + restored so only the spawned app sees them.
+# Subdir names = the frozen clone layout (data/config/cache/state - the same
+# dirs the launcher pre-creates and the patch's in-app branch sets).
+$XdgMap = @{
+    'XDG_DATA_HOME'   = 'data'
+    'XDG_CONFIG_HOME' = 'config'
+    'XDG_CACHE_HOME'  = 'cache'
+    'XDG_STATE_HOME'  = 'state'
+}
+$savedXdg = @{}
+foreach ($xdg in $XdgMap.Keys) {
+    $savedXdg[$xdg] = [Environment]::GetEnvironmentVariable($xdg)
+    [Environment]::SetEnvironmentVariable($xdg, (Join-Path $CloneHome $XdgMap[$xdg]))
+}
+try {
+    $proc = Start-Process -FilePath $LaunchExe -WorkingDirectory $installDir -ArgumentList $launchArgs -PassThru
+} finally {
+    foreach ($xdg in $XdgMap.Keys) {
+        [Environment]::SetEnvironmentVariable($xdg, $savedXdg[$xdg])
+    }
+}
 Write-Host ("      started pid {0}" -f $proc.Id)
+Write-Host ("      XDG preempted: {0} (data/config/cache/state -> the clone home; the app spawns its OWN service)." -f $CloneHome) -ForegroundColor Green
 
 Write-Host "[5/5] Verify-after-launch (up to 60s)..."
 $deadline = (Get-Date).AddSeconds(60)

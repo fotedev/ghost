@@ -507,7 +507,7 @@ reset would touch without touching it.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "tools\patch_opencode_clone_home.ps1"   # once; close ALL OpenCode windows (or pass -WaitForClose like menu row [10])
-powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1
+powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1     # XDG preempted — the clone always spawns its OWN service (CS-10)
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c2   # ... c5
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1 -Status
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clones_all.ps1"

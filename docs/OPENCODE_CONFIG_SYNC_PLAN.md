@@ -36,7 +36,7 @@ watcher armed on `c1\config\opencode` at boot:
 | Does the write STYLE matter? | both an in-place truncate+write AND the atomic temp+`File.Replace` swap fired the reload (~2s each) | both safe — the atomic writer ships |
 | The v1 npm CLI (1.18.32) | 280 `message=loading` lines ALL within ~0.4s of boot, none after | startup-only — new sessions boot fresh; a long-lived TUI needs a restart |
 | The historical Primary "bursts" (23 `config.updated` events) | each carries `event.location.directory` = a PROJECT dir — workspace-scoped session events, coincident with (not caused by) the swarm tool's config writes | NOT evidence of global-config reload |
-| Service sharing | a launched clone JOINS an already-running 2.3.2 service on port 28894 (c1 reused the Primary's orphaned daemon; after stopping it, c1 spawned its own) | recorded as the new TASK_BACKLOG CS-10 spike (shared-service isolation scope unverified) |
+| Service sharing | a launched clone JOINS an already-running 2.3.2 service (the machine-global state-home registry + join-at-startup — 28894 was just the daemon's ephemeral port, not a constant) | **SETTLED by CS-10** (TASK_BACKLOG + [OPENCODE_CLONES_SPEC](OPENCODE_CLONES_SPEC.md) §3.8.1): the joining client's sessions land in the SERVICE's data home; the launcher now preempts the four XDG levers at process-env level (own service, clone-local data — live-verified) |
 
 Probe pitfalls recorded (do not repeat): the first two "zero events" runs
 were EDITOR NO-OPS — a rename-style `sed -i` write vs. the service's

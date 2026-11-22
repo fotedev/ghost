@@ -1705,6 +1705,16 @@ launch_opencode_clone.ps1          # OpenCode desktop clone launcher -Instance c
                                    #   runs the definitions-only config sync child BEFORE the clone
                                    #   starts (a failed sync warns and never blocks; a config-less
                                    #   first run is skipped — the clone starts anonymous),
+                                   #   2026-11-23 CS-10 GUARD + XDG PREEMPT: v2.3.2 keeps a
+                                   #   machine-global service registry (~/.local/state\opencode\
+                                   #   service.json) and the app JOINS a live service at startup
+                                   #   before the in-app XDG branch runs — the launcher now sets the
+                                   #   four XDG_* levers at PROCESS-ENV level around Start-Process
+                                   #   (saved/restored) so the clone always spawns its OWN
+                                   #   clone-local service (live-verified: Primary db untouched) +
+                                   #   a read-only registry guard (WARN when the recorded pid is
+                                   #   alive; the registry tail = TASK_BACKLOG CS-10 PARTIAL-DONE,
+                                   #   spec §3.8.1),
                                    #   writes .opencode-clone-identity
                                    #   .json + .opencode-clone-icon.ico fresh each launch (json =
                                    #   -Status introspection only), detached start + verify-after

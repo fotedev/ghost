@@ -27,6 +27,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   history + the service-sharing discovery recorded in
   `docs/OPENCODE_CONFIG_SYNC_PLAN.md` §Phase-0 and TASK_BACKLOG (new CS-10
   spike).
+- **CS-10: the OpenCode v2.3.2 service-sharing isolation break — fixed
+  per-launch (2026-11-23)** — v2.3.2 keeps a machine-global background
+  service registry (`$XDG_STATE_HOME ?? ~/.local/state\opencode\service.json`)
+  and the desktop app JOINS a live compatible service at startup BEFORE the
+  patched clone-home branch can set `XDG_STATE_HOME`; since the service
+  process owns the data home, a joining clone's sessions landed in the
+  Primary's `opencode.db` (db-verified). `launch_opencode_clone.ps1` now
+  sets the four `XDG_*` levers at PROCESS-ENV level around `Start-Process`
+  (saved/restored) — the clone always spawns its OWN clone-local service
+  (live-verified: the Primary db byte-untouched with the Primary daemon
+  up) — plus a read-only machine-registry guard (WARN when the recorded
+  pid is alive; GHOST never writes/deletes the registry). REMAINING (spec
+  §3.8.1 + TASK_BACKLOG CS-10): the service's registry write goes to the
+  MACHINE-DEFAULT registry (last-writer-wins — the next app launch joins
+  the most recent service, the mirror break); the complete fix needs a
+  per-clone registry path via the asar patch (next spike).
 
 ## [1.7.0] - 2026-11-22
 
