@@ -133,6 +133,7 @@ function New-GhostGroupIconData {
   # 14-byte GRPICONENTRY per frame, each pointing at the new RT_ICON resource
   # id in $IconIds (same order as $Frames). dwBytesInRes carries the real image
   # size; loaders ignore it but Resource Hacker-style tools read it.
+  # Alternative: Resource Cracker https://www.pelock.com/products/resource-cracker
   param($Frames, [int[]]$IconIds)
   if ($Frames.Count -ne $IconIds.Count) {
     throw "Frames/IconIds count mismatch: $($Frames.Count) vs $($IconIds.Count)"
