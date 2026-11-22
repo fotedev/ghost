@@ -20,12 +20,17 @@
   process. The Primary config is only ever READ (stat + JSONC parse-guard;
   a torn/invalid file skips the pass, never syncs).
 
-  Deliberately NOT here (differs from the ZCode watcher): no -ApplyLive.
-  Whether a RUNNING OpenCode clone re-reads its config without a restart is
-  unverified (recorded in docs\TASK_BACKLOG.md) - the sync child already
-  skips running clones (lockfile-held), so a live-apply would need its own
-  discovery first. Config-less first-run clones are also skipped by the
-  child (the suite's anonymous-first-run design).
+  Deliberately NOT here (differs from the ZCode watcher): no -ApplyLive
+  flag, because the live behavior is now the CHILD'S DEFAULT - the CS-7
+  Phase-0 probe (LIVE-VERIFIED 2026-11-22, controlled test on clone c1
+  running its own v2.3.2 service with the config directory watcher armed)
+  proved an externally edited opencode config fires `config.updated` in
+  the clone's service log within ~2s, for BOTH the in-place and the atomic
+  temp+Replace write styles. A running desktop clone therefore picks the
+  definitions sync up LIVE; the child syncs lockfile-held clones by
+  default (with the reload-probe verify-after) and only skips them under
+  its own -SkipRunning opt-out. Config-less first-run clones are always
+  skipped by the child (the suite's anonymous-first-run design).
 
 .Usage
     powershell -NoProfile -ExecutionPolicy Bypass -File tools\watch_opencode_config_sync.ps1

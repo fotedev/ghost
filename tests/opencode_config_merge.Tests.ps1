@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+﻿# SPDX-License-Identifier: Apache-2.0
 # Unit tests for tools/opencode_config_merge.ps1 - the pure merge core of the
 # OpenCode definitions-only Primary -> clone config sync (CS-1,
 # docs\OPENCODE_CONFIG_SYNC_PLAN.md). The module is a pure function library
@@ -168,6 +168,46 @@ Describe 'Invoke-OcConfigMerge (the secret scrub - decision D2)' {
     }
 }
 
+Describe 'Invoke-OcConfigMerge (the REAL nested shape - the CS-7-wave live-caught bug)' {
+    # The app stores servers NESTED under mcp.servers (live-verified
+    # 2026-11-22 on the Primary + clone homes), and the Primary can also
+    # carry DIRECT mcp entries alongside the nested block. The old flat-only
+    # walk treated the WHOLE servers block as one entry and let the
+    # Primary's copy silently drop clone-only servers inside it.
+
+    It 'clone-only servers INSIDE mcp.servers survive (the live-caught drop)' {
+        $primary = New-RootConfig -Entries @{ mcp = @{ servers = (New-Map -Entries @{ supabase = (New-McpEntry -Enabled $true) }) } }
+        $clone   = New-RootConfig -Entries @{ mcp = @{ servers = (New-Map -Entries @{ cloneOnly = (New-McpEntry -Enabled $true) }) } }
+        $r = Invoke-OcConfigMerge -PrimaryConfig $primary -CloneConfig $clone
+        ($r.Changed | Where-Object { $_ -match '^mcp\.servers\.' }) | Should -Not -BeNullOrEmpty
+        # Primary's definition landed AND the clone-only server survived
+        $clone.mcp.servers.supabase.enabled | Should -Be $true
+        $clone.mcp.servers.cloneOnly | Should -Not -BeNullOrEmpty
+        $clone.mcp.servers.cloneOnly.enabled | Should -Be $true
+    }
+
+    It 'a DIRECT mcp entry (codeagentswarm-tasks shape) merges alongside the nested block' {
+        $primary = New-RootConfig -Entries @{ mcp = @{
+            'codeagentswarm-tasks' = (New-McpEntry -Enabled $true)
+            servers = (New-Map -Entries @{ swarm = (New-McpEntry -Enabled $true) })
+        } }
+        $clone = New-RootConfig -Entries @{ mcp = @{ servers = (New-Map -Entries @{}) } }
+        $r = Invoke-OcConfigMerge -PrimaryConfig $primary -CloneConfig $clone
+        $r.Changed | Should -Contain 'mcp.codeagentswarm-tasks'
+        $r.Changed | Should -Contain 'mcp.servers.swarm'
+        $clone.mcp.'codeagentswarm-tasks' | Should -Not -BeNullOrEmpty
+        $clone.mcp.servers.swarm.enabled | Should -Be $true
+    }
+
+    It 'clone-local enabled toggles survive INSIDE mcp.servers' {
+        $primary = New-RootConfig -Entries @{ mcp = @{ servers = (New-Map -Entries @{ swarm = (New-McpEntry -Enabled $true) }) } }
+        $clone   = New-RootConfig -Entries @{ mcp = @{ servers = (New-Map -Entries @{ swarm = (New-McpEntry -Enabled $false -Token 'tok_clone') }) } }
+        $r = Invoke-OcConfigMerge -PrimaryConfig $primary -CloneConfig $clone
+        $r.Changed | Should -Contain 'mcp.servers.swarm'
+        $clone.mcp.servers.swarm.enabled | Should -Be $false -Because 'the clone-local toggle always survives'
+    }
+}
+
 Describe 'sync contract (file-level, TestDrive)' {
     It 'Write-JsonNoBom round-trips and the written file has no BOM' {
         $cfg = New-RootConfig -Entries @{ mcp = @{ supabase = (New-McpEntry -Enabled $true) } }
@@ -177,5 +217,31 @@ Describe 'sync contract (file-level, TestDrive)' {
         ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) | Should -BeFalse
         $back = ConvertFrom-JsoncText -Text ([System.Text.Encoding]::UTF8.GetString($bytes))
         $back.mcp.supabase.enabled | Should -Be $true
+    }
+
+    It 'the write is ATOMIC (CS-7 2026-11-22: temp + File.Replace - a concurrent reader never sees a torn file)' {
+        # the implementation pins: a temp file then an atomic swap, never a
+        # direct truncate+overwrite of the live path
+        $raw = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\tools\opencode_config_merge.ps1'))
+        ($raw -match 'ghost-tmp') | Should -BeTrue
+        ($raw -match '\[System\.IO\.File\]::Replace\(') | Should -BeTrue
+        ($raw -match '\[System\.IO\.File\]::Move\(') | Should -BeTrue
+    }
+
+    It 'overwrite path: a second write lands atomically and leaves no temp file behind' {
+        $p = Join-Path $TestDrive 'overwrite.json'
+        Write-JsonNoBom -Path $p -Object (New-RootConfig -Entries @{ mcp = @{ a = (New-McpEntry -Enabled $true) } })
+        Write-JsonNoBom -Path $p -Object (New-RootConfig -Entries @{ mcp = @{ b = (New-McpEntry -Enabled $false) } })
+        (Test-Path -LiteralPath "$p.ghost-tmp") | Should -BeFalse -Because 'the temp file must be consumed by the swap'
+        $back = ConvertFrom-JsoncText -Text ([System.IO.File]::ReadAllText($p))
+        $back.mcp.b.enabled | Should -Be $false
+        $back.mcp.a | Should -BeNullOrEmpty
+    }
+
+    It 'create path: a first write to a missing path leaves no temp file behind' {
+        $p = Join-Path $TestDrive 'fresh.json'
+        Write-JsonNoBom -Path $p -Object (New-RootConfig -Entries @{ mcp = @{ a = (New-McpEntry -Enabled $true) } })
+        (Test-Path -LiteralPath "$p.ghost-tmp") | Should -BeFalse
+        (Test-Path -LiteralPath $p) | Should -BeTrue
     }
 }

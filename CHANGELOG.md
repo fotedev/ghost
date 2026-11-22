@@ -5,6 +5,29 @@ All notable changes to GHOST are documented here. Versions are Git tags
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **CS-7: OpenCode config-sync goes LIVE (2026-11-22)** — the Phase-0 probe
+  (controlled live test on clone c1 running its own v2.3.2 service with the
+  config directory watcher armed) LIVE-VERIFIED that a running desktop
+  clone re-reads its config on change: an external edit fired
+  `config.updated` in the clone's service log within ~2s, for BOTH write
+  styles (in-place AND the atomic temp+Replace swap). So
+  `sync_opencode_config.ps1` now syncs RUNNING clones by default (with a
+  live-reload verify-after that polls the clone's own service log for the
+  fresh event and reports VERIFIED / NOT observed — absence is a WARN,
+  never a failure: the v1 npm CLI binary is startup-only);
+  `-SkipRunning` restores the old skip as an opt-out. Two hardening fixes
+  rode along: the merge write is now ATOMIC (temp + `File.Replace`), and
+  the merge containers were fixed to the app's REAL shape (`mcp.servers.*`
+  nested + direct `mcp.*` entries — the old flat walk let the Primary's
+  whole `servers` block silently drop clone-only servers inside it;
+  regression-tested). Audit entries gain `running`/`liveReload`. Probe
+  history + the service-sharing discovery recorded in
+  `docs/OPENCODE_CONFIG_SYNC_PLAN.md` §Phase-0 and TASK_BACKLOG (new CS-10
+  spike).
+
 ## [1.7.0] - 2026-11-22
 
 ### Added

@@ -667,13 +667,22 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     overrides); syncs MCP + provider DEFINITIONS from
                                    #     ~\.config\opencode\opencode.jsonc onto each clone's
                                    #     <home>\config\opencode\opencode.jsonc (jsonc-aware reader);
-                                   #     lockfile-held clone = RUNNING → SKIP + WARN (zcode
-                                   #     semantics); config-less clone = SKIP (first run anonymous);
+                                   #     2026-11-22 CS-7 FLIP: lockfile-held clone = RUNNING →
+                                   #     SYNCED LIVE BY DEFAULT (the v2.3.2 service re-reads config
+                                   #     on change — controlled probe on c1: config.updated within
+                                   #     ~2s, BOTH write styles incl. the atomic temp+Replace swap)
+                                   #     with the live-reload verify-after (polls the clone's own
+                                   #     data\opencode\log\opencode.log for a fresh event;
+                                   #     -ReloadProbeSeconds=8; VERIFIED / NOT observed — absence is
+                                   #     a WARN: the v1 npm CLI binary is startup-only, new sessions
+                                   #     boot fresh); -SkipRunning restores the old skip as an
+                                   #     opt-out; config-less clone = SKIP (first run anonymous);
                                    #     backup config-pre-sync-<ts>.json into the clone home,
                                    #     verify-after re-read + deep-compare, JSONL audit at
                                    #     <CloneHome>\config-sync-audit.jsonl (paths + key NAMES
-                                   #     only — never values); Primary READ-ONLY with a hash
-                                   #     re-check after every run (acceptance 5); the launcher's
+                                   #     only — never values; + running/liveReload fields); Primary
+                                   #     READ-ONLY with a hash re-check after every run (acceptance
+                                   #     5); the launcher's
                                    #     [2b/5] pre-launch step is the primary path (failed sync
                                    #     warns, never blocks); fixture acceptance ran the plan's
                                    #     §5 items 1/3/4/5 (dry-run zero-write, zero secret leaks
@@ -725,9 +734,13 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     single instance via mutex OpencodeConfigSyncWatcher +
                                    #     startup process scan, -RunOnce/-DryRun/
                                    #     -InstallAutostart/-RemoveAutostart (Startup .lnk "OpenCode
-                                   #     config sync watcher.lnk"); NO -ApplyLive by design (a
-                                   #     running OpenCode clone's config re-read timing is
-                                   #     unverified — recorded in TASK_BACKLOG); the launcher's
+                                   #     config sync watcher.lnk"); NO -ApplyLive flag — the live
+                                   #     behavior is the CHILD'S DEFAULT (CS-7 Phase-0
+                                   #     LIVE-VERIFIED 2026-11-22: a running desktop clone's
+                                   #     service re-reads config on change — the probe fired
+                                   #     config.updated within ~2s for both write styles; the child
+                                   #     syncs running clones with the reload-probe verify-after
+                                   #     and -SkipRunning is its own opt-out); the launcher's
                                    #     [2c/5] step ensures the watcher is running + autostarted
                                    #     (zcode-2e mechanics, best-effort, never blocks the launch);
                                    #     Pester: tests/watch_opencode_config_sync.Tests.ps1 (19);

@@ -247,7 +247,8 @@ ghost/
 │                   #   shortcuts) + autoclaw2-{blue,yellow,green,red,orange}-branding/
 │                   #   (clone icons),
 │                   #   sync_opencode_config.ps1 + watch_opencode_config_sync.ps1
-│                   #   (OpenCode definitions-only config sync + resident watcher),
+│                   #   (OpenCode definitions-only config sync + resident watcher;
+│                   #   running clones synced LIVE — CS-7 verified),
 │                   #   sync_cline_mcp.ps1 (Cline MCP settings sync + dry-run plan),
 │                   #   sync_mcp_registry.ps1 + tools/mcp/ (central MCP registry
 │                   #   importer: master-mcp.json → every app's own config shape),

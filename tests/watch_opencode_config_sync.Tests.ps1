@@ -46,9 +46,12 @@ Describe 'OpenCode config sync watcher - param surface' {
         @($script:ParamNames) | Should -Contain 'RemoveAutostart'
     }
 
-    It 'has NO -ApplyLive and NO -Target (no live-apply until OpenCode re-read timing is verified)' {
-        @($script:ParamNames) | Should -Not -Contain 'ApplyLive' -Because "a live-apply needs its own discovery first (TASK_BACKLOG)"
+    It 'has NO -ApplyLive and NO -Target (the live behavior is the CHILD''S default - CS-7 LIVE-VERIFIED 2026-11-22)' {
+        @($script:ParamNames) | Should -Not -Contain 'ApplyLive' -Because "the live sync needs no flag: the child syncs running clones by default (LIVE-VERIFIED probe; -SkipRunning is the child's own opt-out)"
         @($script:ParamNames) | Should -Not -Contain 'Target' -Because "the watcher always syncs ALL clones via the child's -Target All"
+        # the header documents the verified verdict (why no flag exists)
+        ($script:Raw -match 'LIVE-VERIFIED 2026-11-22') | Should -BeTrue
+        ($script:Raw -match 'fires .config\.updated. in') | Should -BeTrue
     }
 
     It 'defaults IntervalSeconds to 5 and LogFile under watch-opencode-config-sync' {
