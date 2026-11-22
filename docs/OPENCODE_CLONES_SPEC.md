@@ -303,6 +303,55 @@ ladder below is moot for this app version:
   main's death (observed: outlived a closed clone window) — kill it when
   stopping a clone manually.
 
+#### 3.8.1 SUPERSEDED for v2.3.2: the machine-global service registry + join-at-startup (CS-10, verified live 2026-11-22/23)
+
+The §3.8 verdict held for the 2.0.32–2.2.5 spawn era only. v2.3.2 changed
+the architecture (asar-mined + live-probed):
+
+- **The registry moved to the machine-global state home**:
+  `join($env:XDG_STATE_HOME ?? join(homedir(),'.local','state'), 'opencode',
+  'service.json')`, record `{id, version, url, pid, password}` with an
+  `/api/info` basic-auth health probe (chunk `service-DgfTFRrw.js`). The
+  port is still ephemeral and service-chosen (28894 is NOT hardcoded —
+  zero asar hits; `OPENCODE_PORT` does not exist).
+- **The desktop main entry calls `Service.discover({version})` at startup
+  as pure read-only reuse**: a live compatible record = the instance JOINS
+  that service instead of spawning its own (ensure loop: reuse / wait /
+  replace — SIGTERM→SIGKILL the record's pid, delete the registry,
+  respawn).
+- **The service process owns the data home** (spawn env = `{...process.env}`;
+  clients talk HTTP). So a joining clone's sessions land in the service's
+  data home — with the machine-default registry that is the Primary's
+  `~/.local/share/opencode/opencode.db`. Db-verified: the Primary db's
+  only `OpenCodeClonesHome` occurrences are transcript text (no clone
+  session rows); c1's own db holds the clone-local sessions from its
+  own-service windows.
+- **The ordering race**: the patched in-app clone-home branch sets
+  `XDG_STATE_HOME`, but the startup `discover()` evidently reads the
+  registry BEFORE that branch runs (observed: c1 joined the Primary's
+  daemon while the patch was applied and the flag was on argv). In-app
+  env-setting cannot win this race.
+- **The launcher fix (shipped)**: `launch_opencode_clone.ps1` sets the four
+  `XDG_*` levers at the PROCESS-ENV level before `Start-Process` (saved +
+  restored around the spawn), preempting every in-app read; plus a
+  read-only guard that reports the machine registry's record (WARN when
+  the recorded pid is alive). GHOST never writes or deletes the registry.
+- **Verified outcome + the remaining tail**: with the preempt, c1 spawned
+  its OWN clone-staged service (`c1\desktop\cli\2.3.2-x64\opencode-cli.exe`)
+  writing clone-local data (its own log; the Primary db byte-untouched) —
+  the data-home isolation held. BUT the service's registry write went to
+  the MACHINE-DEFAULT registry (rewritten ~1s after spawn; a direct-spawn
+  probe with explicit `XDG_STATE_HOME` wrote no clone-local registry
+  within 5s) — the registry is effectively machine-global and
+  LAST-WRITER-WINS, so the next app launch (Primary included) would JOIN
+  the most recent service and land in ITS data home (the mirror break).
+  Whether the write is done by the app's ensure loop (pre-branch
+  resolution) or by the service binary ignoring `XDG_STATE_HOME` is
+  unresolved. Remaining work = a per-clone registry path via the asar
+  patch (anchor the registry-path expression in `service-DgfTFRrw.js`;
+  the spawn-side data home is already correct) — TASK_BACKLOG CS-10 keeps
+  that spike open.
+
 ### 3.9 Light worker: headless CLI on the clone XDG homes (spike-verified 2026-11-07)
 
 `src/windows/launch_opencode_cli_light.ps1` (OpenCode submenu [7], gid 79;
