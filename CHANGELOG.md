@@ -5,7 +5,7 @@ All notable changes to GHOST are documented here. Versions are Git tags
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.7.0] - 2026-11-22
 
 ### Added
 - **Terminal Agents suite 2: codex (2026-11-21)** — the OpenAI Codex CLI
