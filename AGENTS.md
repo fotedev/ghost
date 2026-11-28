@@ -406,8 +406,19 @@ tools/suite_status_lib.ps1         # ONE shared cross-suite instance classifier 
                                    #   (env-only CLAUDE_CONFIG_DIR - a clone's running procs
                                    #   are claimed via its light-worker marker's launcher-pid
                                    #   process-tree descendants); injectable -Procs/-Windows
-                                   #   snapshots for tests; the six live-verified per-suite
-                                   #   inline copies are deliberately untouched (TA-2 dedup);
+                                   #   snapshots for tests; TA-2 (2026-11-28): the two
+                                   #   STATUS tools are lib-backed now (status_zcode_instances
+                                   #   running-ness + diagnose_suite_pressure's [1] table with
+                                   #   its snapshot injected) and the autoclaw2 row gained the
+                                   #   LIVE-VERIFIED profile-lockfile probe (the lockfile exists
+                                   #   exactly while the app runs, gone after stop - a HELD lock
+                                   #   claims a stock-exe clone, so autoclaw2 is no longer
+                                   #   blanket-UNCLASSIFIABLE); the per-color AutoClaw2 exe
+                                   #   copies exist (Blue/Green/Orange/Red) - still untouched:
+                                   #   the two taskbar watchers (window->instance needs a new lib
+                                   #   API) + the four reset kill-target resolvers (kill-safety:
+                                   #   the lib keeps WMI-race empty-cmdline candidates the resets
+                                   #   deliberately exclude);
 tools/status_all_instances.ps1     # the unified READ-ONLY "who's running" report
                                    #   (Maintenance [6] = gid 126; Terminal Agents [4] =
                                    #   gid 130 with -Suites claudecode): every suite +

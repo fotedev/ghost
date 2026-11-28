@@ -126,7 +126,7 @@ Describe 'Suite status lib - functional classifier (fake snapshots)' {
         $c2.Pids | Should -Contain 400
     }
 
-    It 'an autoclaw2 clone with no signals is UNCLASSIFIABLE, never guessed' {
+    It 'an autoclaw2 stock-exe main with no signals is stopped via the lock probe (TA-2: the profile lockfile is LIVE-VERIFIED - it exists exactly while the app runs and is gone after stop)' {
         $procs = @(New-FakeProc -Id 500 -Parent 1 -Name 'AutoClaw2.exe' -Cmd '"C:\install\AutoClaw2.exe"')
         $state = Get-GhostSuiteInstanceState -Suite autoclaw2 -Procs $procs -Windows @() -UserProfileOverride "$env:TEMP"
         $primary = @($state.Rows | Where-Object { $_.Instance -eq 'Primary' })[0]
@@ -134,6 +134,27 @@ Describe 'Suite status lib - functional classifier (fake snapshots)' {
         $primary.Note | Should -Match 'stock-exe clones'
         $c1 = @($state.Rows | Where-Object { $_.Instance -eq 'c1' })[0]
         $c1.State | Should -Be 'stopped'
+        $c1.Lock | Should -Match 'absent' -Because 'no clone home under the override - the probe reports it honestly'
+    }
+
+    It 'a HELD autoclaw2 profile lockfile claims the stock-exe clone (the env-only suite is no longer blind - CS-11-era live probe)' {
+        $tmpDir = Join-Path $env:TEMP ("ghost-ac2lock-" + [guid]::NewGuid().ToString('N'))
+        $lockDir = Join-Path $tmpDir 'AutoClaw2ClonesHome\c1'
+        New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
+        $lockPath = Join-Path $lockDir 'lockfile'
+        Set-Content -Path $lockPath -Value 'x' -Encoding Ascii
+        $fs = [System.IO.File]::Open($lockPath, 'Open', 'Read', 'None')
+        try {
+            $procs = @(New-FakeProc -Id 510 -Parent 1 -Name 'AutoClaw2.exe' -Cmd '"C:\install\AutoClaw2.exe"')
+            $state = Get-GhostSuiteInstanceState -Suite autoclaw2 -Procs $procs -Windows @() -UserProfileOverride $tmpDir
+            $c1 = @($state.Rows | Where-Object { $_.Instance -eq 'c1' })[0]
+            $c1.State | Should -Be 'RUNNING'
+            $c1.Signal | Should -Be 'lockfile'
+            $c1.Note | Should -Not -Match 'UNCLASSIFIABLE' -Because 'the held lockfile is a verified positive signal'
+        } finally {
+            $fs.Close()
+            Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     It 'a held lockfile reports HELD and claims the instance' {

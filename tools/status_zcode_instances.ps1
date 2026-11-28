@@ -7,15 +7,13 @@
   three newer suites' launchers already carry (2026-11-14).
 
 .DESCRIPTION
-  Classification follows the standing suite rules:
-    - family filter covers the whole copy family (Name LIKE 'ZCode%' — a bare
-      Name='ZCode.exe' would miss clones running from their per-color copies),
-    - a bare-exe main is ONLY a process with no args (EC-K01: --type filtering
-      alone misclassifies helpers),
-    - a main running FROM ZCode-<Color>.exe IS that clone outright
-      (deterministic even mid-splash), then the subtree markers
-      (roaming/home dir names) decide for stock-exe mains, and any unmatched
-      main is the Primary.
+  Classification is SOURCED FROM THE SHARED LIB (tools\suite_status_lib.ps1,
+  Get-GhostSuiteInstanceState -Suite zcode — TA-2 dedup, 2026-11-28): the
+  standing suite rules live there now (copy-family family filter, EC-K01
+  bare-exe mains, copy-exe-first, subtree markers, honest labeling). This
+  tool keeps what the lib does not model: the per-instance detail probes
+  (roaming dir, clone home, telemetry deviceMid prefix) and the per-instance
+  commit pressure over the attributed main pids.
   Reads are strictly read-only: process snapshots + profile-dir existence +
   the telemetry.machineId prefix from each roaming storage.json. No writes,
   no elevation needed. -All (default) covers all six; -Instance narrows.
@@ -52,74 +50,14 @@ function Get-ZcodeInstanceDisplay {
     return 'Primary'
 }
 
-# --- classification (EC-K01 bare-exe mains + copy-exe-first + subtree markers)
-function Get-ZcodeInstanceMains {
-    # Returns @{ Primary = @(pid...); Second = @(...); ... }
-    $result = @{}
-    foreach ($inst in $script:Instances) { $result[$inst.Key] = @() }
-    $procs = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'ZCode%'" -ErrorAction SilentlyContinue)
-    if ($procs.Count -eq 0) { return $result }
-
-    $byParent = @{}
-    foreach ($p in $procs) {
-        if ($null -eq $p.ProcessId) { continue }
-        $ppid = [int]$p.ParentProcessId
-        if (-not $byParent.ContainsKey($ppid)) { $byParent[$ppid] = @() }
-        $byParent[$ppid] += $p
-    }
-    $mains = @($procs | Where-Object {
-        $cmd = [string]$_.CommandLine
-        if ([string]::IsNullOrWhiteSpace($cmd)) { return $true }   # WMI race: candidate
-        if ($cmd -match '--type=') { return $false }
-        $bare = '^\s*"?[^"]*\\' + [regex]::Escape([string]$_.Name) + '"?\s*$'
-        return ($cmd -match $bare)
-    })
-
-    function Test-SubtreeMarkers($Proc, [string[]]$Markers) {
-        # Queue semantics (Dequeue REMOVES): an array-slice "pop" like
-        # $stack[1..($stack.Count-1)] does NOT shrink a 1-element array in
-        # PowerShell (@('A')[1..0] == @('A') - out-of-range indices clamp),
-        # so a slice-based walk spins forever on leaf nodes (caught live
-        # 2026-11-14 by this very tool's first run).
-        $queue = New-Object System.Collections.Queue
-        $queue.Enqueue($Proc)
-        $seen = @{}
-        while ($queue.Count -gt 0) {
-            $cur = $queue.Dequeue()
-            if ($null -eq $cur -or $seen.ContainsKey([int]$cur.ProcessId)) { continue }
-            $seen[[int]$cur.ProcessId] = $true
-            $cmd = [string]$cur.CommandLine
-            foreach ($mk in $Markers) {
-                if ($cmd -like $mk) { return $true }
-            }
-            $kids = $byParent[[int]$cur.ProcessId]
-            if ($kids) {
-                foreach ($k in $kids) { $queue.Enqueue($k) }
-            }
-        }
-        return $false
-    }
-
-    foreach ($m in $mains) {
-        $matched = $null
-        # 1) strongest signal: a main running FROM the clone's exe copy IS that clone
-        foreach ($inst in $script:Instances) {
-            if ($inst.CopyExe -and ([string]$m.Name -ieq $inst.CopyExe)) { $matched = $inst.Key; break }
-        }
-        # 2) subtree markers (roaming + home dir names) for stock-exe mains
-        if (-not $matched) {
-            foreach ($inst in $script:Instances) {
-                if (-not $inst.Color) { continue }
-                $markers = @(('*' + $inst.Roaming + '*'))
-                if ($inst.Home) { $markers += ('*' + $inst.Home + '*') }
-                if (Test-SubtreeMarkers $m $markers) { $matched = $inst.Key; break }
-            }
-        }
-        # 3) unmatched mains are Primary (bare exe = default profile)
-        if (-not $matched) { $matched = 'Primary' }
-        $result[$matched] += [int]$m.ProcessId
-    }
-    return $result
+# --- classification (the SHARED suite-status lib; TA-2 dedup 2026-11-28) ------
+# The EC-K01 bare-exe mains + copy-exe-first + subtree-marker rules live in
+# tools\suite_status_lib.ps1 now (this tool's former inline copy was the seed
+# the lib was extracted from). Returns the lib's state object; the render
+# loop below maps Rows -> the per-instance detail probes.
+. (Join-Path $PSScriptRoot 'suite_status_lib.ps1')
+function Get-ZcodeInstanceStateFromLib {
+    return (Get-GhostSuiteInstanceState -Suite zcode)
 }
 
 # --- read-only probes -----------------------------------------------------------
@@ -145,7 +83,9 @@ $targets = @($Target)
 if ($Target -eq 'All') {
     $targets = @($script:Instances | ForEach-Object { $_.Key })
 }
-$mains = Get-ZcodeInstanceMains
+$state = Get-ZcodeInstanceStateFromLib
+$rowByInstance = @{}
+foreach ($r in @($state.Rows)) { $rowByInstance[$r.Instance] = $r }
 $osCommit = Get-CimInstance Win32_OperatingSystem
 $osUsed = ($osCommit.TotalVirtualMemorySize - $osCommit.FreeVirtualMemory) / 1KB
 $osLimit = $osCommit.TotalVirtualMemorySize / 1KB
@@ -157,7 +97,8 @@ $anyRunning = 0
 foreach ($key in $targets) {
     $inst = @($script:Instances | Where-Object { $_.Key -eq $key })[0]
     $display = Get-ZcodeInstanceDisplay -Inst $inst
-    $pids = @($mains[$key])
+    $row = $rowByInstance[$key]
+    $pids = @(if ($row) { $row.Pids } else { @() })
     $running = $pids.Count -gt 0
     if ($running) { $anyRunning++ }
 

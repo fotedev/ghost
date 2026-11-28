@@ -42,11 +42,26 @@ Describe 'Suite pressure report - report contract' {
         $script:Raw = [System.IO.File]::ReadAllText((Resolve-Path (Join-Path $PSScriptRoot "..\tools\diagnose_suite_pressure.ps1")).Path)
     }
 
-    It 'labels signals honestly (exe copy definitive, lockfile, title; unclassifiable never guessed)' {
-        ($script:Raw -match 'YES \(exe copy\)') | Should -BeTrue
-        ($script:Raw -match 'YES \(lockfile\)') | Should -BeTrue
-        ($script:Raw -match 'UNCLASSIFIABLE externally') | Should -BeTrue
-        ($script:Raw -match 'no lockfile \(documented\)') | Should -BeTrue
+    It 'sources the [1] table from the SHARED suite-status lib (TA-2 dedup) and injects its own snapshot' {
+        ($script:Raw -match [regex]::Escape('. (Join-Path $PSScriptRoot ''suite_status_lib.ps1'')')) | Should -BeTrue
+        ($script:Raw -match 'Get-GhostSuiteInstanceState -Suite \$Suite -Procs \$famProcs -Windows \$wins') | Should -BeTrue
+        # the honest-labeling vocabulary now lives in the lib; the tool renders its rows
+        ($script:Raw -match 'honestly labeled - shared classifier') | Should -BeTrue
+        ($script:Raw -match '\$state\.Rows') | Should -BeTrue
+    }
+
+    It 'renders the lib row surface incl. the State/Signal/LightWorker columns' {
+        ($script:Raw -match '\$_.State') | Should -BeTrue
+        ($script:Raw -match '\$_.Signal') | Should -BeTrue
+        ($script:Raw -match '\$_.LightWorker') | Should -BeTrue
+        ($script:Raw -match 'Instance, Color, State, Signal, Lock, Window, LightWorker, Note') | Should -BeTrue
+    }
+
+    It 'keeps only its own section inputs in SuiteDefs (the classification inputs live in the lib)' {
+        ($script:Raw -match 'LockProbe') | Should -BeFalse -Because 'lock probes are the lib suite rows now'
+        ($script:Raw -match 'TitleMap') | Should -BeFalse
+        ($script:Raw -match 'ProcFamily') | Should -BeTrue
+        ($script:Raw -match 'LogDirs') | Should -BeTrue
     }
 
     It 'carries the commit-pressure block incl. the >=90% OOM warning' {

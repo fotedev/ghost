@@ -8,14 +8,14 @@
   app-specific and already covered).
 
 .DESCRIPTION
-  [1] Instance table: per-clone running signals, HONESTLY labeled:
-        - exe-copy match  (AutoClaw2-<Color>.exe / OpenCode-<Color>.exe /
-          Cline-<Color>.exe on a live process command line) = definitive,
-        - lockfile probe  (opencode <home>\desktop\lockfile, cline hub lock,
-          autoclaw2 - the launcher's own probe shape) = held = running,
-        - window title    (opencode clones are titled "OpenCode <Color>").
-      A stock-exe AutoClaw2/Cline clone without a held lock is reported as
-      UNKNOWN, never guessed (no argv markers; titles are shared).
+  [1] Instance table: SOURCED FROM THE SHARED LIB (tools\suite_status_lib.ps1,
+      Get-GhostSuiteInstanceState — TA-2 dedup, 2026-11-28): the standing
+      rules live there now (copy-exe-first, subtree-marker walk, lockfile
+      probes, title maps, the light-worker column, honest labeling — anything
+      unlabeled is reported 'unknown / no' with an UNCLASSIFIABLE note, never
+      guessed). This tool snapshots the suite's process family + main windows
+      ONCE and injects them into the lib, then renders the lib's rows plus
+      its own memory/commit and log-scan sections.
   [2] Live memory / commit pressure (right now) - the exact block that
       caught the 2026-09-25 renderer-OOM commit-limit freeze: physical,
       commit used/limit/pct (>=90% = renderer-OOM territory), pagefiles,
@@ -57,15 +57,15 @@ function Write-Hdr([string]$Text) {
 }
 
 # --- Suite maps -----------------------------------------------------------------
+# (TA-2 dedup 2026-11-28: the classification inputs - lock probes, title maps,
+#  copy-exe rules, markers - live in tools\suite_status_lib.ps1 now; this map
+#  keeps only what THIS tool's own sections consume: the process family for
+#  the pressure totals and the log dirs for [3].)
 $SuiteDefs = @{
     'autoclaw2' = @{
         ProcFamily  = 'AutoClaw2*'
         WmiFamily   = "Name LIKE 'AutoClaw2%'"
         ExePrefix   = 'AutoClaw2'
-        CloneRoot   = Join-Path $UserProfile 'AutoClaw2ClonesHome'
-        LockProbe   = { param($home_) $null }  # autoclaw2 leaves no lockfile (documented)
-        PrimaryLock = ''
-        TitleMap    = @{}                       # shared "AutoClaw" title - no title signal
         LogDirs     = @(
             @{ Label = 'Primary logs';    Path = Join-Path $env:APPDATA 'AutoClaw2\logs';   Provenance = 'DERIVED' }
             @{ Label = 'work logs';       Path = Join-Path $UserProfile 'AutoClaw2ClonesHome'; Provenance = 'DERIVED' }
@@ -75,10 +75,6 @@ $SuiteDefs = @{
         ProcFamily  = 'Cline*'
         WmiFamily   = "Name LIKE 'Cline%'"
         ExePrefix   = 'Cline'
-        CloneRoot   = Join-Path $UserProfile 'ClineClonesHome'
-        LockProbe   = { param($home_) Join-Path $home_ 'data\locks\hub\production.json.instance.lock' }
-        PrimaryLock = Join-Path $UserProfile '.cline\data\locks\hub\production.json.instance.lock'
-        TitleMap    = @{}                       # shared "Cline vN" title - no title signal
         LogDirs     = @(
             @{ Label = 'Primary logs';    Path = Join-Path $UserProfile '.cline\data\logs'; Provenance = 'VERIFIED (reset_cline sweeps it)' }
             @{ Label = 'clone logs';      Path = Join-Path $UserProfile 'ClineClonesHome'; Provenance = 'DERIVED' }
@@ -88,10 +84,6 @@ $SuiteDefs = @{
         ProcFamily  = 'OpenCode*'
         WmiFamily   = "Name LIKE 'OpenCode%'"
         ExePrefix   = 'OpenCode'
-        CloneRoot   = Join-Path $UserProfile 'OpenCodeClonesHome'
-        LockProbe   = { param($home_) Join-Path $home_ 'desktop\lockfile' }
-        PrimaryLock = Join-Path $env:APPDATA 'ai.opencode.desktop\lockfile'
-        TitleMap    = @{ 'c1' = 'OpenCode Blue'; 'c2' = 'OpenCode Yellow'; 'c3' = 'OpenCode Green'; 'c4' = 'OpenCode Red'; 'c5' = 'OpenCode Orange' }
         LogDirs     = @(
             @{ Label = 'Primary logs';    Path = Join-Path $env:APPDATA 'ai.opencode.desktop\logs'; Provenance = 'DERIVED' }
             @{ Label = 'clone logs';      Path = Join-Path $UserProfile 'OpenCodeClonesHome'; Provenance = 'DERIVED' }
@@ -100,60 +92,25 @@ $SuiteDefs = @{
 }
 $Sd = $SuiteDefs[$Suite]
 
-# --- [1] instance table -----------------------------------------------------------
-Write-Hdr ("[1] {0} instance table (read-only signals, honestly labeled)" -f $Suite)
+# --- [1] instance table (the SHARED suite-status lib; TA-2 dedup) ------------------
+Write-Hdr ("[1] {0} instance table (read-only signals, honestly labeled - shared classifier)" -f $Suite)
 $famProcs = @(Get-CimInstance Win32_Process -Filter $Sd.WmiFamily -ErrorAction SilentlyContinue -OperationTimeoutSec 5)
 $wins = @(Get-Process -Name $Sd.ProcFamily -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
-$copyProcs = @{}
-foreach ($p in $famProcs) {
-    if ($p.CommandLine) {
-        foreach ($color in $Colors) {
-            if ($p.CommandLine -match ('(?i)' + [regex]::Escape("$($Sd.ExePrefix)-$color.exe"))) { $copyProcs[$color] = $true }
-        }
+. (Join-Path $PSScriptRoot 'suite_status_lib.ps1')
+$state = Get-GhostSuiteInstanceState -Suite $Suite -Procs $famProcs -Windows $wins
+$rows = @($state.Rows | ForEach-Object {
+    [pscustomobject]@{
+        Instance    = $_.Instance
+        Color       = $(if ($_.Color) { $_.Color } else { '-' })
+        State       = $_.State
+        Signal      = $_.Signal
+        Lock        = $_.Lock
+        Window      = $_.Windows
+        LightWorker = $_.LightWorker
+        Note        = $_.Note
     }
-}
-
-function Test-LockState([string]$LockPath) {
-    if (-not $LockPath -or -not (Test-Path -LiteralPath $LockPath)) { return 'absent' }
-    $held = $false
-    try { $fs = [System.IO.File]::Open($LockPath, 'Open', 'Read', 'None'); $fs.Close() } catch { $held = $true }
-    return $(if ($held) { 'HELD' } else { 'free' })
-}
-
-$rows = @()
-$rows += [pscustomobject]@{
-    Instance = 'Primary'; Color = '-'
-    ExeCopy  = '-'
-    Lock     = (Test-LockState $Sd.PrimaryLock)
-    Window   = $(@($wins | Where-Object { $_.MainWindowTitle -eq $Sd.ExePrefix }).Count)
-    Note     = 'stock exe, base identity'
-}
-for ($i = 1; $i -le 5; $i++) {
-    $color = $Colors[$i - 1]
-    $cloneHome = Join-Path $Sd.CloneRoot "c$i"
-    $lockState = '-'
-    if ($Suite -eq 'autoclaw2') { $lockState = 'no lockfile (documented)' }
-    elseif (Test-Path -LiteralPath $cloneHome) {
-        $lp = $Sd.LockProbe.Invoke($cloneHome)
-        $lockState = (Test-LockState $lp)
-    }
-    $winCount = 0
-    if ($Sd.TitleMap.Count -gt 0) {
-        $winCount = @($wins | Where-Object { $_.MainWindowTitle -eq $Sd.TitleMap["c$i"] }).Count
-    }
-    $running = if ($copyProcs.ContainsKey($color)) { 'YES (exe copy)' } elseif ($lockState -eq 'HELD') { 'YES (lockfile)' } elseif ($winCount -gt 0) { 'YES (title)' } else { 'unknown / no' }
-    $note = if ($running -like 'YES*') { '' }
-    elseif ($Suite -ne 'opencode' -and -not $copyProcs.ContainsKey($color)) { 'stock exe + no lock signal = UNCLASSIFIABLE externally' }
-    else { '' }
-    $rows += [pscustomobject]@{
-        Instance = "c$i"; Color = $color
-        ExeCopy  = $(if ($copyProcs.ContainsKey($color)) { 'live' } else { '-' })
-        Lock     = $lockState
-        Window   = $winCount
-        Note     = $note
-    }
-}
-$rows | Format-Table Instance, Color, ExeCopy, Lock, Window, Note -AutoSize | Out-String -Width 200 | Write-Host
+})
+$rows | Format-Table Instance, Color, State, Signal, Lock, Window, LightWorker, Note -AutoSize | Out-String -Width 220 | Write-Host
 Write-Host ("   family total: {0} {1} process(es), {2} with a main window" -f $famProcs.Count, $Sd.ExePrefix, $wins.Count)
 
 # --- [2] live memory / commit pressure ---------------------------------------------
