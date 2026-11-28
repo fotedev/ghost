@@ -22,6 +22,16 @@
                     listener stamps every window's AUMID/icon/title from
                     <cloneHome>\desktop\.opencode-clone-identity.json
                     (written by launch_opencode_clone.ps1).
+    service-registry (engine v5, CS-10) the app's win32 desktop-init deleter
+                    (`delete process.env.XDG_STATE_HOME` - ONE site in the
+                    whole 2.3.2 asar) always strips the state home, so the
+                    spawned CLI child captured a machine-default XDG_STATE_HOME
+                    and self-registered service.json at the MACHINE-DEFAULT
+                    registry (last-writer-wins -> a later Primary launch would
+                    join the clone's daemon). The splice guards the delete with
+                    the patch's own global, so a clone keeps its state home and
+                    registers at <cloneHome>\state\opencode\service.json while
+                    the Primary keeps stock behavior.
 
   App-update recovery (2026-10-24 pattern): the updater replaces app.asar
   wholesale; the script byte-probes for the engine's signature strings
@@ -58,7 +68,17 @@ $ErrorActionPreference = "Stop"
 #     single-pass candidate rebuild + full header/region/content verify. The
 #     sidecar app.asar.unpacked is never touched (swap runs with
 #     -SkipUnpackedSwap). Patch anchors and output bytes unchanged from v3.
-$script:EngineVersion = 4
+# v5 (2026-11-28, CS-10 tail): SERVICE-REGISTRY SCOPING family added - the
+#     win32 desktop-init deleter (`delete process.env.XDG_STATE_HOME`, ONE
+#     site in the whole 2.3.2 asar) is guarded with
+#     `globalThis.__opencodeCloneHome||`, so a clone keeps its state home and
+#     the spawned CLI child registers service.json CLONE-locally instead of
+#     the machine-default registry (last-writer-wins would make a later
+#     Primary launch join the clone's daemon). The Primary keeps stock
+#     behavior (global unset -> the delete still runs). The probe gains the
+#     SVC tier; the anchor is expected at exactly 1 site (the engine aborts on
+#     drift) and an anchor-absent build is skipped loudly.
+$script:EngineVersion = 5
 function Resolve-OpenCodeInstallDir {
   param([string]$Override)
   $candidates = @()
@@ -355,23 +375,25 @@ if ($Restore) {
   exit 0
 }
 
-# Asar content probe (two tiers): an app update replaces app.asar wholesale
+# Asar content probe (three tiers): an app update replaces app.asar wholesale
 # (and may drop the marker/backups too), so a surviving marker cannot prove
 # the patch is alive. CORE signatures are engine-STABLE (emitted by every
 # engine version so far) - their presence means "patched at SOME engine";
 # CURRENT signatures are this engine's additions - their presence upgrades
-# that to "patched at THIS engine". The distinction decides the extract
-# source for engine upgrades: a core-only tree is an OLD-ENGINE patch, not a
+# that to "patched at THIS engine"; SVC is the engine-v5 service-registry
+# splice specifically (a v4-patched tree is CORE+CUR without it, which is
+# exactly the upgrade signal). The distinction decides the extract source
+# for engine upgrades: a core-only tree is an OLD-ENGINE patch, not a
 # pristine asar, and must be rebuilt from the marker's pristine backup
 # (extracting the live tree would let the engine's done-anchors skip and
 # ship no changes - caught live 2026-10-24).
-$OcProbeOut = & $NodeExe -e "const fs=require('fs');try{const b=fs.readFileSync(process.argv[1]);const core=['__opencodeCloneHome','__opencodeCloneIdentity','--opencode-clone-home'];const cur=['--opencode-clone-id'];const cm=core.filter(s=>!b.includes(s));const km=cur.filter(s=>!b.includes(s));console.log('CORE='+(cm.length?'MISSING':'OK')+' CUR='+(km.length?'MISSING':'OK'));process.exit(0)}catch(e){console.error('PROBE_ERROR '+String((e&&e.message)||e));process.exit(3)}" $OcAsar
+$OcProbeOut = & $NodeExe -e "const fs=require('fs');try{const b=fs.readFileSync(process.argv[1]);const core=['__opencodeCloneHome','__opencodeCloneIdentity','--opencode-clone-home'];const cur=['--opencode-clone-id'];const svc=['__opencodeCloneHome||delete'];const cm=core.filter(s=>!b.includes(s));const km=cur.filter(s=>!b.includes(s));const sm=svc.filter(s=>!b.includes(s));console.log('CORE='+(cm.length?'MISSING':'OK')+' CUR='+(km.length?'MISSING':'OK')+' SVC='+(sm.length?'MISSING':'OK'));process.exit(0)}catch(e){console.error('PROBE_ERROR '+String((e&&e.message)||e));process.exit(3)}" $OcAsar
 $OcProbeText = ($OcProbeOut -join " ")
-if ($LASTEXITCODE -ne 0 -or $OcProbeText -notmatch 'CORE=\w+ CUR=\w+') {
+if ($LASTEXITCODE -ne 0 -or $OcProbeText -notmatch 'CORE=\w+ CUR=\w+ SVC=\w+') {
   throw ("app.asar probe failed (node exit {0}): {1}" -f $LASTEXITCODE, $OcProbeText)
 }
 $OcCorePatched = ($OcProbeText -match 'CORE=OK')
-$OcAsarPatched = ($OcProbeText -match 'CORE=OK CUR=OK')
+$OcAsarPatched = ($OcProbeText -match 'CORE=OK CUR=OK SVC=OK')
 $OcProbeNote = if ($OcAsarPatched) { "patched at engine v$script:EngineVersion" }
   elseif ($OcCorePatched) { "OLD-ENGINE patch (current engine signatures missing)" }
   else { "no engine signatures (fresh or update-wiped asar)" }
@@ -492,9 +514,11 @@ try {
     throw ("patch engine FAILED: {0} | totals: {1}" -f $engineJson.error, ($engineJson.totals | ConvertTo-Json -Compress))
   }
   if ($OcCorePatched -and $extractSource -ne $OcAsar) {
-    # Pristine-backup rebuild: BOTH families must have applied fresh. All-done
+    # Pristine-backup rebuild: the families must have applied fresh. All-done
     # (-1) results here mean the surgery source was not actually pristine.
-    if (($engineJson.totals.'clone-home' -eq 0) -and ($engineJson.totals.'clone-identity' -eq 0)) {
+    # (service-registry may legitimately be 0 on a pre-2.3.2 backup - anchor
+    # absent - which the engine reports in `skipped`, not as a failure.)
+    if (($engineJson.totals.'clone-home' -eq 0) -and ($engineJson.totals.'clone-identity' -eq 0) -and ($engineJson.totals.'service-registry' -eq 0)) {
       throw "engine reported no fresh changes on a pristine-backup rebuild - the backup is not pristine. Investigate the backups before retrying."
     }
   }
@@ -509,6 +533,9 @@ try {
     Write-Host ("      engine: patch {0}ms, node --check {1}ms, rebuild {2}ms, verify {3}ms" -f `
       $engineJson.timings.readPatchMs, $engineJson.timings.syntaxMs, $engineJson.timings.rebuildMs, $engineJson.timings.verifyMs)
   }
+  if ($engineJson.skipped -and @($engineJson.skipped).Count -gt 0) {
+    Write-Host ("      note: {0} skipped - anchor absent on this build (no service-registry deleter to scope; pre-2.3.2 layout)" -f (@($engineJson.skipped) -join ", "))
+  }
 
   Write-Host "[3/5] Swapping patched asar into install..."
   $patchFloor = [long]((Get-Item $OcAsar).Length / 2)
@@ -517,8 +544,13 @@ try {
   $OcSwSwap.Stop()
   Write-Host ("      swap done in {0:N1}s" -f $OcSwSwap.Elapsed.TotalSeconds)
   # verify-after-swap: the live file must carry every signature (covers the
-  # in-place fallback path as well as the plain delete+move).
-  $SwapProbeOut = & $NodeExe -e "const fs=require('fs');try{const b=fs.readFileSync(process.argv[1]);const need=['__opencodeCloneHome','__opencodeCloneIdentity','--opencode-clone-home','--opencode-clone-id'];const missing=need.filter(s=>!b.includes(s));if(missing.length){console.log('MISSING '+missing.join(','));process.exit(1)}console.log('OK all-present');process.exit(0)}catch(e){console.error('PROBE_ERROR '+String((e&&e.message)||e));process.exit(3)}" $OcAsar
+  # in-place fallback path as well as the plain delete+move). The service
+  # splice signature is required exactly when the engine did NOT skip the
+  # family (skipped = anchor-absent build, reported loudly above).
+  $SvcSkipped = ($engineJson.skipped -contains "service-registry")
+  $swapScript = "const fs=require('fs');try{const b=fs.readFileSync(process.argv[1]);const need=['__opencodeCloneHome','__opencodeCloneIdentity','--opencode-clone-home','--opencode-clone-id'];const svcNeed=JSON.parse(process.argv[2]||'[]');const missing=need.filter(s=>!b.includes(s)).concat(svcNeed.filter(s=>!b.includes(s)));if(missing.length){console.log('MISSING '+missing.join(','));process.exit(1)}console.log('OK all-present');process.exit(0)}catch(e){console.error('PROBE_ERROR '+String((e&&e.message)||e));process.exit(3)}"
+  $svcNeedArg = if ($SvcSkipped) { '' } else { '["__opencodeCloneHome||delete"]' }
+  $SwapProbeOut = & $NodeExe -e $swapScript $OcAsar $svcNeedArg
   $SwapProbeText = ($SwapProbeOut -join " ")
   if ($LASTEXITCODE -ne 0 -or $SwapProbeText -notmatch 'OK all-present') {
     throw ("post-swap verify FAILED: signatures not present in the live asar ({0}) - run with -Restore." -f $SwapProbeText)

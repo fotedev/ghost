@@ -303,7 +303,7 @@ ladder below is moot for this app version:
   main's death (observed: outlived a closed clone window) — kill it when
   stopping a clone manually.
 
-#### 3.8.1 SUPERSEDED for v2.3.2: the machine-global service registry + join-at-startup (CS-10, verified live 2026-11-22/23)
+#### 3.8.1 SUPERSEDED for v2.3.2: the machine-global service registry + join-at-startup (CS-10, verified live 2026-11-22/23; the registry-write tail SETTLED + fixed 2026-11-28)
 
 The §3.8 verdict held for the 2.0.32–2.2.5 spawn era only. v2.3.2 changed
 the architecture (asar-mined + live-probed):
@@ -347,10 +347,64 @@ the architecture (asar-mined + live-probed):
   the most recent service and land in ITS data home (the mirror break).
   Whether the write is done by the app's ensure loop (pre-branch
   resolution) or by the service binary ignoring `XDG_STATE_HOME` is
-  unresolved. Remaining work = a per-clone registry path via the asar
-  patch (anchor the registry-path expression in `service-DgfTFRrw.js`;
-  the spawn-side data home is already correct) — TASK_BACKLOG CS-10 keeps
-  that spike open.
+  unresolved. **Settled 2026-11-28 — see the two bullets below.**
+- **The tail root cause (deep-mined 2026-11-28, byte-proven)**: the app
+  itself NEVER writes `service.json` — the spawned
+  `opencode-cli.exe serve --service` child SELF-REGISTERS (writer `ye`,
+  atomic tmp+rename into `join(Ci.state, ...)`), and the CLI's Global
+  module captures `XDG_STATE_HOME` ONCE at module-eval into a constant —
+  the child's registry location = whatever the child's env said at
+  process START. The villain is the app's desktop-init layer `vy`: on
+  win32 it ALWAYS deletes `process.env.XDG_STATE_HOME`
+  (`delete process.env.XDG_STATE_HOME` — exactly ONE occurrence in the
+  whole asar, byte-verified unique). Its Effect-fiber scheduling relative
+  to the `whenReady().then(Service.discover())` chain is statically
+  undecidable; when it lands between the patched clone-home branch (sets
+  the state home) and the `Service.ensure` spawn snapshot
+  (`env:{...process.env,...}` — unique anchor), the child starts XDG-free
+  and registers machine-default — while the OTHER three levers survive
+  `vy`, which explains the observed split exactly (clone-local data ✓,
+  machine-default registry ✗). `vy` is the only mechanism in either
+  binary that produces this split.
+- **The engine v5 fix (shipped 2026-11-28)**:
+  `tools/patch_opencode_clone_home.mjs` guards the deleter with the
+  patch's own global —
+  `globalThis.__opencodeCloneHome||delete process.env.XDG_STATE_HOME`
+  (one splice; the anchor is expected at exactly 1 site — the engine
+  aborts on drift — and an anchor-absent build, pre-2.3.2, is skipped
+  loudly instead of failing). The Primary (global unset) keeps stock
+  behavior; a clone (global set by the clone-home argv scan) keeps its
+  state home, the child captures it, and registers at
+  `<cloneHome>\state\opencode\service.json` — the machine-default
+  registry is only ever written by the Primary's own service. The
+  discover read is already per-call-correct (the launcher preempt); the
+  spawn snapshot then chains correctly. `|| delete` is legal JS (delete
+  is a unary operator) — the engine's in-bundle `node --check` gate
+  proves it against the real file.
+- **Live verification status (2026-11-28)**: the 2.4.2 updater replaced
+  app.asar wholesale (marker + ID_Backups wiped — the known update
+  behavior), and the v5 anchors were RE-VERIFIED against the fresh
+  2.4.2 asar read-only: `delete process.env.XDG_STATE_HOME` is still
+  exactly ONE site, the clone-home/identity anchors intact, and a
+  full-engine DRY-RUN on the live asar (candidate written to %TEMP%, no
+  swap) passed the complete pipeline — totals
+  `{clone-home:1, clone-identity:1, service-registry:1}`, in-engine
+  `node --check` clean, rebuild + 11,856-entry verify OK, 825 ms. The
+  splice lands in `out/main/desktop-BdWsgKld.js` (the 2.4.2 desktop-init
+  chunk) and slots into the app's OWN existing guard chain — stock 2.4.2
+  reads `t?.XDG_STATE_HOME||delete process.env.XDG_STATE_HOME` (an `||`
+  chain the app itself uses for the non-win32 case), so v5 extends it to
+  `t?.XDG_STATE_HOME||globalThis.__opencodeCloneHome||delete ...` — the
+  app's own idiom on the exact villain line. The SWAP + the c1 launch
+  run (assert `c1\state\opencode\service.json` appears, the machine
+  registry byte-untouched, a second c1 launch reuses its own service)
+  remain USER-SUPERVISED pending: the dev host's Primary OpenCode
+  session held the install closed through the whole 60-minute
+  instruct-and-poll window (the gate threw before any write — the
+  machine was untouched). Run OpenCode [8] once the app is closed; the
+  2.4.2 update already broke clone launching on an unpatched install
+  (the launcher's patch-signature preflight aborts flagged launches), so
+  the patch needs applying regardless.
 
 ### 3.9 Light worker: headless CLI on the clone XDG homes (spike-verified 2026-11-07)
 
