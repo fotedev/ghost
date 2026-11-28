@@ -102,6 +102,17 @@ Describe 'OpenCode service-port seeding (CS-11)' {
         (Get-Content -LiteralPath $p -Raw) | Should -Be '{ broken' -Because 'a torn/hand-edited file must not be silently replaced'
     }
 
+    It 'skip: a NUMERIC-STRING port also wins (the type-agnostic check - the CI pwsh lane Int64 lesson)' {
+        $h = Join-Path $TestDrive 'strport'
+        $dir = Join-Path $h 'config\opencode'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $p = Join-Path $dir 'service.json'
+        [System.IO.File]::WriteAllText($p, '{"port": "28904"}', (New-Object System.Text.UTF8Encoding $false))
+        $r = Initialize-GhostOpenCodeServicePort -CloneHome $h -Instance c4
+        $r.Status | Should -Be 'skipped'
+        $r.Port | Should -Be 28904
+    }
+
     It 'creates a missing config\opencode dir (fresh clone home)' {
         $h = Join-Path $TestDrive 'freshhome'
         $r = Initialize-GhostOpenCodeServicePort -CloneHome $h -Instance c1

@@ -89,14 +89,18 @@ function Initialize-GhostOpenCodeServicePort {
         }
         if ($existing -is [System.Collections.IDictionary] -and $existing.ContainsKey('port')) {
             $cur = $existing['port']
-            if ($cur -is [int] -or ($cur -is [string] -and $cur -match '^\d+$')) {
-                $curNum = [int]$cur
-                if ($curNum -ge 1 -and $curNum -le 65535) {
-                    $result.Status = 'skipped'
-                    $result.Port = $curNum
-                    $result.Note = "already carries a valid port $curNum"
-                    return $result
-                }
+            # Type-agnostic numeric check: PS 5.1's ConvertFrom-Json yields
+            # Int32, PS 7 yields Int64, and a hand-edited file may carry a
+            # numeric STRING - parse instead of -is checks (the CI pwsh lane
+            # caught the Int32-only shape live: the skip path fell through to
+            # a re-seed).
+            $curNum = $null
+            try { $curNum = [int]::Parse("$cur", [System.Globalization.CultureInfo]::InvariantCulture) } catch { $curNum = $null }
+            if ($null -ne $curNum -and $curNum -ge 1 -and $curNum -le 65535) {
+                $result.Status = 'skipped'
+                $result.Port = $curNum
+                $result.Note = "already carries a valid port $curNum"
+                return $result
             }
             $result.Note = "existing port value '$cur' is not a valid port - replacing it with the frozen map port"
         }
