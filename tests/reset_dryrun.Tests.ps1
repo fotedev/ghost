@@ -109,4 +109,16 @@ Describe 'reset dry-run parity (issue #2 item 1)' {
             Remove-Item -LiteralPath $fakeRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+
+    It '<Name>: the ID_Backups purge carries the 24h floor (same-day undo copies are never erased)' -ForEach @(
+        @{ Name = 'cursor';  File = 'reset_cursor.ps1' }
+        @{ Name = 'trae';    File = 'reset_trae.ps1' }
+        @{ Name = 'devin';   File = 'reset_devin.ps1' }
+        @{ Name = 'qoder';   File = 'reset_qoder.ps1' }
+        @{ Name = 'zcode';   File = 'reset_zcode.ps1' }
+    ) {
+        $raw = [System.IO.File]::ReadAllText((Join-Path $script:RepoRoot ("src\windows\" + $File)))
+        ($raw -match '\$recentFloor = \(Get-Date\)\.AddHours\(-24\)') | Should -BeTrue -Because 'a same-day ID_Backups dir may be the only undo copy of an earlier chained run'
+        ($raw -match 'LastWriteTime -lt \$recentFloor') | Should -BeTrue -Because 'the floor must actually guard the purge filter'
+    }
 }

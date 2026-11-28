@@ -50,7 +50,7 @@ tools/
 ├── cline-{blue,yellow,green,red,orange}-branding/  # Cline per-clone icons (orange tint-generated)
 ├── install_autoclaw2_clone_shortcuts.ps1 # AutoClaw2 clone shortcuts (Desktop + Start menu)
 ├── autoclaw2-{blue,yellow,green,red,orange}-branding/  # AutoClaw2 per-clone icons (tint-generated)
-├── patch_opencode_clone_home.ps1/.mjs # app.asar clone-home + taskbar-identity patch (engine v4 for 2.2.5.0; -WaitForClose via OpenCode [10])
+├── patch_opencode_clone_home.ps1/.mjs # app.asar clone-home + taskbar-identity + service-registry-scoping patch (engine v5; -WaitForClose via OpenCode [10])
 ├── install_opencode_clone_shortcuts.ps1 # OpenCode clone shortcuts (Desktop + Start menu)
 ├── sync_opencode_chats.ps1            # OpenCode cross-instance chat sync (inventory / guarded import / revert)
 ├── sync_opencode_config.ps1           # OpenCode definitions-only config sync (apiKey-shaped Primary values scrubbed)

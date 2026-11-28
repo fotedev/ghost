@@ -221,11 +221,21 @@ Describe 'sync contract (file-level, TestDrive)' {
 
     It 'the write is ATOMIC (CS-7 2026-11-22: temp + File.Replace - a concurrent reader never sees a torn file)' {
         # the implementation pins: a temp file then an atomic swap, never a
-        # direct truncate+overwrite of the live path
-        $raw = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\tools\opencode_config_merge.ps1'))
+        # direct truncate+overwrite of the live path. The ATOMIC
+        # Write-JsonNoBom lives in the shared tools\json_merge_lib.ps1 since
+        # the 2026-11-28 dedup (this tool dot-sources it).
+        $raw = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\tools\json_merge_lib.ps1'))
         ($raw -match 'ghost-tmp') | Should -BeTrue
         ($raw -match '\[System\.IO\.File\]::Replace\(') | Should -BeTrue
         ($raw -match '\[System\.IO\.File\]::Move\(') | Should -BeTrue
+    }
+
+    It 'the tool files carry NO inline helper copies (the trio lives in json_merge_lib.ps1 only)' {
+        foreach ($f in 'zcode_mcp_merge.ps1', 'opencode_config_merge.ps1', 'cline_mcp_merge.ps1') {
+            $raw = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot ('..\tools\' + $f)))
+            ($raw -match 'function ConvertTo-DeepHashtable|function Test-DeepEqual|function Write-JsonNoBom') | Should -BeFalse -Because "$f must dot-source the shared lib, not carry a drifted copy"
+            ($raw -match [regex]::Escape('json_merge_lib.ps1')) | Should -BeTrue
+        }
     }
 
     It 'overwrite path: a second write lands atomically and leaves no temp file behind' {

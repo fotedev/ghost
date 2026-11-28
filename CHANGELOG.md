@@ -59,6 +59,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the install closed through the polling window. Run OpenCode [8] once
   closed — the 2.4.2 update already broke clone launching on an
   unpatched install.
+- **Repo-hygiene wave (2026-11-28)** — four recorded follow-ups closed in
+  one pass: the merge-helper trio (`ConvertTo-DeepHashtable` /
+  `Test-DeepEqual` / `Write-JsonNoBom`) moved into the shared
+  `tools/json_merge_lib.ps1` (the three pure merge cores dot-source it;
+  the dedup also FIXED A REAL BUG — `cline_mcp_merge.ps1`'s drifted copy
+  compared `$B[$i]` instead of `$eb[$i]` in the array branch, diverging
+  for non-IList enumerables; the shared lib is the ATOMIC writer shape);
+  the two redundant literal `1-136` dispatch-header pins deleted (the
+  generic repo-integrity pin derives the ceiling and is strictly
+  stronger); the 24h ID_Backups purge floor (the #73 zcode policy shape)
+  ported to `reset_cursor.ps1` + `reset_devin.ps1` — a same-day re-run
+  can no longer erase the only undo copies of an earlier chained run
+  (trae/zcode/qoder already carried it); and the one stale doc spot
+  (`docs/architecture.md` patch row → engine v5). Pins: the purge-floor
+  contract across all five floored resetters + a no-inline-copies guard
+  on the three merge cores.
 
 ## [1.7.0] - 2026-11-22
 
