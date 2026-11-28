@@ -506,7 +506,7 @@ reset would touch without touching it.
 ## OpenCode multi-instance (5 clones + Primary; per-user, no admin needed)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "tools\patch_opencode_clone_home.ps1"   # once; close ALL OpenCode windows (or pass -WaitForClose like menu row [10])
+powershell -ExecutionPolicy Bypass -File "tools\patch_opencode_clone_home.ps1"   # once; close ALL OpenCode windows (or pass -WaitForClose like menu row [10]); engine v5 also scopes the service registry clone-locally (CS-10 tail)
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1     # XDG preempted — the clone always spawns its OWN service (CS-10)
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c2   # ... c5
 powershell -ExecutionPolicy Bypass -File "src\windows\launch_opencode_clone.ps1" -Instance c1 -Status

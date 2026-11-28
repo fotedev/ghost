@@ -1194,7 +1194,7 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     overwrite-edits prompt); GHOST.bat replaced by either path
                                    #     prints a close-and-relaunch note (cmd reads the .bat
                                    #     incrementally)
-                                   #   patch_opencode_clone_home.ps1 (+ .mjs engine v4, shared
+                                   #   patch_opencode_clone_home.ps1 (+ .mjs engine v5, shared
                                    #     tools/asar_surgery.mjs IO layer — v4 (2026-11-03) swaps the
                                    #     extract/repack pipeline for the same in-place asar surgery as
                                    #     the ZCode v9 patch: minutes -> ~2.5s, output byte-identical to
@@ -1216,10 +1216,20 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     bundle out/main/index.js is ESM, require is undefined, so
                                    #     v1's fs-based json resolver silently no-oped; no
                                    #     BrowserWindow ctor sites exist in this app, aliased
-                                   #     imports); no flag = bit-for-bit stock; marker
+                                   #     imports) + v5 SERVICE-REGISTRY SCOPING (2026-11-28, CS-10
+                                   #     tail: the app's UNIQUE win32 desktop-init deleter
+                                   #     `delete process.env.XDG_STATE_HOME` — ONE site in the whole
+                                   #     asar — always strips the state home, so the spawned CLI child
+                                   #     captured a machine-default XDG and self-registered
+                                   #     service.json at the MACHINE-DEFAULT registry, last-writer-wins
+                                   #     = a later Primary launch would JOIN the clone's daemon; v5
+                                   #     guards it with `globalThis.__opencodeCloneHome||` — clones keep
+                                   #     their state home and register clone-locally, the Primary keeps
+                                   #     stock; drift aborts, anchor-absent builds skip loudly); no flag
+                                   #     = bit-for-bit stock; marker
                                    #     opencode-clone-home-patch.marker.json + -Restore + node
                                    #     --check + zero-site abort + 2026-10-24 update-recovery
-                                   #     byte-probe (core/current tiers — old-engine trees rebuild
+                                   #     byte-probe (core/current/SVC tiers — old-engine trees rebuild
                                    #     from the marker's pristine backup) + locked-asar in-place
                                    #     overwrite fallback (indexer-held asar: delete blocked,
                                    #     write shared; pristine-backup-gated); -WaitForClose
@@ -1713,8 +1723,9 @@ launch_opencode_clone.ps1          # OpenCode desktop clone launcher -Instance c
                                    #   (saved/restored) so the clone always spawns its OWN
                                    #   clone-local service (live-verified: Primary db untouched) +
                                    #   a read-only registry guard (WARN when the recorded pid is
-                                   #   alive; the registry tail = TASK_BACKLOG CS-10 PARTIAL-DONE,
-                                   #   spec §3.8.1),
+                                   #   alive; the registry tail CLOSED 2026-11-28 by patch engine
+                                   #   v5 — the spawned child now registers service.json
+                                   #   clone-locally, spec §3.8.1),
                                    #   writes .opencode-clone-identity
                                    #   .json + .opencode-clone-icon.ico fresh each launch (json =
                                    #   -Status introspection only), detached start + verify-after
@@ -2285,7 +2296,7 @@ are already stated in the live suites' sections where they apply.
   `OPENCODE_TEST_ONBOARDING` rmSync-wipes its root every boot, and the
   channel map only has beta/prod. Isolation therefore needs the ONE-TIME
   **clone-home asar patch** (`tools/patch_opencode_clone_home.ps1` +
-  `.mjs`, engine v4 — asar surgery since 2026-11-03; anchors re-derived
+  `.mjs`, engine v5 — asar surgery since 2026-11-03; anchors re-derived
   2026-11-01 for the 2.2.5.0 bundle after
   the updater replaced app.asar wholesale on 2026-10-31): the argv flag
   `--opencode-clone-home=<dir>` slots into the app's OWN test-root read
@@ -2293,12 +2304,22 @@ are already stated in the live suites' sections where they apply.
   `userData=<home>\desktop`, `sessionData=<home>\session`, and the four
   `XDG_*` env vars set from the home's subdirs BEFORE the background-service
   spawn (the app's own redirection surface, read unconditionally in
-  production). No flag = bit-for-bit stock. Backup + marker
+  production). No flag = bit-for-bit stock. Since engine v5 (2026-11-28,
+  CS-10 tail) the patch ALSO guards the app's UNIQUE win32 desktop-init
+  deleter (`delete process.env.XDG_STATE_HOME`, ONE site in the whole
+  asar) with `globalThis.__opencodeCloneHome||` — without it the spawned
+  CLI child captured a machine-default `XDG_STATE_HOME` and
+  self-registered service.json at the MACHINE-DEFAULT registry
+  (last-writer-wins → a later Primary launch would join the clone's
+  daemon); with it the child registers clone-locally at
+  `<cloneHome>\state\opencode\service.json` while the Primary keeps stock
+  behavior (spec §3.8.1). Backup + marker
   (`opencode-clone-home-patch.marker.json`,
   patchVersion) + `-Restore` + `node --check` + zero-site abort +
-  update-recovery byte-probe with TWO tiers — CORE signatures
+  update-recovery byte-probe with THREE tiers — CORE signatures
   (`__opencodeCloneHome`/`__opencodeCloneIdentity`/`--opencode-clone-home`,
-  engine-stable) vs CURRENT (`--opencode-clone-id`): a core-only tree is
+  engine-stable) vs CURRENT (`--opencode-clone-id`) vs SVC
+  (`__opencodeCloneHome||delete`, the v5 splice): a core-only tree is
   an OLD-ENGINE patch and rebuilds from the marker's pristine backup
   (extracting the live tree lets the done-anchors skip — caught live
   during the v1→v2 upgrade). Plus the locked-asar IN-PLACE swap fallback

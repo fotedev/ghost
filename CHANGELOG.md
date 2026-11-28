@@ -38,11 +38,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (saved/restored) — the clone always spawns its OWN clone-local service
   (live-verified: the Primary db byte-untouched with the Primary daemon
   up) — plus a read-only machine-registry guard (WARN when the recorded
-  pid is alive; GHOST never writes/deletes the registry). REMAINING (spec
-  §3.8.1 + TASK_BACKLOG CS-10): the service's registry write goes to the
-  MACHINE-DEFAULT registry (last-writer-wins — the next app launch joins
-  the most recent service, the mirror break); the complete fix needs a
-  per-clone registry path via the asar patch (next spike).
+  pid is alive; GHOST never writes/deletes the registry). The registry
+  tail is now CLOSED (2026-11-28, deep-mined + patched): the app never
+  writes `service.json` — the spawned CLI child self-registers using the
+  `XDG_STATE_HOME` its env carried at process start, and the app's UNIQUE
+  win32 desktop-init deleter (`delete process.env.XDG_STATE_HOME`, ONE
+  site in the whole asar) always strips that lever, so the child
+  registered machine-default (last-writer-wins — the next Primary launch
+  would join the clone's daemon). Patch engine v5 guards the deleter with
+  the patch's own global (`globalThis.__opencodeCloneHome||`): the child
+  now registers at `<cloneHome>\state\opencode\service.json`, the machine
+  registry is only ever written by the Primary's own service, and the
+  Primary keeps stock behavior (anchor drift aborts; anchor-absent
+  pre-2.3.2 builds skip loudly; 2.4.2 anchors re-verified — the vy
+  deleter is still exactly one site, and a full-engine dry-run on the
+  live 2.4.2 asar — candidate to %TEMP%, no swap — passed the complete
+  pipeline: totals 1/1/1, `node --check` clean, rebuild + verify OK).
+  Live acceptance (the asar swap + the c1 clone-local-registry run) is
+  USER-SUPERVISED pending: the dev host's Primary OpenCode session held
+  the install closed through the polling window. Run OpenCode [8] once
+  closed — the 2.4.2 update already broke clone launching on an
+  unpatched install.
 
 ## [1.7.0] - 2026-11-22
 

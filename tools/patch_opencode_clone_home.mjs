@@ -66,6 +66,24 @@
 //   fixes the same pre-existing perf bug found in the ZCode engine: the
 //   clone-identity per-position regex scan. The patch anchors and output
 //   bytes are identical.
+// Engine v5 (2026-11-28, CS-10 tail): SERVICE-REGISTRY SCOPING - the v2.3.2
+//   service registry. The desktop app never writes service.json; the spawned
+//   `opencode-cli.exe serve --service` child self-registers via a writer whose
+//   target is `join(Ci.state, ...)` - and the CLI's Global module captures
+//   XDG_STATE_HOME ONCE at module-eval into a constant. The app contains a
+//   UNIQUE desktop-init layer (one `delete process.env.XDG_STATE_HOME` site in
+//   the whole asar) that on win32 ALWAYS deletes the var; when its effect
+//   lands between the clone-home branch (sets the state home) and the
+//   Service.ensure spawn snapshot (`env:{...process.env,...}`), the child
+//   starts XDG-free and registers at the MACHINE-DEFAULT registry -
+//   last-writer-wins means a later Primary launch would join the clone's
+//   daemon (the mirror break, live-verified 2026-11-22). The splice guards the
+//   delete with the patch's own global, so a clone keeps its state home and
+//   registers clone-locally while the Primary keeps stock behavior:
+//     globalThis.__opencodeCloneHome||delete process.env.XDG_STATE_HOME
+//   The anchor was byte-verified UNIQUE (count 1) in the 2.3.2 asar - the
+//   engine aborts on any drift; an anchor-absent build (pre-2.3.2 layout) is
+//   skipped loudly instead of failing.
 import { mkdirSync, writeFileSync, openSync, closeSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
@@ -77,7 +95,7 @@ import {
   verifyRebuild,
 } from "./asar_surgery.mjs";
 
-const ENGINE_VERSION = 4;
+const ENGINE_VERSION = 5;
 const sourceAsar = process.argv[2];
 const candidateOut = process.argv[3];
 const checksDir = process.argv[4];
@@ -127,6 +145,20 @@ const IDENTITY_RESOLVER = `(globalThis.__opencodeCloneIdentity ??= (() => { let 
 function windowStampIife(recv, baseExpr) {
   return `,${recv}.on("browser-window-created", (__e, __w) => { try { const __id = globalThis.__opencodeCloneIdentity; if (!__id) return; const __aumid = ${baseExpr} + (__id.aumidSuffix ? "." + __id.aumidSuffix : ""); const __stamp = () => { try { if (typeof __w.setAppDetails === "function") __w.setAppDetails({ appId: __aumid }); } catch (__s1) {} }; __stamp(); if (__id.iconPath) { try { __w.setIcon(__id.iconPath); } catch (__s2) {} } if (__id.title) { try { if (__w.getTitle() !== __id.title) __w.setTitle(__id.title); } catch (__s3) {} try { __w.on("page-title-updated", (__e2) => { try { __e2.preventDefault(); } catch (__s4) {} try { if (__w.getTitle() !== __id.title) __w.setTitle(__id.title); } catch (__s5) {} __stamp(); }); } catch (__s6) {} } try { __w.on("show", () => { __stamp(); }); } catch (__s7) {} } catch (__s8) {} })`;
 }
+
+// ── service-registry (F4, engine v5 / CS-10 tail) ────────────────────────────
+// Pristine anchor: the app's desktop-init deleter - on win32 it ALWAYS strips
+// XDG_STATE_HOME from the process env (exactly ONE site in the whole 2.3.2
+// asar, byte-verified; a drift aborts the patch below). Done anchor: the
+// guarded replacement - which still CONTAINS the pristine anchor substring, so
+// the done-check must run before any split (it does; idempotence holds).
+const SVC_PRISTINE = "delete process.env.XDG_STATE_HOME";
+const SVC_DONE =
+  "globalThis.__opencodeCloneHome||delete process.env.XDG_STATE_HOME";
+// Expected site count. The splice is only proven for the unique vy deleter -
+// a second site means the bundle changed in a way this engine has not
+// surveyed, and the guard would land somewhere unproven.
+const SVC_EXPECTED_SITES = 1;
 
 // Patch definitions. apply(src) returns {src, count}; count -1 = already applied.
 const PATCHES = [
@@ -197,6 +229,20 @@ const PATCHES = [
       return { src: out, count: hits.length };
     },
   },
+  {
+    name: "service-registry",
+    apply: (src) => {
+      if (src.includes(SVC_DONE)) return { src, count: -1 };
+      const parts = src.split(SVC_PRISTINE);
+      if (parts.length === 1) return { src, count: 0 };
+      // Guard the deleter with the patch's own global: a clone (global set by
+      // the clone-home scan) keeps its state home, so the spawned CLI child
+      // captures it and registers clone-locally; the Primary (global unset)
+      // evaluates the same delete as stock. `|| delete` is legal JS - delete
+      // is a unary operator, and node --check gates the real bundle below.
+      return { src: parts.join(SVC_DONE), count: parts.length - 1 };
+    },
+  },
 ];
 
 function markersForPatch(name) {
@@ -210,6 +256,10 @@ function markersForPatch(name) {
       // listener injection point (same statement, but keep the per-file
       // verify conservative).
       return ["__opencodeCloneIdentity", "--opencode-clone-id"];
+    case "service-registry":
+      // The splice marker (the guarded replacement itself). The bare pristine
+      // anchor is NOT a marker - it survives the splice inside the guard.
+      return ["__opencodeCloneHome||delete"];
     default:
       return [];
   }
@@ -272,14 +322,35 @@ if (DEBUG) {
 const totals = {};
 for (const p of PATCHES) totals[p.name] = 0;
 const failures = [];
+const skipped = [];
 for (const p of PATCHES) {
   for (const r of results) {
     if (r.counts[p.name] > 0) totals[p.name] += r.counts[p.name];
   }
   if (totals[p.name] === 0) {
     const anyAlready = results.some((r) => r.counts[p.name] === -1);
-    if (!anyAlready) failures.push(p.name);
+    if (anyAlready) continue;
+    // service-registry exemption: an anchor-absent build (pre-2.3.2 layout,
+    // no vy deleter) has nothing to scope - skip loudly, never fail.
+    if (p.name === "service-registry") { skipped.push(p.name); continue; }
+    failures.push(p.name);
   }
+}
+
+// Uniqueness gate (CS-10): the vy deleter was byte-verified as exactly ONE
+// site in the surveyed 2.3.2 asar. A different count means the bundle changed
+// in a way this engine has not surveyed - refuse to splice the guard blindly.
+if (totals["service-registry"] > SVC_EXPECTED_SITES) {
+  console.log(JSON.stringify({
+    ok: false,
+    engineVersion: ENGINE_VERSION,
+    totals,
+    results,
+    error: "service-registry anchor drift: " + totals["service-registry"] +
+      " sites of '" + SVC_PRISTINE + "' found, expected exactly " +
+      SVC_EXPECTED_SITES + " (the unique win32 deleter) - refusing to splice blindly",
+  }));
+  process.exit(1);
 }
 
 if (failures.length) {
@@ -355,6 +426,7 @@ console.log(JSON.stringify({
   engineVersion: ENGINE_VERSION,
   totals,
   results,
+  skipped,
   timings,
   patchedSizes: meta.patched,
   outSize: meta.outSize,
