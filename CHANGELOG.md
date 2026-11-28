@@ -92,6 +92,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   28902, the child started with ZERO collision errors and registered
   clone-locally on 28902 (machine registry byte-untouched) — two seeded
   instances now coexist live.
+- **TA-2 (partial): the status tools run on the shared classifier
+  (2026-11-28)** — of the 8 real per-suite classifier sites, the two
+  non-destructive STATUS tools are flipped onto
+  `tools/suite_status_lib.ps1`: `status_zcode_instances.ps1` (running-
+  ness from the lib; its detail probes — roaming/clone home/deviceMid —
+  and the commit pressure stay) and `diagnose_suite_pressure.ps1` (the
+  `[1]` table lib-backed with the snapshot injected, which ADDS the
+  subtree-marker walk and the LightWorker column it lacked). The taskbar
+  watchers (need a window→instance lib API) and the four reset
+  kill-target resolvers (kill-safety deltas) stay, recorded with
+  reasons. Factual drifts reconciled with evidence: the per-color
+  AutoClaw2 exe copies DO exist (the reset's stale comment fixed), and
+  the AutoClaw2 profile lockfile is **live-verified** (exists exactly
+  while the app runs, gone after stop) — the lib's autoclaw2 row gained
+  the lockfile probe, so a HELD lock now claims a stock-exe clone and
+  the blanket "UNCLASSIFIABLE" note is gone for that suite.
 - **Repo-hygiene wave (2026-11-28)** — four recorded follow-ups closed in
   one pass: the merge-helper trio (`ConvertTo-DeepHashtable` /
   `Test-DeepEqual` / `Write-JsonNoBom`) moved into the shared

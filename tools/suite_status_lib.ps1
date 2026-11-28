@@ -46,8 +46,8 @@ $script:GhostSuites = @{
         WmiFamily      = "Name LIKE 'AutoClaw2%'"
         ProcFamily     = 'AutoClaw2*'
         ExePrefix      = 'AutoClaw2'
-        PrimaryLock    = ''                    # autoclaw2 leaves no lockfile (documented)
-        CloneLockProbe = $null
+        PrimaryLock    = (Join-Path $env:APPDATA 'AutoClaw2\lockfile')
+        CloneLockProbe = { param($cloneHome) Join-Path $cloneHome 'lockfile' }
         TitleMap       = @{}                   # shared "AutoClaw" title - no title signal
         Instances      = @(
             @{ Key = 'c1'; Color = 'Blue';   CopyExe = 'AutoClaw2-Blue.exe';   CloneHomeRel = 'AutoClaw2ClonesHome\c1'; Markers = @('*AutoClaw2ClonesHome\c1*'); LightWorker = $false },
@@ -436,9 +436,12 @@ function Get-GhostSuiteInstanceState {
             if ($signal -eq 'no' -and $winCount -gt 0) { $signal = 'title' }
         }
 
-        # honesty note: a suite with NO externally readable markers (autoclaw2
-        # passes env, not argv; shared title; no lockfile) can hide a running
-        # stock-exe clone - say so instead of guessing.
+        # honesty note: a suite with NO externally readable markers (env-only
+        # spawn, shared title, no lock probe) can hide a running stock-exe
+        # clone - say so instead of guessing. (Dormant since the TA-2 lockfile
+        # reconciliation: autoclaw2's profile lockfile is LIVE-VERIFIED - it
+        # exists exactly while the app runs, gone after stop - so every
+        # current suite now carries at least one positive/negative signal.)
         if ($signal -eq 'no' -and $inst.Markers.Count -gt 0 -and $sd.TitleMap.Count -eq 0 -and -not $sd.CloneLockProbe) {
             $note = 'stock exe + no lock signal = UNCLASSIFIABLE externally'
         }

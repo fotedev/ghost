@@ -315,8 +315,10 @@ function Sweep-Ac2Tree {
 
 # Aggressive tree-kill for the target's AutoClaw2 processes (marker-classified
 # subtree walk). Requires 2 consecutive clean checks; hard-fails when
-# unkillable. Family filter covers the whole exe family (no per-color copies
-# exist yet, but 'AutoClaw2%' is future-proof for a Task-Manager identity suite).
+# unkillable. Family filter covers the whole exe family (the per-color copies
+# DO exist since the 2026-11-14 exe-identity wave - AutoClaw2-Blue.exe etc. in
+# the install dir, with fresh .ghost-id.json markers - and 'AutoClaw2%'
+# covers them).
 function Get-Ac2TargetMains {
     param([Parameter(Mandatory = $true)][string]$Label)
     $procs = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'AutoClaw2%'" -ErrorAction SilentlyContinue)
