@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 param(
     # v0.1: opt-out switches for the new system-level steps.
     # Default = ON (i.e., do them). Use -SkipMac / -SkipHostname to suppress.
@@ -188,7 +188,7 @@ function Invoke-GhostCore {
     # missing or the subcommand failed (exit code non-zero). Same recipe
     # Set-SqliteKeys uses: functional python probe + UTF-8 console + exit-
     # code check.
-    param([Parameter(Mandatory = $true)][string[]]$CliArgs)
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$CliArgs)
 
     $cli = Get-GhostPythonCli
     if (-not $cli) {
@@ -600,7 +600,7 @@ function Invoke-ClearBinaryIdentityStore {
         else {
             # Empty label -> the core derives the relative label from
             # --root-path (same contract as v0.1's -RootPath).
-            $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot, "",
+            $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot,
                 "--action", $Action, "--root-path", $RootPath)
             if ($null -ne $storeReport) {
                 Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before $storeReport.before -After $storeReport.after -Ok $storeReport.ok

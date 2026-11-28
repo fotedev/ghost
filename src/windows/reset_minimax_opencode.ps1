@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # MiniMax Agent / OpenCode Identity Reset v1.4
 #
 # v1.4 changes vs v1.3 -- THIN MANIFEST over the Python core (Phase 3
@@ -344,7 +344,7 @@ function Invoke-GhostCore {
     # Returns the parsed JSON report, or $null when the core is missing or
     # the subcommand failed (exit code non-zero). Same recipe Set-SqliteKeys
     # uses: functional python probe + UTF-8 console + exit-code check.
-    param([Parameter(Mandatory = $true)][string[]]$CliArgs)
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$CliArgs)
 
     $cli = Get-GhostPythonCli
     if (-not $cli) {
@@ -412,7 +412,7 @@ function Invoke-StoreDelete {
     foreach ($path in $Paths) {
         # Empty label -> the core derives the relative label from --root-path
         # (same contract as the shared helper's -RootPath).
-        $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot, "",
+        $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot,
             "--action", $Action, "--root-path", $RootPath)
         if ($null -ne $storeReport) {
             Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before $storeReport.before -After $storeReport.after -Ok $storeReport.ok
