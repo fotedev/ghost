@@ -170,6 +170,10 @@ class _Fixture:
         db = os.path.join(runtime, "runtime.sqlite")
         self.db_paths[name] = db
         self._seed(db, ws_root=os.path.join("C:\\work", name.lower()))
+        device = os.path.join(pdir, "device")
+        os.makedirs(device, exist_ok=True)
+        with open(os.path.join(device, "active-product-account.json"), "w", encoding="utf-8") as handle:
+            json.dump({"schemaVersion": 1, "accountKey": acc_hash}, handle)
 
     def _seed(self, db, ws_root):
         conn = sqlite3.connect(db)
@@ -1290,8 +1294,15 @@ class ChatImportTests(_PatchedHome):
         open(os.path.join(new_runtime, "runtime.sqlite"), "w").close()
         past = time.time() - 3600
         os.utime(self.fixture.db_paths["Primary"], (past, past))
-        # without the hint the newest pick reads the fresh account and the
-        # schema gate refuses it - the silent source switch, made loud
+        # A stale/newer database must not outrank the app's active pointer.
+        inv = autoclaw2.chat_inventory_for_profile({"profile": "Primary"})
+        self.assertEqual((inv["account_dir"], inv["account_selected_by"]),
+                         (old_hash, "active-pointer"))
+        # Once the app selects the fresh account, the schema gate refuses it;
+        # an explicit source hint still reaches the previous account.
+        pointer = os.path.join(autoclaw2.profile_path("Primary"), "device", "active-product-account.json")
+        with open(pointer, "w", encoding="utf-8") as handle:
+            json.dump({"schemaVersion": 1, "accountKey": "f" * 64}, handle)
         with self.assertRaises(autoclaw2.Refusal) as ctx:
             autoclaw2.chat_inventory_for_profile({"profile": "Primary"})
         self.assertEqual(ctx.exception.code, "schema-mismatch")
@@ -1423,8 +1434,7 @@ class ChatImportTests(_PatchedHome):
         rev = autoclaw2.chat_revert(
             {"target": "c1", "import_id": first["import_id"]})
         self.assertEqual(rev["status"], "ok")
-        profile_dir = os.path.dirname(os.path.dirname(
-            self.fixture.db_paths["c1"]))
+        profile_dir = autoclaw2.profile_path("c1")
         sidecar = autoclaw2._read_sidecar(profile_dir)
         self.assertEqual(
             [r for r in sidecar["imports"] if not r.get("reverted")], [])

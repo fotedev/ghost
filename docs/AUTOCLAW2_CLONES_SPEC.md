@@ -132,7 +132,7 @@ READ (AUMID discovery), never written.
   `dist\installer\payload-verify.cjs` is an existence-only check the app
   never spawns), so no asar-surgery route was needed.
   `tools\patch_autoclaw2_identity.ps1` (AutoClaw2 [13] / gid 78) splices
-  THREE byte-anchors — each verified to occur exactly once in the
+  FIVE byte-anchors — each verified to occur exactly once in the
   4.0.0 bundle — so the AUMID and window icon become env-driven,
   following the app's own `ZWORK_*` convention (it never parses argv
   flags):
@@ -140,9 +140,7 @@ READ (AUMID discovery), never written.
      (process-level AUMID, also covers transient windows);
   2. `appId:Kqn,appIconPath:e,` →
      `appId:process.env.ZWORK_AUMID||Kqn,appIconPath:process.env.ZWORK_CLONE_ICON||e,`
-     (the per-window `setAppDetails` helper; the following
-     `relaunchCommand:`"${e}"`` backtick template literal is NEVER
-     touched);
+     (the per-window `setAppDetails` helper);
   3. `Uf.app.isPackaged&&Xqn(l,process.execPath)` →
      `Uf.app.isPackaged&&(process.env.ZWORK_CLONE_ICON&&l.setIcon(process.env.ZWORK_CLONE_ICON),Xqn(l,process.execPath))`
      (main-window title-bar/taskbar icon).
@@ -156,6 +154,11 @@ READ (AUMID discovery), never written.
      clone's tinted tray_icon.ico and the stock 18x18 resize/template-flag
      logic is untouched. Overriding the read INSIDE mTr covers every call
      site; the Find text is unique in the bundle.)
+  5. Relaunch metadata and native window title (v3, 2026-11-26):
+     `ZWORK_RELAUNCH_COMMAND` routes taskbar relaunch through the clone's
+     launcher, and `ZWORK_RELAUNCH_NAME` uses `AutoClaw2 <Color>`. With no
+     overrides, the Primary keeps its original name and bare command.
+
   The launcher then sets `ZWORK_AUMID=com.zhipuai.autoclaw2.cN`
   (matching the SHORTCUT AUMIDs, so pins and running windows group
   together) + `ZWORK_CLONE_ICON=tools\autoclaw2-<color>-branding\tray_icon.ico`
@@ -172,15 +175,12 @@ READ (AUMID discovery), never written.
   v1-patched file, and the marker records `preDoneAnchors` so `-Restore`
   verifies against that pre-upgrade state. The installer gained
   `-RepairPrimaryAumid` (EC-C01) in the same pass.
-  Inherited quirk (stock behaviour, unchanged): the
-  window's `relaunchCommand` still points at AutoClaw2.exe, so a taskbar
-  "relaunch" on a clone button would open the Primary profile. The new
-  env vars are deliberately NOT added to the bundle's agent-shell env
-  allowlist (`HX`, the `safeEnvironment` array) — they are main-process
-  reads and must not leak into agent shells. Window TITLE stays the
-  shared "AutoClaw" (the renderer `<title>` would re-override it;
-  `page-title-updated` suppression is out of scope — playbook feature #6
-  remains degraded, reported).
+  The identity env vars are main-process inputs, not part of the
+  bundle's agent-shell allowlist. On Windows a colored executable can
+  retarget the stock Start Menu `AutoClaw.lnk` before its main window
+  settles. The launcher now verifies and repairs that link after the
+  window kick. A repair backs up the original and refreshes the living
+  window groups; healthy stock and color-named shortcuts are left alone.
 
   **Taskbar grouping needs a KICK (2026-11-09).** The patched
   `setAppDetails` call writes `System.AppUserModel.ID` on the window at

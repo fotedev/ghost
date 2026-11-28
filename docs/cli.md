@@ -5,7 +5,7 @@ Prefer the interactive launchers — **`GHOST.bat`** (Windows, double-click) or
 scripts and CI. `GHOST.bat` groups its tasks into seven submenus with
 continuous local numbering (IDE Resets [1]-[8] / ZCode Multi-Instance &
 Clones [1]-[34] / System & GHOST Maintenance [1]-[6] / AutoClaw2
-Multi-Instance & Clones [1]-[25] / Cline Multi-Instance & Clones
+Multi-Instance & Clones [1]-[27] / Cline Multi-Instance & Clones
 [1]-[23] / OpenCode Multi-Instance & Clones [1]-[27] / Terminal Agents
 [1]-[9]); chain several tasks in one
 prompt using the numbers shown in that submenu (e.g. `1 3 4` inside ZCode), or
@@ -795,12 +795,14 @@ and `thread_history_*.sqlite` — after a reset a rerun hits the fresh-home
 guard loudly (nothing to reset) until you re-login. gemini-cli stays
 deferred-by-absence (no CLI on this machine; `~\.gemini` is Antigravity's).
 
-### AutoClaw2 watchers (AutoClaw2 [23]-[25])
+### AutoClaw2 watchers + chat sync (AutoClaw2 [23]-[27])
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\watch_suite_taskbar.ps1" -Suite autoclaw2      # [23] — resident taskbar identity watcher
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\diagnose_suite_pressure.ps1" -Suite autoclaw2  # [24] — read-only pressure report
 powershell -ExecutionPolicy Bypass -File "src\windows\reset_autoclaw2.ps1" -Target All -DryRun            # [25] — dry-run reset plan
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\watch_autoclaw2_chat_sync.ps1" -RunOnce -DryRun # [26] — all-to-all chat mesh preview (prints a PlanId, writes nothing)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\watch_autoclaw2_chat_sync.ps1" -RunOnce        # [27] — one verified all-to-all chat mesh apply
 ```
 
 The taskbar watcher re-stamps window AUMIDs + heals the Primary lnk (log
@@ -809,6 +811,16 @@ report is read-only; the dry-run plan writes nothing. Honest limit: a
 stock-exe AutoClaw2 clone carries no classification markers (no per-color
 exe, env-only suite), so the taskbar watcher warns once and leaves it
 alone — it is never re-stamped to the base AUMID.
+
+The chat mesh rows converge conversation history across Primary and all
+five clones: open profiles are queued (never stopped), every closed target
+is backed up + verified before its apply, and each preview prints the
+`PlanId` you can pin with `-PlanId`. The resident watcher behind
+`-InstallAutostart` repeats the pass on runtime changes; the Sync & Open
+Primary handoff lives on its own Desktop shortcut
+(`tools\launch_autoclaw2_primary_sync.ps1 -InstallShortcut` — it waits for
+Primary to quit, runs one gated pass, then relaunches the stock exe
+non-elevated).
 
 Isolation is 100% env-based and needs NO patching: `ZWORK_USER_DATA` pins
 the whole Electron userData per clone BEFORE the per-profile

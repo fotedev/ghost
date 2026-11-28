@@ -113,3 +113,6 @@ _agent_scratch/
 
 # Editor settings (VS Code)
 .vscode/
+
+# Playwright MCP session captures (local junk, never commit).
+.playwright-mcp/

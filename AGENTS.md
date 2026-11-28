@@ -12,11 +12,11 @@ README.md  AGENTS.md  GHOST.bat/ghost.sh     # root launchers (GHOST.exe = the g
                                              #   CLI cheat sheet: docs/cli.md); GHOST.bat =
                                              #   7 submenus with CONTINUOUS LOCAL numbering
                                              #   (IDE Resets [1]-[8] / ZCode Multi-Instance &
-                                             #   Clones [1]-[33] / System & GHOST Maintenance
+                                             #   Clones [1]-[34] / System & GHOST Maintenance
                                              #   [1]-[6] / AutoClaw2 Multi-Instance & Clones
-                                             #   [1]-[25] / Cline Multi-Instance & Clones
+                                             #   [1]-[27] / Cline Multi-Instance & Clones
                                              #   [1]-[23] / OpenCode Multi-Instance & Clones
-                                             #   [1]-[27] / Terminal Agents [1]-[4]) + ANSI
+                                             #   [1]-[27] / Terminal Agents [1]-[9]) + ANSI
                                              #   colors + local chained input
                                              #   per submenu (e.g. "1 3 4"), main-menu sub-paths
                                              #   ("2 1 3 4" = ZCode then run its [1] [3] [4]),
@@ -796,7 +796,12 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     + read-back verify; primary-lnk hijack guard every ~5m
                                    #     = clone-AUMID predicate on Shell ExtendedProperty +
                                    #     installer -RepairPrimaryAumid child (120s cap) +
-                                   #     re-read verify; -RunOnce/-IntervalSeconds/
+                                   #     re-read verify; 2026-11-28: the autoclaw2 guard
+                                   #     dot-sources tools/autoclaw2_primary_lnk.ps1 and
+                                   #     also flags stock-named links TARGETING a per-color
+                                   #     exe copy (not just clone AUMIDs), and the autoclaw2
+                                   #     TitleMap was removed (exe-based classification
+                                   #     only); -RunOnce/-IntervalSeconds/
                                    #     -InstallAutostart/-RemoveAutostart; menu row is the
                                    #     only entry point (launchers do NOT ensure it);
                                    #     Pester: tests/watch_suite_taskbar.Tests.ps1 (17);
@@ -1022,6 +1027,40 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     actively-growing source session
                                    #     duplicates it (changed content hash
                                    #     falls through by design);
+                                   #     2026-11-28 LINEAGE WAVE — both gaps
+                                   #     closed + new modes: imports are tracked
+                                   #     per ORIGIN (ChatLineage back-traces each
+                                   #     imported session to its source
+                                   #     profile/session through the sidecar —
+                                   #     cycle + unknown-origin refusals); the
+                                   #     active-account pointer
+                                   #     (device\active-product-account.json)
+                                   #     drives account selection (resolve_profile
+                                   #     for_chat mode, status
+                                   #     active-account-missing); every chat
+                                   #     writer holds a cross-process lock
+                                   #     (src/python/ghost/autoclaw2_chat_lock.py:
+                                   #     named mutex Local\GhostAutoClaw2ChatMesh-<sha>
+                                   #     on Windows, flock on POSIX; Refusal
+                                   #     mesh-busy); -AllMissing dedupes per
+                                   #     ORIGIN (origin_profile/origin_session_id)
+                                   #     and archived sources are excluded; a
+                                   #     changed-content re-import is a save-fork
+                                   #     gated behind -AllowBranch (explicit
+                                   #     -SessionId only — "(branch X, N entries)"
+                                   #     title); -Mode Reconcile = the
+                                   #     ac2-chat-reconcile core (preview returns
+                                   #     a digest plan_id; apply needs the exact
+                                   #     -PlanId + one explicit -Target, re-checks
+                                   #     plan + closed target + backup inside
+                                   #     BEGIN IMMEDIATE); -PlanId + expected_
+                                   #     source/target_account pins on imports;
+                                   #     audit suppressed for pure previews; -Revert
+                                   #     refuses previews; running-instance
+                                   #     detection = tools/inspect_autoclaw2_chat_runtime.ps1
+                                   #     (userData --user-data-dir markers, NEVER
+                                   #     exe color, FAIL-CLOSED: any unidentifiable
+                                   #     member reports ALL profiles busy);
                                    #   patch_autoclaw2_identity.ps1 — AutoClaw2
                                    #     window + notification-tray identity patch
                                    #     (AutoClaw2 [13] /
@@ -1036,9 +1075,19 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     NO runtime integrity check — bootstrap =
                                    #     bare require(); payload-verify.cjs is
                                    #     existence-only and never spawned). Splices
-                                   #     FOUR byte-anchors (each verified unique
+                                   #     FIVE byte-anchors (each verified unique
                                    #     in the 14.3MB bundle; v2 2026-11-09 adds
-                                   #     the tray anchor) so the AUMID, window icon
+                                   #     the tray anchor; v3 2026-11-28 adds the
+                                   #     window-relaunch anchor — env-driven
+                                   #     relaunchCommand/relaunchDisplayName +
+                                   #     win32 setTitle of the clone name, wired
+                                   #     to ZWORK_RELAUNCH_NAME/COMMAND so the
+                                   #     taskbar relaunch goes through the clone
+                                   #     launcher; process gating widened to
+                                   #     AutoClaw2* but tightened to the exact
+                                   #     install dir; backup hash verified pre-swap
+                                   #     + post-swap byte-hash verify aborts if the
+                                   #     app was reopened) so the AUMID, window icon
                                    #     AND notification-tray icon read
                                    #     ZWORK_AUMID / ZWORK_CLONE_ICON:
                                    #     setAppUserModelId(Kqn),
@@ -1064,6 +1113,16 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     setAppDetails runs and never rebuilds it on a
                                    #     plain write, so without the kick every clone
                                    #     sits in ONE button (the ZCode kick lesson).
+                                   #     2026-11-28 launcher hardening: the window
+                                   #     finder matches by EXE PATH (stock or this
+                                   #     clone's colored copy) instead of process
+                                   #     name, the kick is a retry loop that
+                                   #     re-acquires the HWND after splash swaps
+                                   #     (BelongsToProcess re-checks), and after the
+                                   #     kick the launcher runs install_autoclaw2_
+                                   #     clone_shortcuts.ps1 -RepairPrimaryAumid
+                                   #     -RefreshTaskbar (Windows retargets the
+                                   #     stock lnk during cold start).
                                    #     Idempotent + per-anchor resume since v2:
                                    #     an already-spliced anchor is SKIPPED and
                                    #     recorded as the marker's preDoneAnchors —
@@ -1083,6 +1142,80 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     main-process reads only; window TITLE
                                    #     stays shared "AutoClaw" (renderer <title>
                                    #     re-override is out of scope);
+                                   #   watch_autoclaw2_chat_sync.ps1 — the
+                                   #     all-to-all AutoClaw2 chat mesh driver
+                                   #     (2026-11-28; AutoClaw2 [26] preview =
+                                   #     gid 137 -RunOnce -DryRun, [27] apply =
+                                   #     gid 138 -RunOnce): spawns python -B
+                                   #     <ghost cli> ac2-chat-mesh with the base64
+                                   #     payload (kill-timeout, JSON report);
+                                   #     -RunOnce applies ONE self-planned verified
+                                   #     pass (optional -PlanId pin), no mode switch
+                                   #     = resident watcher that re-runs on a
+                                   #     runtime signature (runtime.sqlite/wal
+                                   #     mtimes, active-product-account.json, the
+                                   #     imports sidecar, the AutoClaw2* process set,
+                                   #     or every 10 min); busy profiles are QUEUED
+                                   #     never stopped; -Target limits destinations
+                                   #     only; -InstallAutostart/-RemoveAutostart
+                                   #     manage the Startup lnk (refuses foreign
+                                   #     links; the lnk's watcher exits when the lnk
+                                   #     is removed); -RequireConverged is the
+                                   #     launch-gate exit contract 0/2/1 for the
+                                   #     primary-sync launcher; single instance via
+                                   #     Local\GhostAutoClaw2ChatWatcher mutex; log
+                                   #     at %LOCALAPPDATA%\watch-autoclaw2-chat-sync\
+                                   #     chat-sync.log (2MB rotate);
+                                   #   launch_autoclaw2_primary_sync.ps1 — the Sync
+                                   #     & Open Primary Desktop handoff (2026-11-28;
+                                   #     -InstallShortcut/-RemoveShortcut manage the
+                                   #     Desktop lnk, -InteractiveShortcut for the
+                                   #     installed link): NEVER closes a running app
+                                   #     — warns + waits for Primary to quit, runs
+                                   #     watch_autoclaw2_chat_sync.ps1 -RunOnce
+                                   #     -Target Primary -RequireConverged, then
+                                   #     starts the stock exe with all clone env
+                                   #     vars stripped; REFUSES ELEVATION (the menu
+                                   #     has NO row for it deliberately — the
+                                   #     non-elevated Desktop shortcut IS the entry);
+                                   #   inspect_autoclaw2_chat_runtime.ps1 — JSON-only
+                                   #     read probe mapping running processes to
+                                   #     profiles by --user-data-dir marker (never
+                                   #     exe color; process-family root grouping);
+                                   #     FAILS CLOSED — any CIM failure, unknown
+                                   #     parent chain or unidentifiable member
+                                   #     reports ALL profiles busy; consumed by the
+                                   #     mesh's _busy_profiles + the primary-sync
+                                   #     launcher; injectable -Processes for tests;
+                                   #   autoclaw2_primary_lnk.ps1 — shared dot-sourced
+                                   #     library: Get-Ac2PrimaryShortcutPaths +
+                                   #     Get-Ac2PrimaryShortcutProblem (flags a
+                                   #     stock-named link carrying a clone AUMID or
+                                   #     targeting a per-color AutoClaw2-<Color>.exe);
+                                   #     consumed by the shortcuts installer's
+                                   #     -RepairPrimaryAumid + watch_suite_taskbar;
+                                   #   autoclaw2_mesh.py / autoclaw2_mesh_copy.py /
+                                   #     autoclaw2_history.py (src/python/ghost) —
+                                   #     the mesh core (CLI verbs ac2-chat-mesh +
+                                   #     ac2-chat-reconcile, 2026-11-28): mesh
+                                   #     catalogs every lineage version across the
+                                   #     profile account DBs, picks winners/forks by
+                                   #     prefix-extension, applies only to closed
+                                   #     targets (disk-checked + quick_check-verified
+                                   #     backup, provenance sidecar written BEFORE
+                                   #     commit, process re-check inside the
+                                   #     transaction, one retained verified backup per
+                                   #     account); NOTE the confusing name:
+                                   #     autoclaw2_mesh_copy.py is the LOAD-BEARING
+                                   #     append-only REPLAY ENGINE (shape fingerprint
+                                   #     / extends strict-prefix test / replay
+                                   #     remapping incl. FTS + artifact custody;
+                                   #     replayed nonterminal runs become
+                                   #     interrupted history so stale turns never
+                                   #     seed the target's work queue) — NOT a stray
+                                   #     copy of the mesh; history.reconcile archives
+                                   #     covered duplicates + renames same-title
+                                   #     keepers to "<title> (N entries)";
                                    #   sync_mcp_registry.ps1 — MCP central registry importer
                                    #     (Maintenance [4] / gid 77; -DryRun, -Target
                                    #     cursor|windsurf|vscode|zcode|minimax|opencode|

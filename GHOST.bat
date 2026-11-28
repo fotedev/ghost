@@ -246,6 +246,10 @@ call :Opt 23 "Taskbar identity watcher" "- resident - re-stamps window AUMIDs + 
 call :Opt 24 "Instance pressure report" "- read-only - instances, commit RAM, log scan"
 call :Opt 25 "Dry-run reset plan" "- what a reset would touch - writes nothing"
 echo.
+call :Div "Chat Sync"
+call :Opt 26 "Chat mesh sync preview" "- all-to-all between Primary and clones - read-only plan"
+call :Opt 27 "Chat mesh sync apply" "- converge every closed profile - verified backups kept"
+echo.
 call :Opt 0 "Back to Main Menu" ""
 echo.
 if not defined PENDING_CHAIN goto AUTOCLAW_PROMPT
@@ -544,7 +548,8 @@ rem 2026-11-04, now LIVE); locals 12-14 = Maintenance, 15 = the Task-Manager
 rem exe-identity rebuild (gid 105, repo-only + opt-in), 16-22 = Identity
 rem Resets (gids 84-90; reset_autoclaw2.ps1 -Target c1..c5|Primary|All; the
 rem ALL row is gated). Locals shifted for the watcher + rebuild rows - gids
-rem unchanged.
+rem unchanged. 2026-11-28: locals 26-27 = the chat mesh sync preview + apply
+rem rows (gids 137/138) in a new Chat Sync section.
 set "RESOLVED="
 if "%~1"=="1" set "RESOLVED=28"
 if "%~1"=="2" set "RESOLVED=29"
@@ -571,6 +576,8 @@ if "%~1"=="22" set "RESOLVED=90"
 if "%~1"=="23" set "RESOLVED=114"
 if "%~1"=="24" set "RESOLVED=116"
 if "%~1"=="25" set "RESOLVED=119"
+if "%~1"=="26" set "RESOLVED=137"
+if "%~1"=="27" set "RESOLVED=138"
 if not defined RESOLVED call :UnknownTask "%~1"
 if not defined RESOLVED exit /b
 call :DispatchOne %RESOLVED%
@@ -675,7 +682,7 @@ call :DispatchOne %RESOLVED%
 exit /b
 
 :DispatchOne
-rem Runs one task by global id (1-136; 5 unused = the retired AutoClaw v1
+rem Runs one task by global id (1-138; 5 unused = the retired AutoClaw v1
 rem block 37-40 + 63, kept reserved-dead by the hub-menu test; 74 = the AutoClaw2 MCP sync
 rem watcher, LIVE since 2026-11-14; 78 = the AutoClaw2 identity patch;
 rem 79/80 = the OpenCode light worker + clone login; 81 = the desktop-app
@@ -693,7 +700,8 @@ rem Agents submenu - claude-code light worker + login + reset + status,
 rem appended 2026-11-21; 131 = the ZCode memory-sync row (ZCode [34]);
 rem 132 = the Terminal Agents Z.ai gateway setup row, appended 2026-11-21;
 rem 133-136 = the Terminal Agents Codex CLI rows (light worker + login +
-rem reset + status), appended 2026-11-21).
+rem reset + status), appended 2026-11-21; 137/138 = the AutoClaw2 chat mesh
+rem sync preview + apply rows, appended 2026-11-28).
 rem Unknown ids
 rem print an error. Returns to caller.
 rem gid 1 (2026-11-10): the bare :Run dispatched the script's DEFAULT mode
@@ -870,6 +878,8 @@ if "%~1"=="133" (call :Detached "Codex CLI Light Worker" "-NoProfile" "src\windo
 if "%~1"=="134" (call :Detached "Codex CLI c1 Login" "-NoProfile" "src\windows\launch_codex_light.ps1" "-Login" "Login window opened - follow the browser flow for THIS instance's account." "One-time per clone home: it writes the home's own auth.json. One credential = one instance." & exit /b)
 if "%~1"=="135" (call :ConfirmRun "Codex reset - Primary identity (~\.codex)" "src\windows\reset_codex.ps1" "Removes the credential (auth.json), the install id and the runtime SQLite stores so the next run generates a FRESH identity. config.toml, AGENTS.md, chats/sessions, memories and thread history are PRESERVED. Re-login required afterwards. Clone-home resets: run the script with -Instance cN." & exit /b)
 if "%~1"=="136" (call :Run "tools\status_all_instances.ps1" -Suites codex & exit /b)
+if "%~1"=="137" (call :Run "tools\watch_autoclaw2_chat_sync.ps1" -RunOnce -DryRun & exit /b)
+if "%~1"=="138" (call :Run "tools\watch_autoclaw2_chat_sync.ps1" -RunOnce & exit /b)
 call :UnknownTask "%~1"
 exit /b
 

@@ -29,7 +29,7 @@ import base64
 import json
 import sys
 
-from ghost import audit, autoclaw2, backup, filesweep, identity, json_merge, json_patch, opencode, platform, restore, sqlite_keys, winstore
+from ghost import audit, autoclaw2, autoclaw2_history, autoclaw2_mesh, backup, filesweep, identity, json_merge, json_patch, opencode, platform, restore, sqlite_keys, winstore
 
 
 def _decode_updates(b64):
@@ -73,6 +73,14 @@ def _cmd_ac2_chat_import(args):
 
 def _cmd_ac2_chat_revert(args):
     return _run_ac2(autoclaw2.chat_revert, args)
+
+
+def _cmd_ac2_chat_reconcile(args):
+    return _run_ac2(autoclaw2_history.reconcile, args)
+
+
+def _cmd_ac2_chat_mesh(args):
+    return _run_ac2(autoclaw2_mesh.sync, args)
 
 
 def _run_oc(fn, args):
@@ -599,6 +607,19 @@ def build_parser():
     p.add_argument("payload_b64",
                    help='base64 of {"target": "c1", "import_id": "..."}')
     p.set_defaults(func=_cmd_ac2_chat_revert)
+
+    p = sub.add_parser(
+        "ac2-chat-reconcile",
+        help="preview or apply non-destructive AutoClaw2 chat cleanup")
+    p.add_argument("payload_b64",
+                   help='base64 of {"target": "c1", "apply": false}; '
+                        'apply needs the preview plan_id')
+    p.set_defaults(func=_cmd_ac2_chat_reconcile)
+
+    p = sub.add_parser(
+        "ac2-chat-mesh", help="preview or converge all local AutoClaw2 chat histories")
+    p.add_argument("payload_b64", help='base64 of {"apply": false, "targets": ["Primary", "c1"]}')
+    p.set_defaults(func=_cmd_ac2_chat_mesh)
 
     # ---- OpenCode suite: chat sync (tools/sync_opencode_chats.ps1) --------
     # Same ONE-base64-JSON-payload contract as the ac2-* bridges; the PS

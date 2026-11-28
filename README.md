@@ -229,7 +229,13 @@ ghost/
 │                   #   watch_zcode_mcp_sync.ps1 (resident MCP sync watcher),
 │                   #   sync_autoclaw2_mcp.ps1 (AutoClaw2: master manifest →
 │                   #   closed-clone connected sources) + sync_autoclaw2_chats.ps1
-│                   #   (chat inventory / guarded one-way import / revert),
+│                   #   (chat inventory / lineage-guarded one-way import / revert
+│                   #   / -Mode Reconcile history cleanup),
+│                   #   watch_autoclaw2_chat_sync.ps1 (all-to-all chat mesh watcher
+│                   #   — preview/apply/autostart) + launch_autoclaw2_primary_sync.ps1
+│                   #   (Sync & Open Primary Desktop handoff) +
+│                   #   inspect_autoclaw2_chat_runtime.ps1 (fail-closed busy-profile
+│                   #   probe) + autoclaw2_primary_lnk.ps1 (stock-lnk drift library),
 │                   #   autoclaw2-mcp.master.json (AutoClaw2 device MCP manifest),
 │                   #   zcode-{blue,yellow,green,red,orange}-branding/ (icon assets);
 │                   #   cline-{blue,yellow,green,red,orange}-branding/ (clone icons,
@@ -257,7 +263,8 @@ ghost/
 │                   #   patch_cline_exe_identity.ps1 / patch_opencode_exe_identity.ps1
 │                   #   (per-color Task-Manager exe copies on the shared
 │                   #   exe_identity_lib.ps1 core), watch_suite_taskbar.ps1
-│                   #   (generic suite taskbar identity watcher),
+│                   #   (generic suite taskbar identity watcher; autoclaw2 also
+│                   #   flags stock lnks retargeted to per-color exe copies),
 │                   #   diagnose_suite_pressure.ps1 (read-only per-suite pressure
 │                   #   report), status_zcode_instances.ps1 (clone status table)
 ├── tests/          # Pester 5 suite (PowerShell) + stdlib unittest suite (Python core)
