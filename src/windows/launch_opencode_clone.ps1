@@ -133,6 +133,21 @@ if ($Status) {
     } else {
         Write-Host 'process     : no process carries this clone flag'
     }
+    # CS-11: the per-clone service port (the frozen map seed written by the
+    # [2d/5] pre-launch step; the spawned `serve --service` child reads it).
+    $svcCfg = Join-Path $CloneHome 'config\opencode\service.json'
+    if (Test-Path -LiteralPath $svcCfg) {
+        try {
+            $svc = Get-Content -LiteralPath $svcCfg -Raw | ConvertFrom-Json
+            if ($svc.port -ge 1 -and $svc.port -le 65535) {
+                Write-Host "service port: $($svc.port) (per-clone seed - the version default collides across instances on 2.4.2+)"
+            } else {
+                Write-Host 'service port: config present but no valid port - the version default applies (collision risk on 2.4.2+)'
+            }
+        } catch { Write-Host 'service port: config unreadable' }
+    } else {
+        Write-Host 'service port: not seeded yet (the next launch runs [2d/5]) - collision risk on 2.4.2+'
+    }
     if (Test-Path $IdentityJson) {
         try {
             $id = Get-Content -LiteralPath $IdentityJson -Raw | ConvertFrom-Json
@@ -201,6 +216,31 @@ if (Test-Path -LiteralPath $SyncScript) {
     }
 } else {
     Write-Warning "sync child not found: $SyncScript - definitions sync skipped."
+}
+
+# 2d) Seed the per-clone service port (CS-11, 2026-11-28): OpenCode v2.4.2
+#     computes the service port default from the version (the win32 remap
+#     yields 28894 for 2.4.2) and the service REFUSES to start on collision -
+#     two instances can only coexist on distinct seeded ports. The spawned
+#     `opencode-cli.exe serve --service` child reads
+#     <configHome>\opencode\service.json (the CONFIG home the XDG preempt
+#     below points at the clone; the desktop app itself never touches this
+#     file). The shared helper writes the frozen map port there, preserving
+#     any existing keys (notably the pre-shared password) and skipping loudly
+#     when a valid port is already present. Best-effort by contract: a failed
+#     seed warns (the next service spawn would hit the documented
+#     port-collision error) and NEVER blocks the launch.
+$ServicePortHelper = Join-Path $PSScriptRoot 'ghost_opencode_service_port.ps1'
+Write-Host '[2d/5] Seed the per-clone service port'
+if (Test-Path -LiteralPath $ServicePortHelper) {
+    . $ServicePortHelper
+    $svcSeed = Initialize-GhostOpenCodeServicePort -CloneHome $CloneHome -Instance $Instance
+    Write-Host ("      service port: {0} ({1})" -f $svcSeed.Port, $svcSeed.Note)
+    if ($svcSeed.Status -eq 'failed') {
+        Write-Warning "service-port seed failed - the clone's service may refuse to start while another instance's service holds the default port (CS-11; see the port-collision note in the service log)."
+    }
+} else {
+    Write-Warning "ghost_opencode_service_port.ps1 not found - port seeding skipped (CS-11)."
 }
 
 # 2c) Ensure the resident config-sync watcher a fresh install needs is alive

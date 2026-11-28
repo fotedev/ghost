@@ -168,4 +168,10 @@ Describe 'OpenCode light launcher - fail-fast guard (functional child)' {
             if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
         }
     }
+    It 'seeds the per-clone service port before the first CLI spawn (CS-11)' {
+        $raw = [System.IO.File]::ReadAllText($script:ScriptPath)
+        ($raw -match [regex]::Escape('ghost_opencode_service_port.ps1')) | Should -BeTrue
+        ($raw -match 'Initialize-GhostOpenCodeServicePort -CloneHome \$CloneHome -Instance \$Instance') | Should -BeTrue
+        ($raw.IndexOf('Initialize-GhostOpenCodeServicePort') -lt $raw.IndexOf('& $CliExe')) | Should -BeTrue -Because 'the default run/REPL path auto-starts the service child, which reads the seeded port'
+    }
 }

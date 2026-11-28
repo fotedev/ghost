@@ -73,6 +73,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `opencode service set port <port>` persists per-clone to
   `<configHome>\opencode\service.json`, so the launcher seeding a frozen
   per-clone port map is the remaining fix.
+- **CS-11: the per-clone service-port seeding (2026-11-28)** — the fix
+  for the 2.4.2 fixed-port collision. A shared helper
+  (`src/windows/ghost_opencode_service_port.ps1`) carries the frozen
+  map **c1..c5 → 28901..28905** (mutual distinctness only — the port
+  default is version-computed, not a literal) and
+  `Initialize-GhostOpenCodeServicePort` seeds
+  `<cloneHome>\config\opencode\service.json`: a valid existing port is
+  SKIPPED loudly (a hand-tuned port is never overwritten), otherwise the
+  file is MERGED (every existing key preserved — notably the pre-shared
+  service password — and `port` set), written atomically via the shared
+  `Write-JsonNoBom` (no BOM), verify-after re-read, warn-never-block.
+  Wired into BOTH launchers: the desktop launcher's new **[2d/5]**
+  pre-launch step and the light worker's run path (its default run
+  auto-starts the same `serve --service` child); `-Status` surfaces the
+  seeded port. Functional fixtures (fresh/skip/merge/invalid-JSON) +
+  launcher/light pins. **Live c2 acceptance**: the fresh seed wrote
+  28902, the child started with ZERO collision errors and registered
+  clone-locally on 28902 (machine registry byte-untouched) — two seeded
+  instances now coexist live.
 - **Repo-hygiene wave (2026-11-28)** — four recorded follow-ups closed in
   one pass: the merge-helper trio (`ConvertTo-DeepHashtable` /
   `Test-DeepEqual` / `Write-JsonNoBom`) moved into the shared
