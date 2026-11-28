@@ -78,6 +78,12 @@ $ErrorActionPreference = "Stop"
 #     behavior (global unset -> the delete still runs). The probe gains the
 #     SVC tier; the anchor is expected at exactly 1 site (the engine aborts on
 #     drift) and an anchor-absent build is skipped loudly.
+# v5.1 (2026-11-28, same engine anchors): the post-swap probe EMBEDS the
+#     signature need list in the script string - PS 5.1's native-argument
+#     boundary strips embedded double quotes, so the v5 JSON-through-argv form
+#     threw AFTER a fully successful swap and lost that run's marker (the
+#     markerless-repair hardening below re-pairs with a scanned pristine
+#     backup when that state is met).
 $script:EngineVersion = 5
 function Resolve-OpenCodeInstallDir {
   param([string]$Override)
@@ -444,6 +450,28 @@ if ($OcCorePatched -and $existingMarker -and $existingMarker.backupDir -and (Tes
   $OcBackupDir = $existingMarker.backupDir
   Write-Host "[1/5] Reusing original backup at $OcBackupDir"
 }
+if ($OcCorePatched -and -not $existingMarker) {
+  # Markerless-but-patched asar (2026-11-28 live incident: a driver run died
+  # between the swap and the marker write). Backing up the PATCHED asar here
+  # would mis-pair -Restore (a later "restore" would return the patched
+  # bytes). Scan the existing backups for a PRISTINE asar (no core
+  # signature); exactly one = re-pair with it loudly. Zero or several =
+  # today's behavior (the WARNING below explains the mis-pairing).
+  $pristineCandidates = @()
+  foreach ($d in @(Get-ChildItem -LiteralPath $OcBackups -Directory -ErrorAction SilentlyContinue)) {
+    $bAsar = Join-Path $d.FullName "app.asar"
+    if (-not (Test-Path -LiteralPath $bAsar)) { continue }
+    $verdict = & $NodeExe -e "const fs=require('fs');process.stdout.write(fs.readFileSync(process.argv[1]).includes('__opencodeCloneHome')?'patched':'pristine')" $bAsar
+    if ("$verdict" -eq 'pristine') { $pristineCandidates += $d.FullName }
+  }
+  if ($pristineCandidates.Count -eq 1) {
+    $OcReuseBackup = $true
+    $OcBackupDir = $pristineCandidates[0]
+    Write-Host "[1/5] Markerless-but-patched asar detected - re-pairing with the pristine backup at $OcBackupDir"
+  } elseif ($pristineCandidates.Count -gt 1) {
+    Write-Host ("WARNING: {0} pristine backups found - cannot pick one; proceeding with the current-asar backup." -f ($pristineCandidates -join '; '))
+  }
+}
 if (-not $OcReuseBackup) {
   if ($OcCorePatched) { Write-Host "WARNING: patched tree but no usable marker backup - the new backup captures the CURRENT (patched) asar; -Restore will return here, not to the vendor asar." }
   Write-Host "[1/5] Backup to $OcBackupDir"
@@ -547,10 +575,20 @@ try {
   # in-place fallback path as well as the plain delete+move). The service
   # splice signature is required exactly when the engine did NOT skip the
   # family (skipped = anchor-absent build, reported loudly above).
+  # The need list is EMBEDDED in the script string as a SINGLE-quoted JS
+  # array literal. PS 5.1's native-argument boundary strips embedded DOUBLE
+  # quotes (live-proven 2026-11-28: node received "[__opencodeCloneHome||
+  # delete]" for the intended '["..."]' - JSON.parse threw and the probe
+  # exited 3 AFTER a fully successful swap, which lost this run's marker -
+  # the markerless-repair hardening below exists because of exactly that).
+  # Single-quoted JS survives the boundary (the tier probe above has always
+  # relied on it), so the list travels inside the script, never as an arg.
   $SvcSkipped = ($engineJson.skipped -contains "service-registry")
-  $swapScript = "const fs=require('fs');try{const b=fs.readFileSync(process.argv[1]);const need=['__opencodeCloneHome','__opencodeCloneIdentity','--opencode-clone-home','--opencode-clone-id'];const svcNeed=JSON.parse(process.argv[2]||'[]');const missing=need.filter(s=>!b.includes(s)).concat(svcNeed.filter(s=>!b.includes(s)));if(missing.length){console.log('MISSING '+missing.join(','));process.exit(1)}console.log('OK all-present');process.exit(0)}catch(e){console.error('PROBE_ERROR '+String((e&&e.message)||e));process.exit(3)}"
-  $svcNeedArg = if ($SvcSkipped) { '' } else { '["__opencodeCloneHome||delete"]' }
-  $SwapProbeOut = & $NodeExe -e $swapScript $OcAsar $svcNeedArg
+  $need = @('__opencodeCloneHome', '__opencodeCloneIdentity', '--opencode-clone-home', '--opencode-clone-id')
+  if (-not $SvcSkipped) { $need += '__opencodeCloneHome||delete' }
+  $needJs = ($need | ForEach-Object { "'" + ($_ -replace "'", "\'") + "'" }) -join ','
+  $swapScript = "const fs=require('fs');try{const b=fs.readFileSync(process.argv[1]);const need=[$needJs];const missing=need.filter(s=>!b.includes(s));if(missing.length){console.log('MISSING '+missing.join(','));process.exit(1)}console.log('OK all-present');process.exit(0)}catch(e){console.error('PROBE_ERROR '+String((e&&e.message)||e));process.exit(3)}"
+  $SwapProbeOut = & $NodeExe -e $swapScript $OcAsar
   $SwapProbeText = ($SwapProbeOut -join " ")
   if ($LASTEXITCODE -ne 0 -or $SwapProbeText -notmatch 'OK all-present') {
     throw ("post-swap verify FAILED: signatures not present in the live asar ({0}) - run with -Restore." -f $SwapProbeText)

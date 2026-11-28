@@ -303,7 +303,7 @@ ladder below is moot for this app version:
   main's death (observed: outlived a closed clone window) — kill it when
   stopping a clone manually.
 
-#### 3.8.1 SUPERSEDED for v2.3.2: the machine-global service registry + join-at-startup (CS-10, verified live 2026-11-22/23; the registry-write tail SETTLED + fixed 2026-11-28)
+#### 3.8.1 SUPERSEDED for v2.3.2: the machine-global service registry + join-at-startup (CS-10, verified live 2026-11-22/23; the registry-write tail SETTLED + fixed + LIVE-ACCEPTED 2026-11-28; the 2.4.2 fixed port = new CS-11)
 
 The §3.8 verdict held for the 2.0.32–2.2.5 spawn era only. v2.3.2 changed
 the architecture (asar-mined + live-probed):
@@ -312,8 +312,10 @@ the architecture (asar-mined + live-probed):
   `join($env:XDG_STATE_HOME ?? join(homedir(),'.local','state'), 'opencode',
   'service.json')`, record `{id, version, url, pid, password}` with an
   `/api/info` basic-auth health probe (chunk `service-DgfTFRrw.js`). The
-  port is still ephemeral and service-chosen (28894 is NOT hardcoded —
-  zero asar hits; `OPENCODE_PORT` does not exist).
+  port was still ephemeral and service-chosen in 2.3.2 (28894 NOT
+  hardcoded — zero asar hits; `OPENCODE_PORT` does not exist) — **v2.4.2
+  superseded this: the port is now a COMPILED DEFAULT 28894 and the
+  service refuses to start on collision; see the CS-11 bullet below.**
 - **The desktop main entry calls `Service.discover({version})` at startup
   as pure read-only reuse**: a live compatible record = the instance JOINS
   that service instead of spawning its own (ensure loop: reuse / wait /
@@ -395,16 +397,62 @@ the architecture (asar-mined + live-probed):
   reads `t?.XDG_STATE_HOME||delete process.env.XDG_STATE_HOME` (an `||`
   chain the app itself uses for the non-win32 case), so v5 extends it to
   `t?.XDG_STATE_HOME||globalThis.__opencodeCloneHome||delete ...` — the
-  app's own idiom on the exact villain line. The SWAP + the c1 launch
-  run (assert `c1\state\opencode\service.json` appears, the machine
-  registry byte-untouched, a second c1 launch reuses its own service)
-  remain USER-SUPERVISED pending: the dev host's Primary OpenCode
-  session held the install closed through the whole 60-minute
-  instruct-and-poll window (the gate threw before any write — the
-  machine was untouched). Run OpenCode [8] once the app is closed; the
-  2.4.2 update already broke clone launching on an unpatched install
-  (the launcher's patch-signature preflight aborts flagged launches), so
-  the patch needs applying regardless.
+  app's own idiom on the exact villain line.
+- **The swap + the lost marker (2026-11-28, live)**: the 2.4.2 update
+  left the install unpatched (marker + backups wiped); the applied patch
+  run (OpenCode closed at 08:21) swapped the asar SUCCESSFULLY and then
+  died at the post-swap probe — **PS 5.1's native-argument boundary
+  strips embedded double quotes**: the probe passed a JSON array
+  (`'["__opencodeCloneHome||delete"]'`) as a second `node` argument and
+  the child received `"[__opencodeCloneHome||delete]"` (quotes gone),
+  `JSON.parse` threw, exit 3 → the driver threw after a fully successful
+  swap and the marker was never written. Live-proven with a one-liner.
+  The driver (v5.1, same engine anchors) now EMBEDS the need list in the
+  script string as a single-quoted JS literal (the shape that survives
+  the boundary) and takes exactly one trailing argument; plus a
+  markerless-but-patched re-pair: when the asar is core-patched but the
+  marker is missing, the backup selection scans `ID_Backups/*` for a
+  PRISTINE asar (no core signature) and adopts it loudly instead of
+  backing up the patched asar (which would mis-pair `-Restore`). The
+  machine was repaired by writing the marker with the verified metadata
+  (patchVersion 5, backupDir = the pristine `20261128-082126`,
+  totals 1/1/1) — the driver's early exit then confirmed
+  "Already patched at engine v5 (marker + asar signatures verified)".
+- **LIVE ACCEPTANCE PASSED (2026-11-28)**: with the patched 2.4.2 asar,
+  the launcher's XDG preempt + the v5 splice produced the FULL chain on
+  c1: `c1\state\opencode\service.json` **appeared** (record
+  `{version:"2.4.2", url:"http://127.0.0.1:28901", pid:16456}` — the
+  spawned child registered CLONE-LOCALLY; the file that was always
+  missing before), the machine-default registry stayed byte-untouched
+  (SHA256 + mtime, before/after every step), and a second c1 launch
+  REUSED the clone's own service (no new `opencode-cli` child; the
+  registry pid unchanged). One manual ingredient was required — see the
+  port bullet below. Probe pitfall re-learned: ad-hoc process enumeration
+  MUST match the whole per-color copy family (`OpenCode-*.exe`, not
+  `OpenCode.exe`) — the c1 app runs as `OpenCode-Blue.exe` and a bare
+  name filter reported it absent while it was running (the same
+  copy-family rule the ZCode suite hardened into the repo, now confirmed
+  for OpenCode too).
+- **CS-11 (NEW, found by the acceptance): v2.4.2 FIXED the service port
+  — 28894 is now the compiled default and the service REFUSES to start
+  on collision** (`Managed service port 28894 on 127.0.0.1 is already in
+  use by another process. Configure another port with
+  `opencode service set port <port>` and start the service again.`).
+  This SUPERSEDES the §3.8/§3.8.1 "port is ephemeral and service-chosen"
+  verdict, which held for the 2.3.2 spawn era only — live evidence: c1's
+  app (started before the port was set) spawned TWO service children
+  that both crashed on the port collision with the Primary's lingering
+  service child; after seeding a per-clone port the child started and
+  registered. **The port setting is per-clone-reachable**:
+  `opencode service set port <port>` persists to
+  `<configHome>\opencode\service.json` (c1's = `{"password":"…",
+  "port":28901}` — the CONFIG home, which the launcher's XDG preempt
+  already points at the clone), and `opencode service get port` reads it
+  back. So multi-instance coexistence needs ONE thing the launcher does
+  not do yet: **seed a distinct port per clone** (CS-11 spike: a frozen
+  c1..c5 port map written by the launcher's pre-launch step + the spec
+  port map, verified-after; the interim operator note: seed the port by
+  hand for any clone that must coexist with a live Primary service).
 
 ### 3.9 Light worker: headless CLI on the clone XDG homes (spike-verified 2026-11-07)
 
