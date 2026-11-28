@@ -638,9 +638,17 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     throwing — the lib uses an EXCEPTION-fallback encoder, and
                                    #     single-line reads return an array (return ,$lines, the
                                    #     PowerShell return-unwrap guard);
+                                   #   json_merge_lib.ps1 — the shared helper trio for the three pure
+                                   #     merge cores (zcode_mcp_merge / opencode_config_merge /
+                                   #     cline_mcp_merge dot-source it): ConvertTo-DeepHashtable /
+                                   #     Test-DeepEqual / the ATOMIC Write-JsonNoBom (the CS-7
+                                   #     shape). Deduped 2026-11-28 from formerly-inline copies —
+                                   #     which had already drifted a real bug into cline's copy
+                                   #     ($B[$i] instead of $eb[$i] in the array branch); a
+                                   #     no-inline-copies guard pins the single copy;
                                    #   zcode_mcp_merge.ps1 — pure merge core extracted from
-                                   #     sync_zcode_assets.ps1 (ConvertTo-DeepHashtable /
-                                   #     Test-DeepEqual / Write-JsonNoBom / Invoke-McpMerge): the
+                                   #     sync_zcode_assets.ps1 (Invoke-McpMerge + the shared trio
+                                   #     from json_merge_lib.ps1): the
                                    #     single copy of the merge invariant, unit-tested by
                                    #     tests/zcode_mcp_merge.Tests.ps1 (clone-local enabled
                                    #     survives, clone-only servers kept, new servers inherit
@@ -656,9 +664,10 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     REMOVED and reported as the Scrubbed list (the child turns
                                    #     them into the loud "fill the API key once in this clone"
                                    #     WARN); a secret the CLONE already has survives; no
-                                   #     placeholder is ever written. Intentionally duplicates the
-                                   #     zcode merge helpers (that file ships + is unit-tested;
-                                   #     dedup recorded as follow-up); unit-tested by
+                                   #     placeholder is ever written. The helper trio is SHARED
+                                   #     (json_merge_lib.ps1 since 2026-11-28 — the v1 deliberate
+                                   #     duplication deduped, and the atomic writer became the
+                                   #     shared shape); unit-tested by
                                    #     tests/opencode_config_merge.Tests.ps1 (12 - the zcode
                                    #     invariant cases ported + the scrub cases + JSONC strip +
                                    #     no-BOM round-trip);

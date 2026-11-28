@@ -371,11 +371,15 @@ function Invoke-OldIdBackupsPurge {
 
     $allBackups = @(Get-ChildItem -LiteralPath $IdBackupsRoot -Directory -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending)
-    $toDelete = @($allBackups | Where-Object { $_.Name -ne $currentTimestamp })
+    # 2026-11-28 (the #73 zcode policy shape, as trae/zcode/qoder already
+    # carry): only dirs OLDER than 24h are purgeable - a same-day dir may be
+    # the only undo copy of an earlier chained run on this resetter.
+    $recentFloor = (Get-Date).AddHours(-24)
+    $toDelete = @($allBackups | Where-Object { $_.Name -ne $currentTimestamp -and $_.LastWriteTime -lt $recentFloor })
 
     if ($toDelete.Count -eq 0) {
         Add-AuditEntry -Audit $Audit -File $IdBackupsRoot -Key "id-backups-purge" -Before "none" -After "none" -Ok $true
-        Write-Host "    no older ID_Backups to purge (only current run present)" -ForegroundColor DarkGray
+        Write-Host "    no older ID_Backups to purge (current run kept; same-day runs protected)" -ForegroundColor DarkGray
         return $true
     }
 
