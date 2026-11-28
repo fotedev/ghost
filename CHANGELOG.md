@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to GHOST are documented here. Versions are Git tags
 (`vX.Y.Z`); script filenames are unversioned.
@@ -8,6 +8,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **ZCode reset hardening (2026-11-28)** — the new fixture tests exposed and
+  fixed FOUR latent bugs in `reset_zcode.ps1` (plus one shared across the four
+  thin-manifest resetters): the QuickEdit guard now opens CONIN$ (the INPUT
+  buffer QuickEdit lives on) with the correct `GENERIC_READ|GENERIC_WRITE`
+  access and an `ExactSpelling` SafeFileHandle import, verify-then-claim
+  (`[console] QuickEdit disabled for this console (verified).`), and a
+  `-DryRun` plan leaves both the mode and the output untouched — the old
+  CONOUT$ guard could never have cleared anything (wrong buffer AND access
+  `0xC0400000`, both probed); the Both/All orchestrator launched children with
+  the undefined `$v14Script` (every Both/All run died at the first child) —
+  now a self-contained `$orchestratorScript` dispatch; an explicit
+  `-SkipQoder` reaches the Primary child and the dry-run plan; the "IDs were
+  generated" NOTE only prints when no child failed (a `[FAILED]` line
+  otherwise); steps [7/27] (Qoder argv.json) and [24/27] (~/.qoder caches)
+  were ungated — clone resets and `Primary -SkipQoder` rotated the shared
+  Qoder crash-reporter id and wiped `~/.qoder` caches; the success banner is
+  finally v1.5; and `Invoke-StoreDelete` across zcode/qoder/qoderwork/minimax
+  could never have fired through the v1.5 shape (a `""` label element fails
+  `Mandatory [string[]]` binding on PS 5.1 AND pwsh, and PS 5.1 then drops
+  empty native args so argparse demanded the label) — the core's
+  `store-delete` label is now optional (`nargs="?"`, omitted = derived from
+  `--root-path`, the documented contract). New tests:
+  `reset_zcode_console` (live CONIN$ fixture) + `reset_zcode_orchestrator`
+  (real child dispatch over inert stubs) + `reset_store_delete` (17 total).
 - **AutoClaw2 chat lineage + all-to-all mesh sync (2026-11-28)** — the chat
   import layer grew an identity: imports are now tracked per ORIGIN
   (`ChatLineage` back-traces each imported session to its source
