@@ -498,7 +498,8 @@ def build_parser():
              "retries (Clear-BinaryIdentityStore twin, one path)")
     p.add_argument("path")
     p.add_argument("backup_root")
-    p.add_argument("label")
+    p.add_argument("label", nargs="?", default=None,
+                   help="omitted/empty = derived from --root-path")
     p.add_argument("--action", choices=["rename", "delete"], default="delete")
     p.add_argument("--root-path", default=None,
                    help="paths under this root get relative backup labels")

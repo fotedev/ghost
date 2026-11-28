@@ -1541,6 +1541,52 @@ reset_qoder.ps1       # Qoder: 31 steps (main + CORS_Profile, expanded
                                    #          the written value (idempotent, heals a recreation)
                                    #          instead of replaying step-[3] audit entries)
 reset_zcode.ps1       # ZCode v1.5 THIN MANIFEST (2026-11-14): 27 steps +
+                                   #          2026-11-28 HARDENING WAVE (the new test
+                                   #          files exposed THREE latent bugs + pinned the
+                                   #          fixes): [1] the console guard is now a
+                                   #          Ghost.ResetConsoleInput CONIN$ INPUT-buffer guard
+                                   #          with verify-then-claim (the exact message
+                                   #          "[console] QuickEdit disabled for this console
+                                   #          (verified).", DryRun leaves mode AND output
+                                   #          untouched) - TWO latent bugs fixed: the old
+                                   #          guard opened CONOUT$ (the screen buffer, not the
+                                   #          input buffer QuickEdit lives on) with access
+                                   #          0xC0400000 (NOT GENERIC_READ|WRITE - the comment
+                                   #          lied; CONIN$ refuses it with ACCESS_DENIED) and
+                                   #          an IntPtr non-ExactSpelling CreateFileW import
+                                   #          opens CONIN$ as INVALID_HANDLE (both probed on
+                                   #          Win10 19045 - ExactSpelling + SafeFileHandle are
+                                   #          load-bearing); [2] the Both/All orchestrator
+                                   #          children were launched with $v14Script (defined
+                                   #          NOWHERE - every Both/All run died at the first
+                                   #          child) -> self-contained $orchestratorScript
+                                   #          ($MyInvocation.MyCommand.Path inside the dispatch
+                                   #          block); an explicit -SkipQoder now also routes the
+                                   #          Primary child around Qoder AND the dry-run plan
+                                   #          drops its Qoder note; the "IDs were generated"
+                                   #          NOTE prints only when NO child failed (a [FAILED]
+                                   #          line prints otherwise); [3] TWO Qoder scope
+                                   #          leaks: step [7/27] argv.json crash-reporter-id
+                                   #          and step [24/27]'s ~/.qoder cache/session-env/
+                                   #          plugins/extensions tail ran on EVERY target -
+                                   #          clone resets and Primary -SkipQoder rotated the
+                                   #          shared Qoder crash-reporter id + wiped ~/.qoder
+                                   #          caches; both now gated on $qoderPresent (the
+                                   #          success banner is v1.5 - the committed one still
+                                   #          said v1.4); [4] ACROSS THE FOUR thin-manifest
+                                   #          resetters (zcode/qoder/qoderwork/minimax):
+                                   #          Invoke-StoreDelete could NEVER have fired through
+                                   #          the v1.5 shape - the "" label slot fails
+                                   #          Mandatory [string[]] binding (empty ELEMENT) on
+                                   #          PS 5.1 AND pwsh, and PS 5.1 then DROPS empty
+                                   #          native args so argparse demanded the label; the
+                                   #          core's store-delete label is now nargs="?"
+                                   #          (omitted = derived from --root-path, the
+                                   #          documented contract) and the "" slots are gone +
+                                   #          [AllowEmptyString()] on all four CliArgs params;
+                                   #          the three new test files
+                                   #          (tests/reset_zcode_console/orchestrator/
+                                   #          reset_store_delete, 17) pin all of it;
                                    #          [6b/27] config.json provider-apiKey strip (per-provider
                                    #          json-set gated on an EXISTING apiKey; the v1.4 conditional
                                    #          preserved) + telemetry-state deviceMid, RUM store (json-patch),

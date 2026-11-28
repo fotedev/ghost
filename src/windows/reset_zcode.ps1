@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # ZCode / Qoder Identity Reset v1.5
 #
 # v1.5 -- THIN MANIFEST over the Python core (Phase 3 migration #7 per
@@ -79,8 +79,10 @@
 #     but is NOT used by single-target modes).
 #   - Backups (ID_Backups), watchdog probes and final validation are scoped
 #     strictly per-target. v1.3 is kept intact for rollback.
-#   - -SkipQoder is internal (used by the Both/All orchestrators so Qoder steps
-#     run exactly once, in the Primary child).
+#   - -SkipQoder: the Both/All orchestrators always pass it to the clone
+#     children (Qoder steps run exactly once, in the Primary child); an
+#     explicit -SkipQoder also routes the Primary child around Qoder (and the
+#     dry-run plan drops its Qoder note).
 #
 # v1.3 adds telemetry.macMachineId to $storageUpdates (was 3 keys, now 4 --
 # Cursor/Windsurf/Trae/Qoder all rotate 4; the missing key was a cross-IDE
@@ -149,33 +151,53 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# --- Console hygiene: disable QuickEdit (2026-11-03) ---------------------------
+# --- Console hygiene: disable QuickEdit input (2026-11-28) ---------------------
 # A click or click-drag inside this console starts a QuickEdit text selection,
 # which BLOCKS all console output until a key is pressed - the reset keeps
 # running underneath, but its progress appears frozen (observed 2026-11-03
 # during a Fifth reset: output stalled at the terminate step until a keypress).
-# Drop ENABLE_QUICK_EDIT_MODE (0x40) from this console's mode, keeping every
-# other flag; ENABLE_EXTENDED_FLAGS (0x80) must accompany the change. The
-# handle opens CONOUT$ (the screen buffer itself) so stdout redirection does
-# not matter. Best effort: any failure here must never block the reset. Note
-# Ctrl+S display pause is a host feature that cannot be disabled - any key
-# resumes it.
+# QuickEdit is a property of the INPUT buffer, so the handle opens CONIN$
+# (GENERIC_READ|GENERIC_WRITE = 0xC0000000, share 0x3, OPEN_EXISTING = 3) -
+# the v1.4 CONOUT$ screen-buffer handle never touched the flag users feel.
+# Drop ENABLE_QUICK_EDIT_MODE (0x40), keep every other flag; ENABLE_EXTENDED_
+# FLAGS (0x80) must accompany the change. VERIFY-then-claim: re-read the mode
+# and only report success when the bit is actually clear. A -DryRun plan must
+# leave both the console mode AND the output untouched. Best effort: any
+# failure here must never block the reset. Note Ctrl+S display pause is a host
+# feature that cannot be disabled - any key resumes it.
 try {
-    if (-not ('Ghost.ResetConsole' -as [type])) {
-        Add-Type -MemberDefinition '
-            [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateFileW(string name, int access, int share, IntPtr sec, int disp, int flags, IntPtr tmpl);
-            [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr h, out int mode);
-            [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr h, int mode);
-        ' -Name ResetConsole -Namespace Ghost | Out-Null
-    }
-    # GENERIC_READ|GENERIC_WRITE = 0xC0000000, share 0x3, OPEN_EXISTING = 3.
-    $qeHandle = [Ghost.ResetConsole]::CreateFileW('CONOUT$', -1069547520, 3, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)
-    $qeMode = 0
-    if (($qeHandle -ne [IntPtr](-1)) -and [Ghost.ResetConsole]::GetConsoleMode($qeHandle, [ref]$qeMode)) {
-        $qeNew = ($qeMode -band (-bnot 0x0040)) -bor 0x0080
-        if ($qeNew -ne $qeMode) {
-            [void][Ghost.ResetConsole]::SetConsoleMode($qeHandle, $qeNew)
-            Write-Host '[console] QuickEdit selection disabled for this window - a stray click can no longer pause the output.' -ForegroundColor DarkGray
+    if (-not $DryRun) {
+        if (-not ('Ghost.ResetConsoleInput' -as [type])) {
+            Add-Type -MemberDefinition '
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)] public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string name, int access, int share, IntPtr sec, int disposition, int flags, IntPtr template);
+            [DllImport("kernel32.dll", SetLastError = true)] public static extern bool GetConsoleMode(Microsoft.Win32.SafeHandles.SafeFileHandle handle, out int mode);
+            [DllImport("kernel32.dll", SetLastError = true)] public static extern bool SetConsoleMode(Microsoft.Win32.SafeHandles.SafeFileHandle handle, int mode);
+        ' -Name ResetConsoleInput -Namespace Ghost | Out-Null
+        }
+        # ExactSpelling + the SafeFileHandle return are load-bearing: an
+        # IntPtr-returning import without ExactSpelling opened CONIN$ as
+        # INVALID_HANDLE (ERROR_INVALID_HANDLE) on Win10 19045 - probed
+        # 2026-11-28, the guard then silently did nothing.
+        # GENERIC_READ|GENERIC_WRITE = 0xC0000000 (as a signed int:
+        # -1073741824). The v1.4 CONOUT$ constant -1069547520 is 0xC0400000
+        # - NOT generic read|write, its old comment lied - and failed on
+        # CONIN$ with ERROR_ACCESS_DENIED (probed 2026-11-28).
+        $qeHandle = [Ghost.ResetConsoleInput]::CreateFileW('CONIN$', -1073741824, 3, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)
+        if (-not $qeHandle.IsInvalid) {
+            try {
+                $qeMode = 0
+                if ([Ghost.ResetConsoleInput]::GetConsoleMode($qeHandle, [ref]$qeMode)) {
+                    $qeNew = ($qeMode -band (-bnot 0x0040)) -bor 0x0080
+                    if ([Ghost.ResetConsoleInput]::SetConsoleMode($qeHandle, $qeNew)) {
+                        $qeCheck = 0
+                        if ([Ghost.ResetConsoleInput]::GetConsoleMode($qeHandle, [ref]$qeCheck) -and (($qeCheck -band 0x0040) -eq 0)) {
+                            Write-Host '[console] QuickEdit disabled for this console (verified).' -ForegroundColor DarkGray
+                        }
+                    }
+                }
+            } finally {
+                $qeHandle.Dispose()
+            }
         }
     }
 } catch { Write-Host "[console] QuickEdit tweak SKIP ($($_.Exception.Message))" -ForegroundColor DarkGray }
@@ -277,7 +299,7 @@ function Invoke-GhostCore {
     # missing or the subcommand failed (exit code non-zero). Same recipe
     # Set-SqliteKeys uses: functional python probe + UTF-8 console + exit-
     # code check.
-    param([Parameter(Mandatory = $true)][string[]]$CliArgs)
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$CliArgs)
 
     $cli = Get-GhostPythonCli
     if (-not $cli) {
@@ -349,7 +371,7 @@ function Invoke-StoreDelete {
     foreach ($path in $Paths) {
         # Empty label -> the core derives the relative label from --root-path
         # (same contract as the shared helper's -RootPath).
-        $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot, "",
+        $storeReport = Invoke-GhostCore @("store-delete", $path, $BackupRoot,
             "--action", $Action, "--root-path", $RootPath)
         if ($null -ne $storeReport) {
             Add-AuditEntry -Audit $Audit -File $path -Key "binary-store" -Before $storeReport.before -After $storeReport.after -Ok $storeReport.ok
@@ -1551,8 +1573,9 @@ if (($Target -eq 'Both') -or ($Target -eq 'All')) {
             )
         }
         foreach ($child in $children) {
+            $childSkipQoder = $child.SkipQoder -bor [bool]$SkipQoder
             $qoderNote = ''
-            if (-not $child.SkipQoder) { $qoderNote = ' (incl. Qoder steps)' }
+            if (-not $childSkipQoder) { $qoderNote = ' (incl. Qoder steps)' }
             Write-Host ("  child reset -Target {0}{1}" -f $child.Label, $qoderNote)
         }
         Write-Host "Per-child step plan: run this script with -DryRun -Target <child label>."
@@ -1580,11 +1603,12 @@ if (($Target -eq 'Both') -or ($Target -eq 'All')) {
     $exitCodes = @()
     for ($ci = 0; $ci -lt $childCount; $ci++) {
         $child = $children[$ci]
+        $childSkipQoder = $child.SkipQoder -bor [bool]$SkipQoder
         $qoderNote = ''
-        if (-not $child.SkipQoder) { $qoderNote = ' (incl. Qoder)' }
+        if (-not $childSkipQoder) { $qoderNote = ' (incl. Qoder)' }
         Write-Host ("[{0} {1}/{2}] Resetting {3} instance{4}..." -f (Get-ZcodeTargetDisplay $Target), ($ci + 1), $childCount, (Get-ZcodeTargetDisplay $child.Label), $qoderNote) -ForegroundColor Cyan
-        $fwdArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $v14Script, '-Target', $child.Label)
-        if ($child.SkipQoder) { $fwdArgs += '-SkipQoder' }
+        $fwdArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $orchestratorScript, '-Target', $child.Label)
+        if ($childSkipQoder) { $fwdArgs += '-SkipQoder' }
         & powershell @fwdArgs
         $exitCodes += $LASTEXITCODE
     }
@@ -1592,11 +1616,14 @@ if (($Target -eq 'Both') -or ($Target -eq 'All')) {
     for ($ci = 0; $ci -lt $childCount; $ci++) {
         Write-Host ("{0} exit: {1}" -f (Get-ZcodeTargetDisplay $children[$ci].Label), $exitCodes[$ci]) -ForegroundColor Gray
     }
-    Write-Host "NOTE: IDs were generated independently per instance (never duplicated)." -ForegroundColor Yellow
     Write-Host "NOTE: change_device_id.ps1 is machine-wide and affects ALL ZCode instances + Qoder." -ForegroundColor Yellow
     $anyFail = $false
     foreach ($code in $exitCodes) { if ($code -ne 0) { $anyFail = $true } }
-    if ($anyFail) { exit 1 }
+    if ($anyFail) {
+        Write-Host "[FAILED] one or more children reported a failure - see the exit codes above; nothing was retried." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "NOTE: IDs were generated independently per instance (never duplicated)." -ForegroundColor Yellow
     exit 0
 }
 
@@ -1672,7 +1699,13 @@ if ($DryRun) {
         if ($planLabel -ne $Target) { $planSurvivors += @($planMap[$planLabel]).Count }
     }
     Write-Host ("Survivor mains that must keep running: {0}" -f $planSurvivors)
-    if ($qoderPlanPresent) { Write-Host "Qoder processes would be killed (Primary target only)." }
+    if ($qoderPlanPresent) {
+        if ($Target -eq 'Primary') {
+            Write-Host "Qoder processes would be killed (Primary target only)."
+        } else {
+            Write-Host "Qoder: outside this reset target (Qoder steps run with the Primary child only)."
+        }
+    }
     Write-Host ""
     Write-Host "Step plan (single-target run):"
     foreach ($planStep in @(
@@ -2035,9 +2068,17 @@ else {
 }
 
 # --- [7/27] Qoder argv.json crash-reporter-id (JSONC, comments preserved) ---
+# Qoder-scoped like every other Qoder step: a clone target (or Primary
+# -SkipQoder) must NOT touch the shared ~/.qoder/argv.json - the Primary
+# child owns all Qoder identity writes.
 $qoderArgvPath = Join-Path $qoderUserProfile "argv.json"
 Write-Host "`n[7/27] Updating Qoder argv.json (crash-reporter-id)..." -ForegroundColor Cyan
-if (Update-ArgvJsonCrashReporterId -Path $qoderArgvPath -NewCrashReporterId $newCrashReporterId -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $qoderArgvPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
+if (-not $qoderPresent) {
+    Write-Host "    [SKIP] Qoder not in scope for this target" -ForegroundColor Yellow
+    Add-AuditEntry -Audit ([ref]$audit) -File $qoderArgvPath -Key "crash-reporter-id" -Before "missing" -After "skipped" -Ok $true
+    $passCount++
+}
+elseif (Update-ArgvJsonCrashReporterId -Path $qoderArgvPath -NewCrashReporterId $newCrashReporterId -BackupRoot $backupRoot -BackupLabel (Get-UserProfileBackupLabel -TargetPath $qoderArgvPath) -Audit ([ref]$audit) -Actions ([ref]$actions)) {
     $passCount++
 }
 else {
@@ -2532,7 +2573,10 @@ if ($qoderPresent) {
 }
 # .qoder cache subdirs: clean regenerable AI caches only. memories/, canvas/
 # and knowledges/ hold per-project AI context adjacent to chat history and are
-# preserved by policy; settings.json and mcp.json are never touched.
+# preserved by policy; settings.json and mcp.json are never touched. Qoder-
+# scoped like every other Qoder step: a clone target (or Primary -SkipQoder)
+# must NOT touch the shared ~/.qoder tree - the Primary child owns it.
+if ($qoderPresent) {
 foreach ($subdir in @("cache", "session-env", "plugins")) {
     $p = Join-Path $qoderUserProfile $subdir
     $result = Remove-AppPathSafely -Path $p -BackupRoot $backupRoot -Audit ([ref]$audit) -Actions ([ref]$actions)
@@ -2553,6 +2597,7 @@ elseif ($extResult -eq "link-removed") {
 }
 else {
     Write-Host "    [OK] .qoder\extensions" -ForegroundColor Green
+}
 }
 foreach ($preserved in @("memories", "canvas", "knowledges")) {
     $p = Join-Path $qoderUserProfile $preserved
@@ -2844,4 +2889,4 @@ if ($failCount -gt 0) {
     exit 1
 }
 
-Write-Host "ZCode/Qoder reset v1.4 [$(Get-ZcodeTargetDisplay $Target)] completed successfully." -ForegroundColor Green
+Write-Host "ZCode/Qoder reset v1.5 [$(Get-ZcodeTargetDisplay $Target)] completed successfully." -ForegroundColor Green
