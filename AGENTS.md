@@ -1234,7 +1234,14 @@ tools/                             # reviewed utilities (block_qoder_domains.ps1
                                    #     = a later Primary launch would JOIN the clone's daemon; v5
                                    #     guards it with `globalThis.__opencodeCloneHome||` — clones keep
                                    #     their state home and register clone-locally, the Primary keeps
-                                   #     stock; drift aborts, anchor-absent builds skip loudly); no flag
+                                   #     stock; drift aborts, anchor-absent builds skip loudly;
+                                   #     LIVE-ACCEPTED 2026-11-28 on the patched 2.4.2 asar — the v5.1
+                                   #     driver fixes the post-swap probe (PS 5.1's native-arg boundary
+                                   #     STRIPS embedded double quotes: the JSON-argv form threw AFTER
+                                   #     a successful swap and lost the marker — the need list now
+                                   #     travels as a single-quoted JS literal inside the script) and
+                                   #     re-pairs a markerless-but-patched asar with a scanned pristine
+                                   #     backup; no flag
                                    #     = bit-for-bit stock; marker
                                    #     opencode-clone-home-patch.marker.json + -Restore + node
                                    #     --check + zero-site abort + 2026-10-24 update-recovery
@@ -1732,9 +1739,14 @@ launch_opencode_clone.ps1          # OpenCode desktop clone launcher -Instance c
                                    #   (saved/restored) so the clone always spawns its OWN
                                    #   clone-local service (live-verified: Primary db untouched) +
                                    #   a read-only registry guard (WARN when the recorded pid is
-                                   #   alive; the registry tail CLOSED 2026-11-28 by patch engine
-                                   #   v5 — the spawned child now registers service.json
-                                   #   clone-locally, spec §3.8.1),
+                                   #   alive; the registry tail CLOSED + LIVE-ACCEPTED 2026-11-28 by
+                                   #   patch engine v5 — the spawned child registers service.json
+                                   #   clone-locally (c1\state\opencode\service.json seen, machine
+                                   #   registry untouched, second launch reuses), spec §3.8.1;
+                                   #   NOTE 2.4.2 fixed the service port at 28894 = CS-11: the
+                                   #   launcher must seed a per-clone port
+                                   #   (<configHome>\opencode\service.json) or the child crashes on
+                                   #   collision with any live instance's service),
                                    #   writes .opencode-clone-identity
                                    #   .json + .opencode-clone-icon.ico fresh each launch (json =
                                    #   -Status introspection only), detached start + verify-after

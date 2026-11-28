@@ -54,11 +54,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deleter is still exactly one site, and a full-engine dry-run on the
   live 2.4.2 asar — candidate to %TEMP%, no swap — passed the complete
   pipeline: totals 1/1/1, `node --check` clean, rebuild + verify OK).
-  Live acceptance (the asar swap + the c1 clone-local-registry run) is
-  USER-SUPERVISED pending: the dev host's Primary OpenCode session held
-  the install closed through the polling window. Run OpenCode [8] once
-  closed — the 2.4.2 update already broke clone launching on an
-  unpatched install.
+  The swap then ran live (2026-11-28, OpenCode closed) and exposed a
+  real driver bug: the post-swap probe passed a JSON array through the
+  PS 5.1 native-argument boundary, which STRIPS embedded double quotes
+  — `JSON.parse` threw AFTER the fully successful swap and the run's
+  marker was lost (the machine was repaired: the marker written with
+  verified metadata, the backup pairing verified pristine). Driver v5.1
+  embeds the need list as a single-quoted JS literal (the shape that
+  survives the boundary) and re-pairs a markerless-but-patched asar with
+  a scanned pristine backup instead of backing up the patched bytes.
+  **LIVE ACCEPTANCE PASSED on c1**: `c1\state\opencode\service.json`
+  appeared (the spawned child registered CLONE-LOCALLY), the machine
+  registry stayed byte-untouched through every step, and a second c1
+  launch REUSED the clone's own service. One manual ingredient — the
+  per-clone port — became the new CS-11 spike: **v2.4.2 FIXED the
+  service port at the compiled default 28894 and refuses to start on
+  collision** (the 2.3.2-era "ephemeral port" verdict is superseded);
+  `opencode service set port <port>` persists per-clone to
+  `<configHome>\opencode\service.json`, so the launcher seeding a frozen
+  per-clone port map is the remaining fix.
 - **Repo-hygiene wave (2026-11-28)** — four recorded follow-ups closed in
   one pass: the merge-helper trio (`ConvertTo-DeepHashtable` /
   `Test-DeepEqual` / `Write-JsonNoBom`) moved into the shared

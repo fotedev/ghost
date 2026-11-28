@@ -80,8 +80,30 @@ Describe 'OpenCode clone-home patch engine - v5 service-registry contract' {
 
     It 'ps1 probe carries the SVC tier and requires the splice at verify-after unless the engine skipped' {
         ($script:Ps1Raw -match 'SVC=') | Should -BeTrue
-        ($script:Ps1Raw -match [regex]::Escape("const svcNeed=JSON.parse(process.argv[2]||'[]')")) | Should -BeTrue
         ($script:Ps1Raw -match '\$SvcSkipped = \(\$engineJson\.skipped -contains "service-registry"\)') | Should -BeTrue
+        ($script:Ps1Raw -match [regex]::Escape("if (-not `$SvcSkipped) { `$need += '__opencodeCloneHome||delete' }")) | Should -BeTrue
+    }
+
+    It 'the post-swap probe EMBEDS the need list in the script string (PS 5.1 native-arg quoting strips embedded double quotes)' {
+        # 2026-11-28 live incident: the v5 probe passed a JSON array as a second
+        # node argument; the boundary turned '["__opencodeCloneHome||delete"]'
+        # into "[__opencodeCloneHome||delete]" (quotes gone), JSON.parse threw,
+        # and the driver aborted AFTER a fully successful swap - losing the
+        # marker. The list must travel as a single-quoted JS literal inside the
+        # script string, with the asar path as the ONLY trailing argument.
+        ($script:Ps1Raw -match [regex]::Escape('$needJs = ($need | ForEach-Object')) | Should -BeTrue
+        ($script:Ps1Raw -match [regex]::Escape("-join ','")) | Should -BeTrue
+        ($script:Ps1Raw -match [regex]::Escape('const need=[$needJs]')) | Should -BeTrue
+        ($script:Ps1Raw -match 'JSON\.parse\(process\.argv\[2\]') | Should -BeFalse -Because 'no requirement list may travel through the native-argument boundary'
+        ($script:Ps1Raw -match 'svcNeedArg') | Should -BeFalse
+        ($script:Ps1Raw -match '& \$NodeExe -e \$swapScript \$OcAsar \$') | Should -BeFalse -Because 'the probe takes exactly one trailing argument (the asar path)'
+    }
+
+    It 'a markerless-but-patched asar re-pairs with a scanned pristine backup (never backs up the patched asar)' {
+        ($script:Ps1Raw -match [regex]::Escape('if ($OcCorePatched -and -not $existingMarker) {')) | Should -BeTrue
+        ($script:Ps1Raw -match [regex]::Escape('$pristineCandidates')) | Should -BeTrue
+        ($script:Ps1Raw -match [regex]::Escape('re-pairing with the pristine backup at')) | Should -BeTrue
+        ($script:Ps1Raw -match [regex]::Escape("?'" + "patched':'pristine'")) | Should -BeTrue -Because 'the scan classifies a backup asar by the core signature'
     }
 
     It 'ps1 pristine-backup sanity gate includes service-registry in the no-fresh-changes check' {
