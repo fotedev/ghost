@@ -33,6 +33,8 @@ from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from ghost.autoclaw2_chat_lock import chat_writer
+
 STDIO_PREFIX = "stdio+v1:"
 # The app's own validators (main.cjs `By` / `IL`, mined 2026-11-05): a slug or
 # tool name outside these shapes fails the app's strict row parse and the row
@@ -142,6 +144,28 @@ def probe_running(profile_dir):
 _ACCOUNT_TIE_SECONDS = 60.0
 
 
+def _pick_chat_account(name, profile_dir, accounts_dir, accounts, hint):
+    """Prefer the app's active account over recent SQLite write times."""
+    if hint:
+        return _pick_account(name, accounts_dir, accounts, hint)
+    pointer = os.path.join(profile_dir, "device", "active-product-account.json")
+    try:
+        with open(pointer, "r", encoding="utf-8-sig") as handle:
+            active = json.load(handle)
+    except FileNotFoundError:
+        # A signed-out profile can still have old DBs, even if there is only
+        # one. Never infer a writable destination from a leftover directory.
+        return None
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise Refusal("active-account-invalid",
+                      "{0}: cannot read active account; sign in and retry".format(name)) from exc
+    key = active.get("accountKey") if isinstance(active, dict) else None
+    if not isinstance(key, str) or key not in accounts:
+        raise Refusal("active-account-invalid",
+                      "{0}: active account does not match an account directory".format(name))
+    return os.path.join(accounts_dir, key), "active-pointer"
+
+
 def _pick_account(name, acc_root, accounts, hint):
     """Choose one account dir among several (the Primary's dormant
     27e33829 + live 68f7331f case). An explicit hint - exact 64-hex dir name
@@ -182,7 +206,7 @@ def _pick_account(name, acc_root, accounts, hint):
     return os.path.join(acc_root, mtimes[0][1]), "newest-mtime"
 
 
-def resolve_profile(name, require_account=False, account_hint=None):
+def resolve_profile(name, require_account=False, account_hint=None, for_chat=False):
     """Resolve one profile to its account runtime DB. Returns a dict with
     status fields; raises Refusal only for hard errors (unknown name,
     ambiguous account, bad account hint) -- missing accounts come back as
@@ -211,13 +235,15 @@ def resolve_profile(name, require_account=False, account_hint=None):
             if os.path.isdir(os.path.join(acc_root, d)))
     if len(accounts) == 0:
         info["account_status"] = "not-signed-in"
-    elif len(accounts) > 1:
-        picked = _pick_account(name, acc_root, accounts, account_hint)
+    elif for_chat or len(accounts) > 1:
+        picked = (_pick_chat_account(name, pdir, acc_root, accounts, account_hint)
+                  if for_chat else _pick_account(name, acc_root, accounts, account_hint))
         if picked is None:
-            info["account_status"] = "ambiguous-account"
+            info["account_status"] = "active-account-missing" if for_chat else "ambiguous-account"
             if require_account:
-                raise Refusal("ambiguous-account",
-                              "{0}: {1} account dirs, refusing to guess".format(name, len(accounts)))
+                raise Refusal(info["account_status"],
+                              "{0}: no verified active account; sign in or select a source account explicitly".format(name)
+                              if for_chat else "{0}: {1} account dirs, refusing to guess".format(name, len(accounts)))
         else:
             acc, how = picked
             info["account_status"] = "ok"
@@ -1496,6 +1522,8 @@ def _write_sidecar(profile_dir, data):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(data, handle, ensure_ascii=False, indent=1)
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(tmp, path)
     return path
 
@@ -1546,21 +1574,74 @@ def profile_inventory(payload):
     return {"profiles": out}
 
 
+def _chat_profile_key(name):
+    return "Primary" if name.lower() == "primary" else name
+
+
+class ChatLineage:
+    """Trace imported IDs back to their original profile and session UUID.
+
+    Old sidecar records remain useful as ancestry (even after a revert); they
+    are not evidence that a copy exists in the currently selected account.
+    """
+
+    def __init__(self):
+        self._records = {}
+        self._origins = {}
+
+    def records(self, profile):
+        profile = _chat_profile_key(profile)
+        if profile not in self._records:
+            self._records[profile] = {
+                rec["new_session_id"]: rec
+                for rec in _read_sidecar(profile_path(profile))["imports"]
+            }
+        return self._records[profile]
+
+    def origin(self, profile, session_id):
+        key = (_chat_profile_key(profile), session_id)
+        seen = set()
+        while key not in self._origins:
+            if key in seen:
+                raise Refusal("chat-lineage-cycle", "cyclic import history; review the sidecar")
+            seen.add(key)
+            record = self.records(key[0]).get(key[1])
+            if record is None:
+                self._origins[key] = key
+            elif record.get("origin_profile") and record.get("origin_session_id"):
+                origin = (_chat_profile_key(record["origin_profile"]), record["origin_session_id"])
+                if origin[0] not in _PROFILE_NAMES:
+                    raise Refusal("chat-origin-invalid", "unknown origin profile in import history")
+                self._origins[key] = origin
+            else:
+                key = (_chat_profile_key(record["source_profile"]), record["source_session_id"])
+        origin = self._origins[key]
+        for visited in seen:
+            self._origins[visited] = origin
+        return origin
+
+
+def _require_closed_chat_target(info):
+    """Revalidate the destination after planning, before any write."""
+    current = resolve_profile(info["profile"], require_account=True, for_chat=True)
+    if current["running"]:
+        raise Refusal("target-running", "{0} is running - close it first".format(info["profile"]))
+    if current["db_path"] != info["db_path"]:
+        raise Refusal("active-account-changed", "active target account changed; preview again")
+
+
 def chat_inventory_for_profile(payload):
-    """Bridge wrapper: resolve one profile, then inventory its chats.
-    Read-only; safe against a running instance (WAL readers coexist).
-    payload.account_hint (optional) pins the account dir of a multi-account
-    profile - the Primary's dormant 27e33829 + live case, where the
-    newest-mtime default silently switches sources after a re-login."""
+    """Read-only chat inventory; defaults to the app's active account.
+    An explicit account hint can read a dormant source account."""
     name = payload.get("profile") or payload.get("target")
     if not name:
         raise Refusal("bad-payload", 'payload needs {"profile": "c1"}')
-    info = resolve_profile(name, account_hint=payload.get("account_hint"))
+    info = resolve_profile(name, account_hint=payload.get("account_hint"), for_chat=True)
     if info["account_status"] != "ok":
         return {"profile": name, "status": "skipped",
                 "reason": info["account_status"], "session_count": 0,
                 "sessions": [], "imported_count": 0}
-    result = chat_inventory(info["db_path"], info["path"])
+    result = chat_inventory(info["db_path"], info["path"], name)
     result["profile"] = name
     result["status"] = "ok"
     result["running"] = info["running"]
@@ -1571,29 +1652,38 @@ def chat_inventory_for_profile(payload):
     return result
 
 
-def chat_inventory(db_path, profile_dir):
-    """Counts only -- never message bodies, never credential columns."""
+def chat_inventory(db_path, profile_dir, profile=None):
+    """Counts and provenance only -- never message bodies or credentials."""
     conn = ro_connect(db_path)
     try:
         _require_schema(conn, os.path.basename(os.path.dirname(
             os.path.dirname(os.path.dirname(db_path)))))
-        imports = _read_sidecar(profile_dir)["imports"]
-        imported = {rec["new_session_id"]: rec for rec in imports}
+        if profile is None:
+            leaf = os.path.basename(profile_dir)
+            profile = "Primary" if leaf == "AutoClaw-oversea-official" else leaf
+        lineage = ChatLineage()
+        imported = lineage.records(profile)
+        account = os.path.basename(os.path.dirname(os.path.dirname(db_path)))
         sessions = []
         rows = conn.execute(
             "SELECT s.session_id, s.title, s.created_at, s.updated_at,"
-            " s.external_provider, s.workspace_id, w.root_path"
+            " s.external_provider, s.workspace_id, w.root_path, s.archived_at"
             " FROM work_sessions s LEFT JOIN work_workspaces w"
             " ON w.workspace_id = s.workspace_id"
             " WHERE s.deleted_at IS NULL ORDER BY s.updated_at DESC").fetchall()
+        session_ids = {row[0] for row in rows}
         for r in rows:
             sid = r[0]
+            origin_profile, origin_session_id = lineage.origin(profile, sid)
             sessions.append({
                 "session_id": sid,
                 "title": r[1],
                 "created_at": r[2], "updated_at": r[3],
                 "external_provider": r[4],
                 "workspace_root": r[6],
+                "archived_at": r[7],
+                "origin_profile": origin_profile,
+                "origin_session_id": origin_session_id,
                 "entries": conn.execute(
                     "SELECT COUNT(*) FROM neutral_session_entries"
                     " WHERE session_id = ?", (sid,)).fetchone()[0],
@@ -1623,7 +1713,9 @@ def chat_inventory(db_path, profile_dir):
                 {"source_session_id": r.get("source_session_id"),
                  "new_session_id": r.get("new_session_id"),
                  "import_id": r.get("import_id")}
-                for r in imports if not r.get("reverted")],
+                for r in imported.values() if not r.get("reverted")
+                and r.get("new_session_id") in session_ids
+                and r.get("target_account", account) == account],
         }
     finally:
         conn.close()
@@ -1695,23 +1787,63 @@ def _content_hash(tree):
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
+def _chat_entries(tree):
+    return [(e["session_seq"], e["entry_type"], e["payload"]) for e in tree["entries"]]
+
+
+def _chat_import_presence(conn, lineage, target, origin, incoming, revision, allow_branch):
+    """Inspect actual rows, not sidecar claims from another login."""
+    profile = target["profile"]
+    account = os.path.basename(target["account_dir"])
+    records = lineage.records(profile)
+    existing = None
+    for sid, in conn.execute(
+            "SELECT session_id FROM work_sessions WHERE deleted_at IS NULL"
+            " ORDER BY archived_at IS NOT NULL, session_id"):
+        if lineage.origin(profile, sid) != origin:
+            continue
+        record = records.get(sid, {})
+        existing = existing or {"status": "skipped", "reason": "lineage-present",
+                                "import_id": record.get("import_id"), "new_session_id": sid}
+        stored = conn.execute(
+            "SELECT session_seq, entry_type, payload FROM neutral_session_entries"
+            " WHERE session_id = ? ORDER BY session_seq", (sid,)).fetchall()
+        imported_revision = (not record.get("reverted") and record.get("target_account") == account
+                             and record.get("source_revision") == revision)
+        if imported_revision or incoming == stored or (incoming and stored[:len(incoming)] == incoming):
+            return {"status": "skipped", "reason": "already-imported",
+                    "import_id": record.get("import_id"), "new_session_id": sid}
+    # A different revision of the same lineage never fans back out by
+    # default. Explicit branch imports still cannot re-copy a covered version.
+    return existing if not allow_branch else None
+
+
 def chat_import(payload):
-    """Copy one source session into one target profile as a NEW local
-    session (D8/D10/D11/D12). Refuses IM-bound sessions; nuls the copied
-    runs' credential_version; drops (and counts) entries whose artifact
-    revision is missing in the target. payload.source_account_hint (optional)
-    pins the source's account dir - the Primary's re-login case, where the
-    newest-mtime default silently switches to the fresh (empty) account."""
-    src = resolve_profile(payload["source"], require_account=True,
+    """Copy a source chat without multiplying existing conversation lineages."""
+    if payload.get("dry_run"):
+        return _chat_import(payload)
+    with chat_writer(_home()):
+        return _chat_import(payload)
+
+
+def _chat_import(payload):
+    src = resolve_profile(payload["source"], require_account=True, for_chat=True,
                           account_hint=payload.get("source_account_hint"))
-    tgt = resolve_profile(payload["target"], require_account=True)
-    if tgt["running"]:
+    tgt = resolve_profile(payload["target"], require_account=True, for_chat=True)
+    for role, info in (("source", src), ("target", tgt)):
+        expected = payload.get("expected_" + role + "_account")
+        if expected and expected != os.path.basename(info["account_dir"]):
+            raise Refusal("active-account-changed", "{0} account changed; preview again".format(role))
+    if tgt["running"] and not payload.get("dry_run"):
         raise Refusal("target-running",
                       "{0} is running - close it first (D7)".format(payload["target"]))
     src_conn = ro_connect(src["db_path"])
     try:
+        src_conn.execute("BEGIN")
         _require_schema(src_conn, payload["source"])
         tree = _session_tree(src_conn, payload["session_id"])
+        if tree["session"].get("deleted_at") or tree["session"].get("archived_at"):
+            raise Refusal("inactive-session", "deleted and archived sessions are not sync sources")
         source_ws_root = None
         ws_row = src_conn.execute(
             "SELECT root_path FROM work_workspaces WHERE workspace_id = ?",
@@ -1727,21 +1859,18 @@ def chat_import(payload):
                           payload["session_id"], tree["session"]["external_provider"]))
 
     content_hash = _content_hash(tree)
-    sidecar = _read_sidecar(tgt["path"])
-    for rec in sidecar["imports"]:
-        if rec.get("reverted"):
-            continue  # 2026-11-10: a reverted import is re-importable
-        if (rec.get("source_profile") == payload["source"]
-                and rec.get("source_session_id") == payload["session_id"]):
-            if rec.get("content_hash") == content_hash:
-                return {"status": "skipped", "reason": "already-imported",
-                        "import_id": rec["import_id"],
-                        "new_session_id": rec["new_session_id"]}
-            break  # same session, changed content: fall through and re-import
-
+    incoming = _chat_entries(tree)
+    revision = hashlib.sha256(json.dumps(incoming, ensure_ascii=False).encode("utf-8")).hexdigest()
+    lineage = ChatLineage()
+    origin = lineage.origin(src["profile"], payload["session_id"])
+    allow_branch = payload.get("allow_branch") is True
     tgt_conn = ro_connect(tgt["db_path"])
     try:
+        tgt_conn.execute("BEGIN")
         _require_schema(tgt_conn, payload["target"])
+        presence = _chat_import_presence(tgt_conn, lineage, tgt, origin, incoming, revision, allow_branch)
+        if presence:
+            return presence
         tgt_workspaces = read_workspaces(tgt_conn)
         pairs, _ = _map_target_workspaces(
             [{"root_path": source_ws_root}] if source_ws_root else [],
@@ -1769,8 +1898,12 @@ def chat_import(payload):
     title_tag = payload.get("title_tag")
     if title_tag is None:
         title_tag = "[import] "
-    new_title = (title_tag + (tree["session"].get("title") or "")) if title_tag else \
-        (tree["session"].get("title") or "")
+    base_title = tree["session"].get("title") or ""
+    if title_tag == "[import] " and base_title.startswith(title_tag):
+        base_title = base_title[len(title_tag):]
+    new_title = title_tag + base_title
+    if allow_branch:
+        new_title += " (branch {0}, {1} entries)".format(src["profile"], len(tree["entries"]))
 
     dropped = []
     kept_entries = []
@@ -1844,10 +1977,15 @@ def chat_import(payload):
     finally:
         src_conn.close()
 
+    _require_closed_chat_target(tgt)
     backup_path = _backup_db(tgt["db_path"], tgt["path"], "chat-import")
     conn = rw_connect(tgt["db_path"])
     try:
         conn.execute("BEGIN IMMEDIATE")
+        _require_closed_chat_target(tgt)
+        presence = _chat_import_presence(conn, ChatLineage(), tgt, origin, incoming, revision, allow_branch)
+        if presence:
+            return presence
         # 1. session (verbatim row, overridden identity columns)
         sess = dict(tree["session"])
         sess["session_id"] = new_session_id
@@ -2045,8 +2183,14 @@ def chat_import(payload):
         "import_id": import_id,
         "source_profile": payload["source"],
         "target_profile": payload["target"],
+        "source_account": os.path.basename(src["account_dir"]),
+        "target_account": os.path.basename(tgt["account_dir"]),
+        "origin_profile": origin[0],
+        "origin_session_id": origin[1],
         "source_session_id": payload["session_id"],
         "new_session_id": new_session_id,
+        "source_revision": revision,
+        "imported_title": new_title,
         "content_hash": content_hash,
         "created_at": _iso_now(),
         "title_tag": title_tag,
@@ -2057,8 +2201,11 @@ def chat_import(payload):
                    "artifacts": len(artifact_map)},
         "backup": backup_path,
     }
+    sidecar = _read_sidecar(tgt["path"])
     sidecar["imports"].append(record)
     _write_sidecar(tgt["path"], sidecar)
+    if record not in _read_sidecar(tgt["path"])["imports"]:
+        raise RuntimeError("chat import provenance did not verify")
     return {"status": "ok" if ok else "failed", "import_id": import_id,
             "new_session_id": new_session_id, "verify": verify,
             "expected": expected, "dropped": dropped,
@@ -2069,11 +2216,16 @@ def chat_import(payload):
 
 
 def chat_revert(payload):
+    with chat_writer(_home()):
+        return _chat_revert(payload)
+
+
+def _chat_revert(payload):
     """Tombstone + delete exactly the rows one import created (plan §7).
     payload.account_hint (optional) pins the target's account dir (symmetry
     with the inventory/import hints; revert targets are single-account
     clones today)."""
-    tgt = resolve_profile(payload["target"], require_account=True,
+    tgt = resolve_profile(payload["target"], require_account=True, for_chat=True,
                           account_hint=payload.get("account_hint"))
     if tgt["running"]:
         raise Refusal("target-running",
@@ -2088,6 +2240,15 @@ def chat_revert(payload):
         raise Refusal("import-not-found",
                       "no active import {0!r} in the sidecar".format(payload["import_id"]))
     new_sid = record["new_session_id"]
+    account = os.path.basename(tgt["account_dir"])
+    if record.get("target_account", account) != account:
+        raise Refusal("import-account-mismatch", "import belongs to a different target account")
+    conn = ro_connect(tgt["db_path"])
+    try:
+        if not conn.execute("SELECT 1 FROM work_sessions WHERE session_id = ?", (new_sid,)).fetchone():
+            raise Refusal("import-account-mismatch", "import absent from this target account")
+    finally:
+        conn.close()
     backup_path = _backup_db(tgt["db_path"], tgt["path"], "chat-revert")
     conn = rw_connect(tgt["db_path"])
     try:

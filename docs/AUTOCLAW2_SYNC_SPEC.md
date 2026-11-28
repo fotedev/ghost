@@ -184,6 +184,56 @@ rule applies to entry ids, which inherit the run id prefix.
 `payload` on every copied entry must satisfy `json_valid(payload)` — copy it
 verbatim (already valid), never re-serialize with a lossy encoder.
 
+**Chat lineage and reconciliation (2026-11-26).** Continuing imported
+copies made content-hash-only sync copy the same conversation back and forth.
+The chat commands now use `device/active-product-account.json` to select the
+active account, unless the operator explicitly selects a historical source with
+`-Account`. Legacy import records are followed back to their original profile
+and session ID; a record alone does not prove its target copy exists in the
+active account. `-AllMissing` copies one session per absent lineage, not every
+edited branch. To share a distinct continuation deliberately, use an explicit
+`-SessionId -AllowBranch`.
+
+`sync_autoclaw2_chats.ps1 -Mode Reconcile -Target c1` previews a separate,
+non-destructive cleanup. Apply with `-Apply -PlanId <preview-id>` while that
+profile is closed. The same-account plan must still match. An imported copy is
+archived only when another session in its workspace and lineage covers its
+transcript, runs, events and stored artifacts. Other branches keep their data
+and get distinct titles when needed. User-renamed and native chats are not
+edited. One SQLite backup is taken per changed account; no chat is deleted.
+
+**All-to-all chat sync (opt-in).** `tools/watch_autoclaw2_chat_sync.ps1`
+uses the shared origin IDs to converge each active account to one visible
+version per conversation. It keeps true forks as archived versions. A
+verified prefix advances in place without replacing the chat ID; a real fork
+changes which version is visible, never splices divergent turns. Dormant
+account DBs are read-only sources. Local drafts, intentionally archived-only
+histories, and delete tombstones are respected; live turns and Telegram chats
+are not exported. Replayed stale nonterminal runs become interrupted history,
+not queued work. Incompatible artifacts stay in the source when a target
+lacks their tool revisions; the pass reports their count.
+
+- Preview: `tools\watch_autoclaw2_chat_sync.ps1 -RunOnce -DryRun`.
+- Apply a reviewed pass: `-RunOnce -PlanId <preview-id>`. `-Target c1` limits
+  destinations, not sources. An open or unclassifiable target is queued;
+  there are no forced restarts or direct live DB writes.
+- Enable on sign-in: `-InstallAutostart`. For immediate background sync,
+  launch that Startup shortcut once. `-RemoveAutostart` stops its resident
+  watcher at the next interval. GHOST clone launches run an opted-in pass
+  before boot; stock Primary receives changes on the next closed pass.
+- `tools\launch_autoclaw2_primary_sync.ps1 -InstallShortcut` adds the separate
+  Desktop **AutoClaw2 Sync & Open Primary** shortcut without replacing the
+  stock link or modifying clone shortcuts. It waits for a normal tray quit and opens the stock executable
+  only when the targeted pass reports Primary closed and current. It never
+  stops an app. The preview and watcher log report why an update is queued.
+- A known GHOST entry-count label is stripped when its version is visible,
+  using the matching account's reconcile audit and import provenance. User
+  titles, real message counts and archived versions are not rewritten.
+- Each changed account gets one WAL-safe DB and provenance backup per batch.
+  The latest verified mesh backup for that account is retained; manual or
+  other tools' backups are not pruned. Repeating unchanged sync does not write
+  chat rows or create another backup.
+
 ### 5.4 Master manifest (format)
 
 ```json

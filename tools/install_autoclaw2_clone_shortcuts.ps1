@@ -42,11 +42,16 @@
 
 .PARAMETER RepairPrimaryAumid
   EC-C01 repair: pinning a clone window (or taskbar pin maintenance) can
-  rewrite a STOCK AutoClaw2 shortcut with a clone AUMID
-  (com.zhipuai.autoclaw2.cN) and wipe its IconLocation. Scans every
-  shortcut in the Desktop + Start-menu Programs locations that targets
-  AutoClaw2.exe, strips a clone-suffixed AUMID back to the base and
-  restores the exe icon. Nothing else is touched.
+  retarget the stock AutoClaw shortcut to a colored executable, stamp a
+  clone AUMID (com.zhipuai.autoclaw2.cN), or both. Repairs only recognized
+  stock shortcuts in Desktop and Start Menu Programs. Backs up the link,
+  then restores and verifies the stock executable, AUMID and icon.
+  Color-named clone shortcuts are untouched.
+
+.PARAMETER RefreshTaskbar
+  After a repair, rebuild the current AutoClaw2 window groups once. Used by
+  the clone launcher so a cold start cannot leave the stock icon grouped
+  under the clone even after the shortcut has been corrected.
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\install_autoclaw2_clone_shortcuts.ps1
@@ -57,6 +62,7 @@
 param(
     [switch]$Remove,
     [switch]$RepairPrimaryAumid,
+    [switch]$RefreshTaskbar,
     [ValidateSet('c1','c2','c3','c4','c5','')]
     [string]$Instance = ''
 )
@@ -195,37 +201,73 @@ $BaseAumid = 'com.zhipuai.autoclaw2'
 $script:Failed = $false
 
 if ($RepairPrimaryAumid) {
-    # EC-C01 (P0): only a SUFFIXED base.<cN> value is a hijack; the base itself
-    # and foreign AUMIDs are left untouched. AUMIDs are read via Shell
-    # ExtendedProperty - never by decoding the .lnk bytes (EC-C09).
+    . (Join-Path $PSScriptRoot 'autoclaw2_primary_lnk.ps1')
     $exe = Join-Path $env:LOCALAPPDATA 'Programs\AutoClaw2\AutoClaw2.exe'
-    if (-not (Test-Path -LiteralPath $exe)) { Write-Error "AutoClaw2.exe not found: $exe - cannot restore the stock icon" }
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+        Write-Error "AutoClaw2.exe not found: $exe - cannot restore the stock shortcut"
+    }
     $repaired = 0
-    foreach ($root in @($Desktop, $StartMenu)) {
-        foreach ($lnkFile in @(Get-ChildItem -LiteralPath $root -Filter *.lnk -File -ErrorAction SilentlyContinue)) {
-            $t = $sh.CreateShortcut($lnkFile.FullName)
-            if (-not $t.TargetPath -or ($t.TargetPath -ine $exe)) { continue }
-            $aumid = Get-ShortcutAumid $lnkFile.FullName
-            if (-not $aumid) { Write-Host "no AUMID  : $($lnkFile.FullName)"; continue }
-            if ($aumid -eq $BaseAumid) { Write-Host "clean    : $($lnkFile.FullName) ($aumid)"; continue }
-            if (-not $aumid.StartsWith($BaseAumid + '.')) {
-                Write-Host "foreign  : $($lnkFile.FullName) AUMID '$aumid' does not start with '$BaseAumid.' - leaving untouched"
-                continue
+    foreach ($lnkPath in @(Get-Ac2PrimaryShortcutPaths)) {
+        $shortcut = $sh.CreateShortcut($lnkPath)
+        $aumid = Get-ShortcutAumid $lnkPath
+        $problem = Get-Ac2PrimaryShortcutProblem -TargetPath $shortcut.TargetPath -Aumid $aumid -StockExe $exe
+        if (-not $problem) { continue }
+
+        $before = (Get-FileHash -LiteralPath $lnkPath).Hash
+        $backupDir = Join-Path $env:LOCALAPPDATA ('autoclaw2-sync\shortcut-backups\' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        $backup = Join-Path $backupDir (Split-Path -Leaf $lnkPath)
+        Copy-Item -LiteralPath $lnkPath -Destination $backup
+        if ((Get-FileHash -LiteralPath $backup).Hash -ne $before) {
+            throw "Backup did not verify for '$lnkPath' - shortcut not modified."
+        }
+
+        try {
+            $shortcut.TargetPath = $exe
+            $shortcut.WorkingDirectory = Split-Path -Parent $exe
+            $shortcut.Arguments = ''
+            $shortcut.IconLocation = "$exe,0"
+            $shortcut.Save()
+            Set-ShortcutAumid -LnkPath $lnkPath -Aumid $BaseAumid
+            $chk = $sh.CreateShortcut($lnkPath)
+            $back = Get-ShortcutAumid $lnkPath
+            if (($back -ine $BaseAumid) -or ($chk.TargetPath -ine $exe) -or
+                ($chk.Arguments -ne '') -or (($chk.IconLocation -replace ',\s*0$', ',0') -ine "$exe,0")) {
+                throw "Shortcut read-back mismatch: target='$($chk.TargetPath)', AUMID='$back', icon='$($chk.IconLocation)'"
             }
-            Set-ShortcutAumid -LnkPath $lnkFile.FullName -Aumid $BaseAumid
-            $s2 = $sh.CreateShortcut($lnkFile.FullName)
-            $s2.IconLocation = "$exe,0"
-            $s2.Save()
-            $back = Get-ShortcutAumid $lnkFile.FullName
-            $chk = $sh.CreateShortcut($lnkFile.FullName)
-            $ok = ($back -eq $BaseAumid) -and ($chk.IconLocation -like "$exe*")
-            Write-Host ("{0} : repaired {1} -> aumid={2} icon={3}" -f $(if ($ok) {'OK  '} else {'FAIL'}), $lnkFile.FullName, $(if ($back) { $back } else { '<none>' }), $chk.IconLocation)
-            if ($ok) { $repaired++ } else { $script:Failed = $true }
+            Write-Host "OK: repaired '$lnkPath' ($problem); verified stock target, AUMID and icon. Backup: $backup"
+            $repaired++
+        } catch {
+            Write-Warning "FAILED to repair '$lnkPath': $($_.Exception.Message)"
+            Copy-Item -LiteralPath $backup -Destination $lnkPath -Force
+            if ((Get-FileHash -LiteralPath $lnkPath).Hash -ne $before) {
+                throw "Shortcut rollback did not verify; saved backup: $backup"
+            }
+            Write-Warning "Original shortcut restored and verified from '$backup'."
+            $script:Failed = $true
         }
     }
     if ($repaired -gt 0) {
         Write-Host ""
         Write-Host "repaired $repaired shortcut(s). Re-pin from a running STOCK AutoClaw2 window if a pin still resolves to a clone identity."
+        if ($RefreshTaskbar) {
+            $watcher = Join-Path $PSScriptRoot 'watch_suite_taskbar.ps1'
+            $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            & $psExe -NoProfile -ExecutionPolicy Bypass -File $watcher -Suite autoclaw2 -RunOnce
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning 'Shortcut repaired, but the live taskbar refresh failed.'
+                $script:Failed = $true
+            }
+            # The refresh can exercise Explorer's shortcut resolution too.
+            foreach ($path in @(Get-Ac2PrimaryShortcutPaths)) {
+                $check = $sh.CreateShortcut($path)
+                $id = Get-ShortcutAumid $path
+                if (Get-Ac2PrimaryShortcutProblem -TargetPath $check.TargetPath -Aumid $id -StockExe $exe) {
+                    Write-Warning "Stock shortcut drifted again after the taskbar refresh: $path"
+                    $script:Failed = $true
+                }
+            }
+        }
     } else {
         Write-Host "nothing needed repairing."
     }

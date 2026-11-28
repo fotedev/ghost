@@ -10,7 +10,7 @@
   resources\app\dist\main.cjs (no app.asar; the bootstrap does a bare
   require() of it, and dist\installer\payload-verify.cjs is an
   existence-only check the app never spawns - verified 2026-11-06). This
-  patch therefore does NOT need the asar-surgery route: it splices FOUR
+  patch therefore does NOT need the asar-surgery route: it splices FIVE
   unique byte-level anchors (each verified to occur EXACTLY once in the
   4.0.0 bundle) so the AppUserModelID, the window icon AND the
   notification-area tray icon become env-driven, following the app's own
@@ -25,10 +25,8 @@
           -> appId:process.env.ZWORK_AUMID||Kqn,
              appIconPath:process.env.ZWORK_CLONE_ICON||e,
         (inside the per-window setAppDetails helper - the taskbar
-        identity of the main window. The relaunchCommand template literal
-        that follows in the same function is NEVER touched, so the
-        relaunch command keeps pointing at AutoClaw2.exe exactly like
-        stock.)
+        identity of the main window. Relaunch metadata is handled by
+        the separate window-relaunch anchor below.)
 
     3.  Uf.app.isPackaged&&Xqn(l,process.execPath)
           -> Uf.app.isPackaged&&(
@@ -48,11 +46,19 @@
         read INSIDE mTr covers every call site; verified unique in the
         bundle 2026-11-09.)
 
+    5.  relaunchCommand / relaunchDisplayName (v3)
+         -> clone launcher command and color-specific name from env.
+         This also gives the clone window a distinct title. The original
+         AutoClaw name and bare executable let Windows rewrite the stock
+         Start Menu shortcut when a colored executable launched.
+
   The launcher (launch_autoclaw2_clone.ps1) then sets, per clone:
     ZWORK_AUMID      = com.zhipuai.autoclaw2.cN   (matches the SHORTCUT
                        AUMIDs the installer already writes, so pins and
                        running windows group together)
     ZWORK_CLONE_ICON = tools\autoclaw2-<color>-branding\tray_icon.ico
+    ZWORK_RELAUNCH_COMMAND = the same per-clone launcher used by shortcuts
+    ZWORK_RELAUNCH_NAME    = AutoClaw2 <Color>
   With no env vars set (the Primary, bare launches) the patched bundle is
   behaviourally identical to stock.
 
@@ -112,20 +118,20 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:PatchVersion = 2
+$script:PatchVersion = 3
 
 # Byte-level anchors verified unique in the 4.0.0 bundle (main.cjs; anchors
 # 1-3 verified 2026-11-06, each occurring exactly once - grep counts 1/1/1
 # across the 14,293,768 stock bytes; anchor 4 verified 2026-11-09 with one
 # occurrence in both the pristine backup and the live v1-patched bundle).
-# Plain ASCII, no backticks, no single quotes - safe as PS single-quoted
-# literals. The relaunchCommand:`"${e}"` template literal lives INSIDE the
-# same Xqn function but is deliberately not part of any anchor.
+# Single-quoted PowerShell literals preserve the JavaScript backticks and
+# ${e} in the relaunch anchor verbatim. Stock is the exact fallback.
 $script:Anchors = @(
     @{ Name = 'process-aumid';    Find = 'setAppUserModelId(Kqn)'; Replace = 'setAppUserModelId(process.env.ZWORK_AUMID||Kqn)' },
     @{ Name = 'window-details';   Find = 'appId:Kqn,appIconPath:e,'; Replace = 'appId:process.env.ZWORK_AUMID||Kqn,appIconPath:process.env.ZWORK_CLONE_ICON||e,' },
     @{ Name = 'main-window-icon'; Find = 'Uf.app.isPackaged&&Xqn(l,process.execPath)'; Replace = 'Uf.app.isPackaged&&(process.env.ZWORK_CLONE_ICON&&l.setIcon(process.env.ZWORK_CLONE_ICON),Xqn(l,process.execPath))' },
-    @{ Name = 'tray-icon';        Find = 't=r(e(n.iconPath))'; Replace = 't=r(e(process.env.ZWORK_CLONE_ICON||n.iconPath))' }
+    @{ Name = 'tray-icon';        Find = 't=r(e(n.iconPath))'; Replace = 't=r(e(process.env.ZWORK_CLONE_ICON||n.iconPath))' },
+    @{ Name = 'window-relaunch';  Find = 'relaunchCommand:`"${e}"`,relaunchDisplayName:Tgt})'; Replace = 'relaunchCommand:process.env.ZWORK_RELAUNCH_COMMAND||`"${e}"`,relaunchDisplayName:process.env.ZWORK_RELAUNCH_NAME||Tgt}),r==="win32"&&process.env.ZWORK_RELAUNCH_NAME&&n.setTitle(process.env.ZWORK_RELAUNCH_NAME)' }
 )
 
 function Invoke-IdentitySplice {
@@ -173,7 +179,8 @@ function Get-InstallScopedAutoClaw2 {
     # Only AutoClaw2.exe copies FROM THIS INSTALL are gating candidates.
     param([string]$Root)
     $scoped = @()
-    foreach ($p in (Get-Process -Name AutoClaw2 -ErrorAction SilentlyContinue)) {
+    $installPath = [IO.Path]::GetFullPath($Root).TrimEnd('\','/')
+    foreach ($p in (Get-Process -Name 'AutoClaw2*' -ErrorAction SilentlyContinue)) {
         $path = $null
         try { $path = $p.Path } catch { }
         if (-not $path) {
@@ -181,7 +188,7 @@ function Get-InstallScopedAutoClaw2 {
             $scoped += $p
             continue
         }
-        if ($path.StartsWith($Root, [System.StringComparison]::OrdinalIgnoreCase)) { $scoped += $p }
+        if ([IO.Path]::GetDirectoryName($path) -ieq $installPath) { $scoped += $p }
     }
     return $scoped
 }
@@ -297,6 +304,9 @@ $stamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
 $backup = "$target.bak-zwork-identity-$stamp"
 Copy-Item -LiteralPath $target -Destination $backup -Force
 $shaBefore = Write-Sha256 -LiteralPath $target
+if ((Write-Sha256 -LiteralPath $backup) -cne $shaBefore) {
+    throw "Identity patch backup hash mismatch: $backup. No bundle written."
+}
 Write-Output "backup: $backup"
 
 # Candidate + node --check gate BEFORE touching the original.
@@ -323,8 +333,13 @@ if ($nodeExe) {
     Write-Warning 'node not found; skipping the syntax gate.'
 }
 
-# Swap (retry for AV scans), then verify-after: done-anchors in, originals out,
-# sha256 equals the candidate's hash. Any failure auto-restores the backup.
+# Swap (retry for AV scans), then verify against exact candidate bytes,
+# including the original BOM if present. Any failure restores the backup.
+$shaExpected = Write-Sha256 -LiteralPath $candidate
+if (@(Get-InstallScopedAutoClaw2 -Root $InstallRoot).Count -gt 0) {
+    Remove-Item -LiteralPath $candidate -Force
+    throw 'AutoClaw2 was reopened before the swap; no bundle written.'
+}
 $swapped = $false
 for ($i = 0; $i -lt 3 -and -not $swapped; $i++) {
     try { Copy-Item -LiteralPath $candidate -Destination $target -Force; $swapped = $true }
@@ -339,9 +354,6 @@ if (-not $swapped) {
 $finalText = [System.IO.File]::ReadAllText($target)
 $final     = Invoke-IdentitySplice -Text $finalText
 $shaAfter  = Write-Sha256 -LiteralPath $target
-$shaExpected = [BitConverter]::ToString(
-    [System.Security.Cryptography.SHA256]::Create().ComputeHash($enc.GetBytes($splice.Text))
-).Replace('-', '')
 if (-not ($final.AlreadyApplied) -or $shaAfter -cne $shaExpected) {
     Copy-Item -LiteralPath $backup -Destination $target -Force
     Write-Error "post-patch verification FAILED (alreadyApplied=$($final.AlreadyApplied), sha match=$($shaAfter -ceq $shaExpected)) - the original was restored from the backup."
@@ -364,7 +376,7 @@ $marker = [ordered]@{
 Write-Host ""
 Write-Host "IDENTITY PATCH APPLIED (v$($script:PatchVersion)): $($script:Anchors.Count) anchors spliced into main.cjs" -ForegroundColor Green
 if (@($splice.Skipped).Count -gt 0) {
-    Write-Host "  upgrade: skipped $($splice.Skipped.Count) already-spliced anchor(s) (v1 -> v$($script:PatchVersion)): $($splice.Skipped -join ', ')"
+    Write-Host "  upgrade: skipped $($splice.Skipped.Count) already-spliced anchor(s) (resumed existing patch): $($splice.Skipped -join ', ')"
 }
 Write-Host "  marker : $markerPath"
 Write-Host "  next   : launch the clones via their AutoClaw2 shortcuts - each window now"

@@ -71,6 +71,7 @@ param(
     [string]$Instance = 'c1',
     [switch]$Status,
     [switch]$SkipMcpSync,
+    [switch]$SkipChatSync,
     # Soft RAM guard threshold: at or above this many running AutoClaw2
     # instances, launching another one asks for confirmation (shared
     # ghost_launch_guard.ps1, same mechanics as the ZCode launcher).
@@ -109,7 +110,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 public class Ac2WindowIdentity {
     [StructLayout(LayoutKind.Sequential)] public struct PROPERTYKEY { public Guid fmtid; public uint pid; }
-    [StructLayout(LayoutKind.Explicit)]
+    [StructLayout(LayoutKind.Explicit, Size = 24)] // native x64 PROPVARIANT
     public struct PROPVARIANT {
         [FieldOffset(0)] public ushort vt;
         [FieldOffset(8)] public IntPtr pointerValue;
@@ -168,10 +169,15 @@ public class Ac2WindowIdentity {
         return Read(hwnd);
     }
 
-    // Ownerless, visible Chrome_WidgetWin_1 windows owned by AutoClaw2.exe
-    // -> "pid|hwnd|aumid". The owner test skips tool windows; the process
-    // name test scopes the scan to this suite's app only.
-    public static string[] FindWindows() {
+    public static bool BelongsToProcess(IntPtr hwnd, int expectedPid) {
+        uint actualPid;
+        return GetWindowThreadProcessId(hwnd, out actualPid) != 0 && actualPid == (uint)expectedPid;
+    }
+
+    // Ownerless, visible Chrome_WidgetWin_1 windows from the stock executable
+    // or THIS clone's colored copy. Restrict by path, not title (stock and
+    // older patched bundles share the same title), and admit stock fallback.
+    public static string[] FindWindows(string stockExe, string cloneExe) {
         var list = new List<string>();
         EnumWindows(delegate(IntPtr h, IntPtr l) {
             if (!IsWindowVisible(h)) return true;
@@ -182,10 +188,15 @@ public class Ac2WindowIdentity {
             uint pid;
             GetWindowThreadProcessId(h, out pid);
             try {
-                var p = Process.GetProcessById((int)pid);
-                if (!string.Equals(p.ProcessName, "AutoClaw2", StringComparison.OrdinalIgnoreCase)) return true;
+                using (var p = Process.GetProcessById((int)pid)) {
+                    var exe = p.MainModule.FileName;
+                    if (!string.Equals(exe, stockExe, StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(exe, cloneExe, StringComparison.OrdinalIgnoreCase)) return true;
+                }
             } catch { return true; }
-            list.Add(pid + "|" + h.ToInt64() + "|" + Read(h));
+            // A splash HWND can disappear between EnumWindows and the COM read.
+            try { list.Add(pid + "|" + h.ToInt64() + "|" + Read(h)); }
+            catch (COMException) { }
             return true;
         }, IntPtr.Zero);
         return list.ToArray();
@@ -285,6 +296,20 @@ if (($ac2Mains.Count -ge $MaxConcurrent) -and -not $ac2AlreadyRunning) {
     }
 }
 
+# --- Opt-in chat sync before a closed profile boots -------------------------
+$chatStartup = Join-Path ([Environment]::GetFolderPath('Startup')) 'AutoClaw2 chat sync watcher.lnk'
+if (-not $ac2AlreadyRunning -and -not $SkipChatSync -and (Test-Path -LiteralPath $chatStartup)) {
+    $chatWorker = Join-Path $PSScriptRoot '..\..\tools\watch_autoclaw2_chat_sync.ps1'
+    if (Test-Path -LiteralPath $chatWorker) {
+        try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $chatWorker -RunOnce -Target $Instance
+            if ($LASTEXITCODE) { Write-Warning "Chat sync pre-launch pass did not converge (exit $LASTEXITCODE). Launch continues." }
+        } catch {
+            Write-Warning "Chat sync pre-launch pass failed: $($_.Exception.Message)"
+        }
+    } else { Write-Warning 'Chat sync is enabled but the worker is missing.' }
+}
+
 # --- Pre-launch MCP sync [2b] ------------------------------------------------
 # D7: this is the PRIMARY convergence path - the profile is provably closed
 # here (a running clone only warns above and never reaches a second write),
@@ -352,6 +377,11 @@ if (Test-Path -LiteralPath $identityMarker) {
 # the launch.
 $ExeIdentityTool = Join-Path $PSScriptRoot '..\..\tools\patch_autoclaw2_exe_identity.ps1'
 $ExeColorCap = @{ c1 = 'Blue'; c2 = 'Yellow'; c3 = 'Green'; c4 = 'Red'; c5 = 'Orange' }[$Instance]
+# A pinned window must relaunch through the profile-aware script, not the
+# bare colored exe (which has no clone environment and would open Primary).
+$relaunchPs = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$env:ZWORK_RELAUNCH_NAME = "AutoClaw2 $ExeColorCap"
+$env:ZWORK_RELAUNCH_COMMAND = '"{0}" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" -Instance {2}' -f $relaunchPs, $PSCommandPath, $Instance
 $LaunchExe = $ExePath
 $CloneExe = Join-Path (Split-Path -Parent $ExePath) "AutoClaw2-$ExeColorCap.exe"
 Write-Host '[2f] Task Manager identity - per-color exe copy'
@@ -406,49 +436,61 @@ for ($i = 0; $i -lt 30; $i++) {
 # back to the window already carrying this clone's AUMID. Never touches
 # another clone's window: pid first, expected AUMID second, nothing else.
 $kickOk = $false
-$kickResult = 'not attempted'
 $expectedAumid = $env:ZWORK_AUMID
-$targetHwnd = [IntPtr]::Zero
-$targetPid = 0
-for ($i = 0; $i -lt 60 -and $targetHwnd -eq [IntPtr]::Zero; $i++) {
+$kickResult = "FAILED: no stable AutoClaw2 window found within 60s (AUMID $expectedAumid)"
+$kickTimer = [Diagnostics.Stopwatch]::StartNew()
+while (-not $kickOk -and $kickTimer.Elapsed.TotalSeconds -lt 60) {
     $candidates = @()
-    foreach ($line in [Ac2WindowIdentity]::FindWindows()) {
+    foreach ($line in [Ac2WindowIdentity]::FindWindows($ExePath, $CloneExe)) {
         $parts = $line -split '\|', 3
         $candidates += [pscustomobject]@{ Pid = [int]$parts[0]; Hwnd = [IntPtr][long]$parts[1]; Aumid = $parts[2] }
     }
-    if ($launched) {
-        $mine = @($candidates | Where-Object { $_.Pid -eq $launched.Id })
-        if ($mine.Count -gt 0) { $targetHwnd = $mine[0].Hwnd; $targetPid = $mine[0].Pid; break }
+    $mine = @()
+    if ($launched) { $mine = @($candidates | Where-Object { $_.Pid -eq $launched.Id }) }
+    if ($mine.Count -eq 0) {
+        $mine = @($candidates | Where-Object { $_.Aumid -eq $expectedAumid -or $_.Aumid -eq "$expectedAumid.kick" })
     }
-    $stamped = @($candidates | Where-Object { $_.Aumid -eq $expectedAumid })
-    if ($stamped.Count -gt 0) { $targetHwnd = $stamped[0].Hwnd; $targetPid = $stamped[0].Pid; break }
-    Start-Sleep -Seconds 1
-}
+    if ($mine.Count -eq 0) { Start-Sleep -Seconds 1; continue }
 
-if ($targetHwnd -eq [IntPtr]::Zero) {
-    $kickResult = "FAILED: no AutoClaw2 window found within 60s (patch applied? AUMID $expectedAumid)"
-    Write-Warning "taskbar identity kick: $kickResult"
-} else {
-    # Spacing is load-bearing: a 300-400 ms temp->real pair can be COALESCED
-    # by the shell - the temporary group is destroyed and the real one is
-    # never re-created, leaving the window with NO taskbar button at all
-    # (reproduced live 2026-11-09 on c5; a slower kick restored it). 1.2 s
-    # lets the shell finish the first re-group before the second write.
-    $kickRead = ''
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
+    $targetHwnd = $mine[0].Hwnd
+    $targetPid = $mine[0].Pid
+    if (-not [Ac2WindowIdentity]::BelongsToProcess($targetHwnd, $targetPid)) { continue }
+    try {
+        # Keep 1.2s between writes: an earlier regroup can be coalesced and
+        # leave the window with no button. If the splash swaps out during the
+        # wait, discard that HWND and reacquire the clone's current window.
         [Ac2WindowIdentity]::Stamp($targetHwnd, "$expectedAumid.kick") | Out-Null
         Start-Sleep -Milliseconds 1200
+        if (-not [Ac2WindowIdentity]::BelongsToProcess($targetHwnd, $targetPid)) { continue }
         $kickRead = [Ac2WindowIdentity]::Stamp($targetHwnd, $expectedAumid)
         Start-Sleep -Milliseconds 1200
+        if (-not [Ac2WindowIdentity]::BelongsToProcess($targetHwnd, $targetPid)) { continue }
         $kickRead = [Ac2WindowIdentity]::Read($targetHwnd)
-        if ($kickRead -eq $expectedAumid) { break }
+        if ($kickRead -eq $expectedAumid) {
+            $kickOk = $true
+            $kickResult = "window AUMID verified $expectedAumid (pid $targetPid, group kicked)"
+        } else {
+            $kickResult = "FAILED: read-back '$kickRead' != '$expectedAumid' (pid $targetPid)"
+        }
+    } catch {
+        # A disappearing window or a denied COM write is cosmetic. Retry
+        # against a fresh snapshot, not the now-stale HWND.
+        $kickResult = "FAILED: taskbar write for PID $targetPid : $($_.Exception.Message)"
+        Start-Sleep -Seconds 1
     }
-    if ($kickRead -eq $expectedAumid) {
-        $kickOk = $true
-        $kickResult = "window AUMID verified $expectedAumid (pid $targetPid, group kicked)"
-    } else {
-        $kickResult = "FAILED: read-back '$kickRead' != '$expectedAumid' (pid $targetPid)"
-    }
+}
+if (-not $kickOk) { Write-Warning "taskbar identity kick: $kickResult" }
+
+# Windows can retarget the stock AutoClaw.lnk during a colored exe's cold
+# start, before the new main window receives its own relaunch metadata. Check
+# after the window settles, not before spawn. The installer is a no-op for
+# healthy/foreign links and verifies any repair; it never edits clone links.
+$shortcutRepair = Join-Path $PSScriptRoot '..\..\tools\install_autoclaw2_clone_shortcuts.ps1'
+if (Test-Path -LiteralPath $shortcutRepair) {
+    & $relaunchPs -NoProfile -ExecutionPolicy Bypass -File $shortcutRepair -RepairPrimaryAumid -RefreshTaskbar
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Primary shortcut verification failed (exit $LASTEXITCODE); clone launch continues." }
+} else {
+    Write-Warning 'Primary shortcut repair tool not found; stock shortcut not checked.'
 }
 
 Write-Host ""

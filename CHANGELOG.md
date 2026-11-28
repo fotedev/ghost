@@ -8,6 +8,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **AutoClaw2 chat lineage + all-to-all mesh sync (2026-11-28)** — the chat
+  import layer grew an identity: imports are now tracked per ORIGIN
+  (`ChatLineage` back-traces each imported session to its source
+  profile/session through the sidecar, with cycle + unknown-origin
+  refusals), the active-account pointer (`device\active-product-account.json`)
+  drives account selection, and every chat writer holds a cross-process
+  lock (`Local\GhostAutoClaw2ChatMesh-<sha>` / flock on POSIX). New core
+  verbs + tools: `ac2-chat-reconcile` (account-scoped, digest-planned,
+  reversible cleanup of duplicated import history — dry-run returns a
+  `plan_id`, apply re-verifies plan + closed target + backup inside
+  `BEGIN IMMEDIATE`) and `ac2-chat-mesh` (convergence across Primary +
+  c1..c5: per-lineage winners/forks by prefix-extension, append-only
+  replay that never seeds a target work queue, sidecar-before-commit
+  provenance, one retained verified backup per account, busy profiles
+  QUEUED never stopped); `tools/watch_autoclaw2_chat_sync.ps1` (resident
+  watcher on a runtime signature + `-RunOnce` preview/apply + autostart,
+  AutoClaw2 [26] preview / [27] apply, gids 137/138),
+  `tools/launch_autoclaw2_primary_sync.ps1` (Sync & Open Primary Desktop
+  handoff — waits for Primary to quit, one gated pass, relaunches the
+  stock exe non-elevated), `tools/inspect_autoclaw2_chat_runtime.ps1`
+  (fail-closed busy-profile probe by `--user-data-dir`, never exe color)
+  and `tools/autoclaw2_primary_lnk.ps1` (shared stock-lnk drift library).
+  The clone launcher now matches windows by exe path (splash-swap-safe
+  taskbar kick), sets `ZWORK_RELAUNCH_NAME`/`ZWORK_RELAUNCH_COMMAND` and
+  repairs a stock lnk Windows retargeted during cold start;
+  `patch_autoclaw2_identity.ps1` is engine v3 (fifth `window-relaunch`
+  anchor); the shortcuts installer's `-RepairPrimaryAumid` is rebuilt on
+  the lnk library (AUMID or per-color-exe drift, hash-verified backups)
+  with `-RefreshTaskbar`. Spec docs extended
+  (`AUTOCLAW2_SYNC_SPEC.md` lineage/reconciliation/mesh sections).
 - **CS-7: OpenCode config-sync goes LIVE (2026-11-22)** — the Phase-0 probe
   (controlled live test on clone c1 running its own v2.3.2 service with the
   config directory watcher armed) LIVE-VERIFIED that a running desktop

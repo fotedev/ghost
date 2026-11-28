@@ -41,14 +41,14 @@ Describe 'AutoClaw2 identity patch - anchor table' {
         Invoke-Expression ('$script:Anchors = ' + $assign[0].Right.Extent.Text)
     }
 
-    It 'declares exactly 4 distinct, backtick-free anchors (v2 adds tray-icon)' {
-        $script:Anchors.Count | Should -Be 4
+    It 'declares five distinct anchors including tray and per-clone relaunch' {
+        $script:Anchors.Count | Should -Be 5
         foreach ($a in $script:Anchors) {
             $a.Find | Should -Not -Be $a.Replace
-            $a.Find | Should -Not -Match '`' -Because "the relaunchCommand template literal must never be inside a splice anchor"
+            if ($a.Name -ne 'window-relaunch') { $a.Find | Should -Not -Match '`' }
             $a.Name | Should -Not -BeNullOrEmpty
         }
-        ($script:Anchors | ForEach-Object { $_.Name } | Select-Object -Unique).Count | Should -Be 4
+        ($script:Anchors | ForEach-Object { $_.Name } | Select-Object -Unique).Count | Should -Be 5
         @($script:Anchors | Where-Object { $_.Name -eq 'tray-icon' }).Count | Should -Be 1 -Because "patch v2 adds exactly one notification-tray anchor"
     }
 
@@ -130,7 +130,7 @@ var pTr = { join: function (a, b) { return a + '\\' + b; } };
 var Kqn = "com.zhipuai.autoclaw2", p0 = "AutoClaw", Tgt = p0, Zqn = p0;
 function Yqn(n,e=process.platform,r=p0,i=r){Zqn=r,Tgt=i,n.setName(p0),e==="win32"&&n.setAppUserModelId(Kqn),n.setAboutPanelOptions({applicationName:i})}
 function Xqn(n,e,r=process.platform){r==="win32"&&n.setAppDetails({appId:Kqn,appIconPath:e,appIconIndex:0,relaunchCommand:`"${e}"`,relaunchDisplayName:Tgt})}
-var l = { setIcon: function (p) { globalThis.__winIcon = p; }, setAppDetails: function (d) { globalThis.__details = d; } };
+var l = { setIcon: function (p) { globalThis.__winIcon = p; }, setTitle: function (t) { globalThis.__winTitle = t; }, setAppDetails: function (d) { globalThis.__details = d; } };
 Uf.app.isPackaged&&Xqn(l,process.execPath);
 Yqn(Uf.app);
 function PG(){return "AutoClaw";}
@@ -143,18 +143,18 @@ UUr({tray:null},"C:\\app\\resources",{current:function(){return{};},attachTray:f
 '@
     }
 
-    It 'splices all 4 anchors and preserves the backtick literal verbatim' {
+    It 'splices all five anchors and preserves the original executable fallback' {
         $r = Invoke-IdentitySplice -Text $script:Fixture
         $r.Ok | Should -BeTrue
         $r.AlreadyApplied | Should -BeFalse
-        $r.Applied.Count | Should -Be 4
-        $r.Applied | Should -Contain 'tray-icon' -Because "patch v2 splices the tray anchor"
+        $r.Applied.Count | Should -Be 5
+        $r.Applied | Should -Contain 'tray-icon'
+        $r.Applied | Should -Contain 'window-relaunch'
         foreach ($a in $script:Anchors) {
             [regex]::Matches($r.Text, [regex]::Escape($a.Find)).Count | Should -Be 0
             [regex]::Matches($r.Text, [regex]::Escape($a.Replace)).Count | Should -Be 1
         }
-        # The relaunchCommand template literal must survive byte-for-byte.
-        $r.Text | Should -Match ([regex]::Escape('relaunchCommand:`"${e}"`'))
+        $r.Text | Should -Match ([regex]::Escape('relaunchCommand:process.env.ZWORK_RELAUNCH_COMMAND||`"${e}"`'))
     }
 
     It 'is idempotent: re-splicing a patched fixture reports AlreadyApplied' {
@@ -165,17 +165,17 @@ UUr({tray:null},"C:\\app\\resources",{current:function(){return{};},attachTray:f
         $twice.Text | Should -Be $once.Text
     }
 
-    It 'resumes a legacy v1 state: only the missing tray anchor is applied, older anchors skipped' {
-        $a1 = $script:Anchors[0]
-        $legacy = $script:Fixture.Replace($a1.Find, $a1.Replace)
+    It 'upgrades a v2 bundle by adding relaunch metadata without re-splicing old anchors' {
+        $legacy = $script:Fixture
+        foreach ($anchor in ($script:Anchors | Where-Object Name -NE 'window-relaunch')) {
+            $legacy = $legacy.Replace($anchor.Find, $anchor.Replace)
+        }
         $r = Invoke-IdentitySplice -Text $legacy
         $r.Ok | Should -BeTrue
         $r.AlreadyApplied | Should -BeFalse
-        @($r.Skipped).Count | Should -Be 1
-        $r.Skipped[0] | Should -Be 'process-aumid'
-        $r.Applied.Count | Should -Be 3
-        $r.Applied | Should -Not -Contain 'process-aumid'
-        $r.Applied | Should -Contain 'tray-icon'
+        @($r.Skipped).Count | Should -Be 4
+        @($r.Applied).Count | Should -Be 1
+        $r.Applied | Should -Contain 'window-relaunch'
     }
 
     It 'aborts with anchor drift when an anchor is missing (bundle changed)' {
@@ -222,6 +222,8 @@ console.log(JSON.stringify({
   appId: globalThis.__details ? globalThis.__details.appId : null,
   iconPath: globalThis.__details ? globalThis.__details.appIconPath : null,
   relaunch: globalThis.__details ? globalThis.__details.relaunchCommand : null,
+  relaunchName: globalThis.__details ? globalThis.__details.relaunchDisplayName : null,
+  winTitle: globalThis.__winTitle === undefined ? null : globalThis.__winTitle,
   winIcon: globalThis.__winIcon === undefined ? null : globalThis.__winIcon,
   traySrc: globalThis.__traySrc === undefined ? null : globalThis.__traySrc,
   trayTemplate: globalThis.__trayTemplate === undefined ? null : globalThis.__trayTemplate
@@ -232,6 +234,8 @@ console.log(JSON.stringify({
         # icon AND the notification-tray icon source.
         $env:ZWORK_AUMID = 'com.zhipuai.autoclaw2.c1'
         $env:ZWORK_CLONE_ICON = 'C:\clone\blue.ico'
+        $env:ZWORK_RELAUNCH_COMMAND = '"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -File "C:\repo with spaces\launch_autoclaw2_clone.ps1" -Instance c1'
+        $env:ZWORK_RELAUNCH_NAME = 'AutoClaw2 Blue'
         try {
             $out = & $node $driver $fixture 2>&1
             $LASTEXITCODE | Should -Be 0 -Because "clone run must succeed: $($out -join ' | ')"
@@ -242,11 +246,13 @@ console.log(JSON.stringify({
             $v.winIcon | Should -Be 'C:\clone\blue.ico'
             $v.traySrc | Should -Be 'C:\clone\blue.ico' -Because "the tray builder must receive the clone's tinted icon when ZWORK_CLONE_ICON is set"
             $v.trayTemplate | Should -BeFalse -Because "the tinted ico is not a macOS template image"
-            # relaunchCommand stays the EXE (the parameter e), never the icon.
-            $v.relaunch | Should -Be ('"' + (Get-Item -LiteralPath $node).FullName + '"')
+            $v.relaunch | Should -Be $env:ZWORK_RELAUNCH_COMMAND
+            $v.relaunchName | Should -Be 'AutoClaw2 Blue'
+            $v.winTitle | Should -Be 'AutoClaw2 Blue'
         } finally {
             Remove-Item Env:ZWORK_AUMID -ErrorAction SilentlyContinue
             Remove-Item Env:ZWORK_CLONE_ICON -ErrorAction SilentlyContinue
+            Remove-Item Env:ZWORK_RELAUNCH_COMMAND,Env:ZWORK_RELAUNCH_NAME -ErrorAction SilentlyContinue
         }
 
         # Stock launch: no env = byte-for-byte stock behaviour (tray keeps the
@@ -259,6 +265,8 @@ console.log(JSON.stringify({
         $v2.procAumid | Should -Be 'com.zhipuai.autoclaw2'
         $v2.appId | Should -Be 'com.zhipuai.autoclaw2'
         $v2.iconPath | Should -Be ($v2.relaunch -replace '^"|"$', '') -Because "stock appIconPath is process.execPath, same as the relaunch command"
+        $v2.relaunchName | Should -Be 'AutoClaw'
+        $v2.winTitle | Should -BeNullOrEmpty
         $v2.winIcon | Should -BeNullOrEmpty
         $v2.traySrc | Should -Be 'C:\app\resources\trayTemplate.png' -Because "stock tray icon source is the app's own trayTemplate.png"
         $v2.trayTemplate | Should -BeFalse

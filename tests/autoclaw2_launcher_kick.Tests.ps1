@@ -36,12 +36,27 @@ Describe 'AutoClaw2 launcher taskbar kick' {
             Should -BeTrue
     }
 
+    It 'admits the stock executable and only this clone copy in the window search' {
+        $script:Text.Contains('FindWindows($ExePath, $CloneExe)') | Should -BeTrue
+        $script:Text.Contains('var exe = p.MainModule.FileName;') | Should -BeTrue
+        $script:Text.Contains('string.Equals(exe, cloneExe, StringComparison.OrdinalIgnoreCase)') | Should -BeTrue
+        $script:Text.Contains('string.Equals(exe, stockExe, StringComparison.OrdinalIgnoreCase)') | Should -BeTrue
+        $script:Text | Should -Not -Match 'string\.Equals\(p\.ProcessName, "AutoClaw2"'
+    }
+
     It 'kicks temp AUMID -> real AUMID with >=1.2s spacing (coalescing guard)' {
         $script:Text.Contains('[Ac2WindowIdentity]::Stamp($targetHwnd, "$expectedAumid.kick")') |
             Should -BeTrue -Because 'the temporary AUMID write is what forces the shell to rebuild the group'
         $script:Text.Contains('[Ac2WindowIdentity]::Stamp($targetHwnd, $expectedAumid)') |
             Should -BeTrue -Because 'the real AUMID must be written back'
         $script:Text | Should -Match 'Stamp\(\$targetHwnd, "\$expectedAumid\.kick"\)[\s\S]{0,300}?Start-Sleep -Milliseconds 1200[\s\S]{0,300}?Stamp\(\$targetHwnd, \$expectedAumid\)' -Because 'a 300-400 ms pair can be coalesced and drop the button entirely'
+    }
+
+    It 'reacquires the window after a splash swap instead of stamping a stale handle' {
+        $script:Text | Should -Match 'while \(-not \$kickOk.*[\s\S]*FindWindows\(\$ExePath, \$CloneExe\)'
+        ([regex]::Matches($script:Text, 'BelongsToProcess\(\$targetHwnd, \$targetPid\)')).Count |
+            Should -BeGreaterOrEqual 2
+        $script:Text | Should -Match 'catch \(COMException\)'
     }
 
     It 'verifies the read-back and reports FAILED instead of silent success' {
@@ -61,6 +76,12 @@ Describe 'AutoClaw2 launcher taskbar kick' {
         $script:Text | Should -Match 'DllImport\("ole32\.dll"\)[^\r\n]*PropVariantClear'
         $script:Text | Should -Not -Match 'DllImport\("oleaut32\.dll"\)[^\r\n]*PropVariantClear'
         $script:Text | Should -Not -Match 'DllImport\("propsys\.dll"\)[^\r\n]*PropVariantClear'
+    }
+
+    It 'assigns the clone a distinct shell name and rechecks the stock shortcut after the kick' {
+        $script:Text.Contains('$env:ZWORK_RELAUNCH_NAME = "AutoClaw2 $ExeColorCap"') | Should -BeTrue
+        $script:Text | Should -Match 'ZWORK_RELAUNCH_COMMAND[^\r\n]*-Instance \{2\}'
+        $script:Text | Should -Match 'while \(-not \$kickOk[\s\S]+?-File \$shortcutRepair -RepairPrimaryAumid -RefreshTaskbar'
     }
 
     It 'keeps the frozen AUMID vocabulary used by the shortcut installer' {

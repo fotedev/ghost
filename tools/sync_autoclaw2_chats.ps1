@@ -22,12 +22,14 @@
                                gates (D10): closed target, matching schema,
                                clean sqlite-backup-API backup first, the
                                entries' immutability triggers stay active,
-                               idempotency via the sidecar content hash.
+                               idempotency via the conversation lineage in the active account.
                                -AllMissing instead copies EVERY source session
                                each target has not already imported (the same
                                diff the Inventory report prints) - the GHOST.bat
                                [10] path (2026-11-09; before this the menu row
                                ran Import with no -SessionId and always failed).
+    -Mode Reconcile            preview archiving covered imports and labeling
+                               distinct branches; apply only an exact plan.
     -Revert -ImportId <id>     tombstone + delete exactly the rows one import
                                created (the sidecar is the source of truth).
 
@@ -42,32 +44,37 @@
   but pointless - the source default).
 
 .PARAMETER Mode
-  'Inventory' (default, zero-risk) or 'Import'.
+  'Inventory' (default), 'Import', or 'Reconcile'.
 
 .PARAMETER Source
   Source profile for Import and for the Inventory diff. Default: Primary.
 
 .PARAMETER Account
-  Optional account-dir hint (exact 64-hex sha or unique prefix) for the
-  SOURCE profile - same idea as sync_autoclaw2_mcp.ps1 -Account. Without it
-  a multi-account Primary resolves to the account whose runtime.sqlite was
-  written most recently, so a re-login into a fresh account silently moves
-  the source (the 2026-11-11 case: old live 68f7331f became invisible the
-  moment the new 830c6348 account took over). Pass the older account's sha
-  to reach its chats.
+  Optional source account directory (full name or unique prefix). Without
+  it, chats use the app's active account pointer, not SQLite timestamps.
+  Pass an older account's prefix to read its chats explicitly. For -Revert,
+  the hint instead selects the target account containing the import.
 
 .PARAMETER SessionId
   Source session id to copy (Import mode; required unless -AllMissing).
 
 .PARAMETER AllMissing
-  Import mode: plan and copy every non-IM source session each target has not
-  already imported, per target (mutually exclusive with -SessionId).
+  Import mode: copy one non-IM, unarchived source chat per lineage absent
+  from each target (mutually exclusive with -SessionId and -AllowBranch).
+
+.PARAMETER AllowBranch
+  Opt in to copying a different revision of a known lineage. Requires an
+  explicit -SessionId. Existing copies are never overwritten.
+
+.PARAMETER PlanId
+  Reconcile apply gate. Use the identifier printed by a preview of that
+  specific target; an account switch or changed chat plan invalidates it.
 
 .PARAMETER ImportId
   Import id from the sidecar (Revert; required).
 
 .PARAMETER Apply
-  Perform the Import write. Without it, Import mode is a dry-run plan.
+  Perform Import or Reconcile writes. Without it both modes are dry-run.
 
 .PARAMETER DryRun
   Alias semantics for Inventory/Import planning - nothing is ever written.
@@ -93,7 +100,7 @@
 [CmdletBinding()]
 param(
     [string]$Target = 'All',
-    [ValidateSet('Inventory', 'Import')]
+    [ValidateSet('Inventory', 'Import', 'Reconcile')]
     [string]$Mode = 'Inventory',
     [string]$Source = 'Primary',
     [string]$Account = '',
@@ -103,6 +110,8 @@ param(
     [switch]$Apply,
     [switch]$DryRun,
     [string]$TitleTag,
+    [string]$PlanId,
+    [switch]$AllowBranch,
     [double]$MaxUnresolvedPct = 5,
     [switch]$Quiet,
     [switch]$Revert
@@ -158,6 +167,7 @@ function Get-ProfileDir([string]$name) {
 }
 
 function Write-AuditLine([string]$name, [hashtable]$record) {
+    if ($DryRun -or ($Mode -ne 'Inventory' -and -not $Apply -and -not $Revert)) { return }
     $dir = Get-ProfileDir $name
     if (-not (Test-Path -LiteralPath $dir)) { return }
     $record.ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
@@ -200,6 +210,10 @@ if (-not $Quiet) {
 
 # --- Revert path ---------------------------------------------------------------
 if ($Revert) {
+    if ($DryRun) {
+        Write-Host '[REFUSED] -Revert does not support preview. Nothing was written.' -ForegroundColor Yellow
+        exit 2
+    }
     if (-not $ImportId) {
         Write-Host '[FAILED] -Revert needs -ImportId <id from the sidecar report>' -ForegroundColor Red
         exit 1
@@ -223,6 +237,48 @@ if ($Revert) {
     Write-AuditLine $tname @{ status = 'revert-failed'; import_id = $ImportId
                               rows_left = $call.verdict.rows_left }
     exit 1
+}
+
+# --- Reconcile mode ------------------------------------------------------------
+if ($Mode -eq 'Reconcile') {
+    $applying = $Apply -and -not $DryRun
+    if ($applying -and ($targets.Count -ne 1 -or -not $PlanId)) {
+        Write-Host '[FAILED] Reconcile -Apply requires one explicit -Target and the preview -PlanId.' -ForegroundColor Red
+        exit 1
+    }
+    $refusals = 0
+    foreach ($tname in $targets) {
+        $call = Invoke-Ac2 'ac2-chat-reconcile' @{ target = $tname; apply = $applying; plan_id = $PlanId }
+        $v = $call.verdict
+        if ($call.exit -eq 2) {
+            Write-Host ("[REFUSED] {0}: {1} - {2}" -f $tname, $v.refused, $v.message) -ForegroundColor Yellow
+            $refusals++
+            continue
+        }
+        Write-Tag $v.status ("{0}: {1} metadata change(s) - PlanId {2}" -f $tname, @($v.actions).Count, $v.plan_id) 'Cyan'
+        foreach ($a in $v.actions) {
+            $detail = if ($a.kind -eq 'archive') { "covered by $($a.covered_by)" } else { "new title: $($a.new_title)" }
+            Write-Tag $a.kind ("{0} {1}: {2} ({3})" -f $tname, $a.session_id, $a.title, $detail) 'Cyan'
+        }
+        if ($v.status -eq 'ok') {
+            Write-Tag 'backup' $v.backup 'Green'
+            Write-AuditLine $tname @{ status = 'reconciled'; account_dir = $v.account_dir; plan_id = $v.plan_id
+                                     backup = $v.backup; actions = @($v.actions | Select-Object kind,session_id) }
+        }
+    }
+    if ($refusals) { exit 2 }
+    exit 0
+}
+
+function Get-ChatOriginKey($Session) {
+    return "$($Session.origin_profile)/$($Session.origin_session_id)"
+}
+
+function Get-UnarchivedChatSources($Inventory) {
+    # Native first, newest first for imported-only lineages. -AllMissing won't
+    # re-export multiple revisions with the same origin into one target.
+    $Inventory.sessions | Where-Object { -not $_.archived_at } | Sort-Object -Property `
+        @{ Expression = { [bool]$_.imported } }, @{ Expression = { $_.updated_at }; Descending = $true }, session_id
 }
 
 # --- Inventory mode -------------------------------------------------------------
@@ -270,19 +326,23 @@ if ($Mode -eq 'Inventory') {
     # cross-profile diff (AC2S-040): what would Import copy, per target?
     $srcInv = $inv[$Source]
     if ($null -ne $srcInv -and $srcInv.status -eq 'ok') {
-        $srcSessions = @($srcInv.sessions)
+        $srcSessions = @(Get-UnarchivedChatSources $srcInv)
         foreach ($tname in $targets) {
             if ($tname -eq $Source) { continue }
             $tInv = $inv[$tname]
             if ($null -eq $tInv) { continue }
             $seen = @{}
             if ($tInv.status -eq 'ok') {
-                foreach ($r in $tInv.source_imports) { $seen[$r.source_session_id] = $true }
+                foreach ($row in $tInv.sessions) { $seen[(Get-ChatOriginKey $row)] = $true }
             }
+            $planned = @{}
             $missing = @(); $already = 0; $imRefused = 0
             foreach ($s in $srcSessions) {
                 if ($s.external_provider) { $imRefused++; continue }
-                if ($seen.ContainsKey($s.session_id)) { $already++ }
+                $key = Get-ChatOriginKey $s
+                if ($planned.ContainsKey($key)) { continue }
+                $planned[$key] = $true
+                if ($seen.ContainsKey($key)) { $already++ }
                 else { $missing += $s }
             }
             $report.diff += @{
@@ -293,11 +353,12 @@ if ($Mode -eq 'Inventory') {
                        workspace_root = $_.workspace_root
                        entries = $_.entries } })
             }
-            Write-Tag 'DIFF' ("{0}: {1} missing / {2} already-imported / {3} IM-refused" -f
+            Write-Tag 'DIFF' ("{0}: {1} missing / {2} known lineage(s) / {3} IM-refused" -f
                 $tname, $missing.Count, $already, $imRefused) 'Cyan'
         }
     }
 
+    if ($DryRun) { exit 0 }
     $reportDir = Join-Path $env:LOCALAPPDATA 'autoclaw2-sync'
     if (-not (Test-Path -LiteralPath $reportDir)) {
         New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
@@ -318,8 +379,14 @@ if ($Mode -eq 'Inventory') {
 # report prints; GHOST.bat [10] path since 2026-11-09). IM-bound sessions are
 # skipped everywhere (D12).
 $missingByTarget = @{}
+$accountByTarget = @{}
+$plannedSourceAccount = $null
 $planRefused = 0
 if ($AllMissing) {
+    if ($AllowBranch) {
+        Write-Host '[FAILED] -AllowBranch requires one explicit -SessionId, not -AllMissing.' -ForegroundColor Red
+        exit 1
+    }
     if ($SessionId) {
         Write-Host '[FAILED] -SessionId and -AllMissing are mutually exclusive.' -ForegroundColor Red
         exit 1
@@ -335,7 +402,8 @@ if ($AllMissing) {
         Write-Host ("[SKIP] source {0} - {1}" -f $Source, $srcCall.verdict.reason) -ForegroundColor Yellow
         exit 0
     }
-    $srcSessions = @($srcCall.verdict.sessions)
+    $srcSessions = @(Get-UnarchivedChatSources $srcCall.verdict)
+    $plannedSourceAccount = $srcCall.verdict.account_dir
     if ($srcSessions.Count -eq 0) {
         Write-Host ("[ok] source {0} has no sessions - nothing to import." -f $Source) -ForegroundColor Green
         exit 0
@@ -355,13 +423,18 @@ if ($AllMissing) {
             $missingByTarget[$tname] = @()
             continue
         }
+        $accountByTarget[$tname] = $tCall.verdict.account_dir
         $seen = @{}
-        foreach ($r in $tCall.verdict.source_imports) { $seen[$r.source_session_id] = $true }
+        foreach ($row in $tCall.verdict.sessions) { $seen[(Get-ChatOriginKey $row)] = $true }
         $ids = @()
         $imSkipped = 0
         foreach ($s in $srcSessions) {
             if ($s.external_provider) { $imSkipped++; continue }
-            if (-not $seen.ContainsKey($s.session_id)) { $ids += $s.session_id }
+            $key = Get-ChatOriginKey $s
+            if (-not $seen.ContainsKey($key)) {
+                $ids += $s.session_id
+                $seen[$key] = $true
+            }
         }
         $missingByTarget[$tname] = $ids
         $note = ''
@@ -390,11 +463,14 @@ foreach ($tname in $targets) {
             source    = $Source
             target    = $tname
             session_id = $sid
-            dry_run   = (-not $Apply)
+            dry_run   = ($DryRun -or -not $Apply)
+            allow_branch = [bool]$AllowBranch
             max_unresolved_pct = $MaxUnresolvedPct
         }
         if ($Account) { $payload.source_account_hint = $Account }
-        if ($TitleTag -ne '') { $payload.title_tag = $TitleTag }
+        if ($plannedSourceAccount) { $payload.expected_source_account = $plannedSourceAccount }
+        if ($accountByTarget[$tname]) { $payload.expected_target_account = $accountByTarget[$tname] }
+        if ($PSBoundParameters.ContainsKey('TitleTag')) { $payload.title_tag = $TitleTag }
         $attempted++
         $call = Invoke-Ac2 'ac2-chat-import' $payload
         if ($call.exit -eq 2) {
@@ -406,9 +482,10 @@ foreach ($tname in $targets) {
         }
         $v = $call.verdict
         if ($v.status -eq 'skipped') {
-            Write-Tag 'SKIP' ("{0} - already-imported ({1})" -f $tname, $v.import_id) 'Yellow'
-            Write-AuditLine $tname @{ status = 'skipped'; reason = 'already-imported'
-                                      session_id = $sid }
+            $reason = $v.reason
+            if ($reason -eq 'lineage-present') { $reason += ' (different revision; use -AllowBranch to copy deliberately)' }
+            Write-Tag 'SKIP' ("{0} - {1} (existing {2})" -f $tname, $reason, $v.new_session_id) 'Yellow'
+            Write-AuditLine $tname @{ status = 'skipped'; reason = $v.reason; session_id = $sid }
             continue
         }
         if ($v.status -eq 'dry-run') {

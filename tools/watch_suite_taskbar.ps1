@@ -31,12 +31,11 @@
   2026-09-24 lesson), so the watcher's re-stamp is the backstop.
 
 .PRIMARY LNK HIJACK GUARD
-  Every 60 passes (~5 min): the suite's Primary shortcut(s) on the Desktop +
-  Start menu are read (Shell ExtendedProperty); an AUMID equal to a CLONE's
-  (ai.opencode.desktop.cN / com.zhipuai.autoclaw2.cN) = hijack - repaired by
-  shelling out to the suite's own installer -RepairPrimaryAumid (console-less
-  child, 120s cap, verify-after re-read). ZCode's richer predicate (target/
-  icon drift) stays in its dedicated lib.
+  Every 60 passes (~5 min): the suite's Primary shortcuts on the Desktop +
+  Start menu are checked for a clone AUMID. AutoClaw2 also checks whether
+  a stock-named link targets a per-color executable from its own install.
+  Repairs use the suite's installer -RepairPrimaryAumid (console-less child,
+  120s cap, verify-after re-read).
 
 .Usage
     powershell -NoProfile -ExecutionPolicy Bypass -File tools\watch_suite_taskbar.ps1 -Suite opencode [-RunOnce] [-IntervalSeconds 5]
@@ -79,9 +78,9 @@ $SuiteDefs = @{
         Mutex           = 'Autoclaw2TaskbarIdentityWatcher'
         AutostartLnk    = 'AutoClaw2 taskbar identity.lnk'
         RepairScript    = 'install_autoclaw2_clone_shortcuts.ps1'
-        PrimaryLnkNames = @('AutoClaw2.lnk')
-        # Windows titled "AutoClaw" for EVERY instance (patch does not touch
-        # titles) - no title map; classification = exe copies only.
+        # Stock shortcut names and exe-aware drift checks live in the same
+        # helper the AutoClaw2 installer uses.
+        # Older bundles share "AutoClaw" titles. Use exe copies, never titles.
         TitleMap        = @{}
     }
     'opencode' = @{
@@ -363,7 +362,28 @@ $script:HijackCheckPass = 0
 $RepairScriptPath = Join-Path $PSScriptRoot $Sd.RepairScript
 if (-not (Test-Path -LiteralPath $RepairScriptPath)) { throw "repair script not found: $RepairScriptPath" }
 
+if ($Suite -eq 'autoclaw2') {
+    . (Join-Path $PSScriptRoot 'autoclaw2_primary_lnk.ps1')
+}
+
 function Get-SuitePrimaryLnkHijack {
+    if ($Suite -eq 'autoclaw2') {
+        $stockExe = Join-Path $env:LOCALAPPDATA 'Programs\AutoClaw2\AutoClaw2.exe'
+        if (-not (Test-Path -LiteralPath $stockExe -PathType Leaf)) { return }
+        $shell = New-Object -ComObject Shell.Application
+        $wsh = New-Object -ComObject WScript.Shell
+        foreach ($path in @(Get-Ac2PrimaryShortcutPaths)) {
+            $folder = $shell.Namespace((Split-Path -Parent $path))
+            if (-not $folder) { continue }
+            $item = $folder.ParseName((Split-Path -Leaf $path))
+            if (-not $item) { continue }
+            $id = [string]$item.ExtendedProperty('System.AppUserModel.ID')
+            $target = $wsh.CreateShortcut($path).TargetPath
+            $reason = Get-Ac2PrimaryShortcutProblem -TargetPath $target -Aumid $id -StockExe $stockExe
+            if ($reason) { [pscustomobject]@{ Path = $path; Aumid = $id; Reason = $reason } }
+        }
+        return
+    }
     $shell = $null
     try { $shell = New-Object -ComObject Shell.Application } catch { return @() }
     $dirs = @(
