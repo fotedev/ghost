@@ -531,7 +531,11 @@ automatically on the next run (re-run OpenCode [10] after any manual
 update). Each clone gets its own userData/sessionData plus its own
 `XDG_*` CLI-state home, its own single-instance lock, and per-clone
 taskbar identity (AUMID + window icon + "OpenCode <Color>" title).
-Service ports are ephemeral per instance (no port plan). First run per
+Each clone's background-service port is seeded per clone (frozen map
+c1..c5 → 28901..28905, launcher step [2d/5] + the light worker's run
+path; the Primary keeps the version default) — since 2.4.2 the service
+refuses to start on a port collision, so distinct ports are what make
+multi-instance coexistence work. First run per
 clone: ONE manual sign-in. Menu equivalents: launch
 c1/c2/c3/c4/c5 = OpenCode [1]-[5]; all five = OpenCode [6]; light worker =
 OpenCode [7] (gids 79/80 for worker/login); login = OpenCode [8]; shortcuts

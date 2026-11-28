@@ -72,4 +72,21 @@ Describe 'OpenCode desktop clone launcher - script hygiene + CS-10 contract' {
         ($script:Raw -match '\$env:HOME\s*=') | Should -BeFalse
         ($script:Raw -match '\$env:USERPROFILE\s*=') | Should -BeFalse -Because 'USERPROFILE is only read here, never redirected'
     }
+    It 'seeds the per-clone service port via the shared helper ([2d/5], CS-11)' {
+        ($script:Raw -match [regex]::Escape('[2d/5] Seed the per-clone service port')) | Should -BeTrue
+        ($script:Raw -match [regex]::Escape('ghost_opencode_service_port.ps1')) | Should -BeTrue
+        ($script:Raw -match [regex]::Escape('. $ServicePortHelper')) | Should -BeTrue
+        ($script:Raw -match 'Initialize-GhostOpenCodeServicePort -CloneHome \$CloneHome -Instance \$Instance') | Should -BeTrue
+    }
+
+    It 'the port seed runs BEFORE the running-guard (a fresh spawn needs the port; a focused relaunch does not)' {
+        $seedAt = $script:Raw.IndexOf('[2d/5]')
+        $guardAt = $script:Raw.IndexOf('appears to be RUNNING (lockfile held)')
+        ($seedAt -gt 0 -and $guardAt -gt $seedAt) | Should -BeTrue
+    }
+
+    It '-Status surfaces the per-clone service port (reads the seeded config)' {
+        ($script:Raw -match 'service port:') | Should -BeTrue
+        ($script:Raw -match [regex]::Escape('config\opencode\service.json')) | Should -BeTrue
+    }
 }

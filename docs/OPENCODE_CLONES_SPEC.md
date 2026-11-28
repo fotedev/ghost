@@ -449,10 +449,30 @@ the architecture (asar-mined + live-probed):
   "port":28901}` — the CONFIG home, which the launcher's XDG preempt
   already points at the clone), and `opencode service get port` reads it
   back. So multi-instance coexistence needs ONE thing the launcher does
-  not do yet: **seed a distinct port per clone** (CS-11 spike: a frozen
-  c1..c5 port map written by the launcher's pre-launch step + the spec
-  port map, verified-after; the interim operator note: seed the port by
-  hand for any clone that must coexist with a live Primary service).
+  not do yet: **seed a distinct port per clone**.
+- **CS-11 SHIPPED (2026-11-28)**: a shared helper
+  `src/windows/ghost_opencode_service_port.ps1` carries the frozen port
+  map **c1=28901 … c5=28905** (mutual distinctness is the only
+  requirement — the port default is VERSION-COMPUTED, not a literal:
+  `49374` → a win32 remap `>=32768 → 28672 | (s & 4095)` yields 28894
+  for 2.4.2, so the map never needs to chase the Primary's port) and
+  `Initialize-GhostOpenCodeServicePort -CloneHome -Instance` seeds it:
+  a valid existing port (1..65535) is SKIPPED loudly (a hand-tuned port
+  is never overwritten), otherwise the file is MERGED — every existing
+  key preserved (notably the pre-shared `password`), `port` set from the
+  map, written ATOMICALLY via the shared `tools/json_merge_lib.ps1`
+  `Write-JsonNoBom` (no BOM — a bare `Set-Content -Encoding UTF8` emits
+  one), verify-after re-read. Wired into BOTH launchers: the desktop
+  launcher's new **[2d/5]** pre-launch step (after [2b/5] config sync,
+  before the running-guard) and the LIGHT worker's run path (its default
+  run/REPL auto-starts the same `serve --service` child; `-Server`/
+  `-Acp`/`-Standalone` never read the file). `-Status` surfaces the
+  seeded port. Best-effort by contract: a failed seed warns (the next
+  service spawn would hit the documented collision error in
+  `<cloneHome>\data\opencode\log\opencode.log`) and never blocks the
+  launch. Functional fixtures cover fresh/skip/merge/invalid-JSON; the
+  live c2 run (fresh seed → child started on 28902 → registered
+  clone-locally, machine registry untouched) closed the acceptance.
 
 ### 3.9 Light worker: headless CLI on the clone XDG homes (spike-verified 2026-11-07)
 

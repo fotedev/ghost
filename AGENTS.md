@@ -1743,10 +1743,18 @@ launch_opencode_clone.ps1          # OpenCode desktop clone launcher -Instance c
                                    #   patch engine v5 — the spawned child registers service.json
                                    #   clone-locally (c1\state\opencode\service.json seen, machine
                                    #   registry untouched, second launch reuses), spec §3.8.1;
-                                   #   NOTE 2.4.2 fixed the service port at 28894 = CS-11: the
-                                   #   launcher must seed a per-clone port
-                                   #   (<configHome>\opencode\service.json) or the child crashes on
-                                   #   collision with any live instance's service),
+                                   #   CS-11 SHIPPED 2026-11-28: 2.4.2 compiles the service port
+                                   #   default (28894 for that version) and the service REFUSES to
+                                   #   start on collision — the new pre-launch step [2d/5] (between
+                                   #   [2b/5] and the running-guard) seeds the FROZEN per-clone port
+                                   #   map (c1..c5 → 28901..28905, shared helper
+                                   #   ghost_opencode_service_port.ps1 — also dot-sourced by the
+                                   #   light worker's run path; -Status surfaces the port) into
+                                   #   <cloneHome>\config\opencode\service.json, preserving the
+                                   #   pre-shared password and skipping a valid existing port
+                                   #   (atomic Write-JsonNoBom; live-verified on c2: fresh seed →
+                                   #   child started on 28902, zero collision errors, registered
+                                   #   clone-locally, machine registry untouched)),
                                    #   writes .opencode-clone-identity
                                    #   .json + .opencode-clone-icon.ico fresh each launch (json =
                                    #   -Status introspection only), detached start + verify-after

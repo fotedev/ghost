@@ -134,6 +134,22 @@ $env:XDG_CACHE_HOME = Join-Path $CloneHome 'cache'
 $env:XDG_STATE_HOME = Join-Path $CloneHome 'state'
 $AuthJsonPath = Join-Path $env:XDG_DATA_HOME 'opencode\auth.json'
 
+# CS-11 (2026-11-28): seed the per-clone service port BEFORE any CLI spawn.
+# The default run/REPL path AUTO-STARTS the clone's background service
+# (`serve --service`), which on 2.4.2 refuses to start when the compiled
+# version-default port is held by another instance's service (the Primary's
+# service child can outlive its window). The shared helper writes the frozen
+# map port into <CloneHome>\config\opencode\service.json (skip when a valid
+# port is already there; the XDG levers above put that path under the clone).
+# -Standalone/-Server/-Acp never read the file, so the seed is simply
+# harmless for them. Best-effort by contract: warn, never block.
+. (Join-Path $PSScriptRoot 'ghost_opencode_service_port.ps1')
+$svcSeed = Initialize-GhostOpenCodeServicePort -CloneHome $CloneHome -Instance $Instance
+Write-Host ("[light] service port: {0} ({1})" -f $svcSeed.Port, $svcSeed.Note)
+if ($svcSeed.Status -eq 'failed') {
+    Write-Warning "[light] service-port seed failed - a spawned background service may refuse to start while another instance holds the default port (CS-11)."
+}
+
 # Standalone-login check: <data>\opencode\auth.json is the account-login store
 # (reset_minimax_opencode.ps1 -KeepLogin preserves exactly this file). Missing
 # = headless runs resolve to the FREE model, so warn with the fix (unless
